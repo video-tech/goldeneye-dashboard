@@ -1,0 +1,31 @@
+<div id="midas-master"
+     data-supa-url="{{custom_values.supabase_url}}"
+     data-supa-key="{{custom_values.supabase_api_key}}">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+</div>
+
+<script>
+    (async () => {
+        const base = "https://video-tech.github.io/goldeneye-dashboard";
+        const mount = document.getElementById('midas-master');
+        try {
+            const html = await fetch(base + "/body.html").then(r => r.text());
+            mount.innerHTML = html;
+
+            const s = document.createElement('script');
+            s.src = base + "/app.js";
+            s.onerror = () => console.error("Goldeneye: failed to load app.js from " + s.src);
+            document.body.appendChild(s);
+        } catch (e) {
+            console.error("Goldeneye: failed to load body.html from " + base, e);
+        }
+    })();
+</script>

@@ -1,0 +1,95 @@
+Here is the high-level architectural summary of the SMMA Internal Dashboard we are building, serving as the master context for the project.
+
+1. Core Application Architecture
+We are building a standalone, custom internal operating dashboard for a Social Media Marketing Agency (SMMA).  
+PDF
+
+The Stack: We bypassed GoHighLevel's native builder to ensure full control over the backend and data. The frontend uses a component-based framework (like React), the backend uses Node.js/Express, and the database relies on local JSON storage for Phase 1, architected for a clean lift-and-shift to PostgreSQL in Phase 2.  
+PDF
++ 1
+
+Future Integrations: The system is designed so that it can easily link to the agency's existing, custom-coded client KPI dashboard down the road.  
+PDF
+
+2. Role-Based Access Control (RBAC)
+Permissions are strictly enforced at the data layer across three tiers:  
+PDF
+
+Admins: Agency owners with absolute global access to all clients, financials, tasks, and system settings.  
+PDF
+
+Team Members: Staff who can view and manage tasks for their assigned clients, along with health scores, but are blocked from viewing any financial data.  
+PDF
+
+Investors: Silent partners who have read-only access to financial performance, contract statuses, and relationship health, but cannot see operational tasks.  
+PDF
+
+3. Client Lifecycle & Task Automation
+Clients are routed through a 5-stage lifecycle: Onboarding, Campaign Building, Campaign Learning, Optimizing, and Offboarding.  
+PDF
+
+Stage Checklists: When an Admin moves a client into a new stage, the system automatically generates the relevant task checklist. The Onboarding stage specifically groups tasks into sub-phases: Tech Access Call, GHL Training, and Launch Call.  
+PDF
++ 1
+
+Template Engine: The system supports recurring task templates (e.g., weekly syncs) with intelligent edit logic, allowing Admins to update a single occurrence, future occurrences, or push a master template update to all subscribed clients.  
+PDF
+
+4. The Algorithmic Task Engine
+To remove guesswork for the team, tasks are automatically sorted by a calculated Priority Score (1.0 to 10.0).  
+PDF
+
+The Formula: The default algorithm weights Priority (40%) + Urgency (40%) + Effort (20%).  
+PDF
+
+Effort Inversion: The effort metric is inverted in the math so that quick, high-priority tasks bubble to the top of the queue.  
+PDF
+
+5. Relationship Health & Churn Risk
+Every client receives a dynamic, 100-point Relationship Health Score that generates red/yellow/green visual indicators.  
+PDF
+
+The Metrics: The score is a weighted composite of Milestone Speed (30%), Last Communication Date (20%), GHL Usage rating (20%), Lead Volume (10%), Appointment Volume (10%), and Closed Deals (10%).  
+PDF
+
+Automated Churn Flags: The system automatically flags a client as a "Churn Risk" if their health score drops below a specific threshold (e.g., 40), or if their contract is within 30 days of expiring with no logged renewal.  
+PDF
+
+6. Current Blockers & Open Items
+According to the specification, we are currently waiting on the product owner to provide the finalized content for:  
+PDF
+
+The exact task items for the Onboarding, Campaign Building, and Offboarding checklists.  
+PDF
+
+The specific milestone names and their target completion days (e.g., "Ads go live - 7 days").  
+PDF
+
+
+
+
+
+
+
+
+
+
+
+
+Welcome to the war room. If someone new is stepping into this codebase, they need to understand that we aren’t just building a single app; we’ve engineered a two-pronged SaaS ecosystem sharing a single, unified database layer.Here is the architectural source of truth for the Golden Eye Internal Dashboard and the Client Portal. This breakdown outlines exactly how the tables are structured in Supabase, how they talk to each other, and where our custom business logic lives.🏢 The Unified InfrastructureThe application operates via a single Supabase instance serving two distinct frontends:The Master Dashboard (Internal): Used by Admins and Team Members to track macro agency revenue, delegate algorithmic task queues, score relationship health, and configure template lifecycles.  The Client Portal (External): A secure, client-facing environment where users bypass manual onboarding via cross-table email matchmaking to view live Meta ad ROI and manually log local sales data.🗄️ Supabase Relational Schema BlueprintHere are the active production tables currently powering our applications, including their names, critical columns, and exact design intent.👥 Authentication & Access Controluser_profilesManages post-authentication registration and role definitions.  id (UUID, Primary Key): Links directly to Supabase Auth auth.users.email (Text, Unique): The authenticated Google or email address.  role (Text): Restricted to admin, member, investor, or pending.  full_name (Text): Pulled from OAuth metadata during signup.pre_approved_usersThe VIP invite system. Allows admins to pre-assign an elite role and client list to an email before that person ever logs in.  email (Text, Primary Key): Target registration email.role (Text): The role they will instantly inherit upon registration.  client_access (JSONB): An array of string names matching the clients they are allowed to see.  user_client_accessBridges the relational gap between Team Members and the active accounts they manage.  id (BigInt, Primary Key)user_email (Text): Foreign key back to a staff profile.  client_name (Text): Matches the client's strict string name in the system.  💼 Operational EntitiesclientsThe master ledger for all contracted accounts.  id (UUID/BigInt, Primary Key)  name (Text): The distinct business name (the anchor for normalization).  monthly_retainer (Decimal): The base financial contract value.  status (Text): Defaults to active or inactive.contract_end_date (Date): Automatically calculated or overridden to flag churn alerts.  daily_reportsThe telemetry table. This is where your external automated scripts dump live performance data from ad platforms (like Meta) on a daily cadence.  id (BigInt, Primary Key)account_name (Text): The raw account name pulled from the ad manager platform.date (Date): The specific performance day.  spend (Decimal) / leads (Integer) / impressions (Integer) / reach (Integer) / unique_link_clicks (Integer)  client_email / email (Text): Crucial Column. This field is used by our Zero-Touch Onboarding mechanism. When a client authenticates, the Client Portal searches these fields; if a match is found, they are instantly granted access to their matching data dashboard without waiting for manual admin approval.📋 Operations & Dynamic CheckliststasksPowers both the Master Kanban board and individual client execution lists.  id (UUID/BigInt, Primary Key)  client (Text): The client name this task belongs to.  title (Text): The core action item.  status (Text): Not Started, In Progress, Blocked, or Complete.  stage (Text): The lifecycle stage this task is associated with.  assignee (Text): The primary staff handling the task.  type (Text): One-off, Recurring, Checklist, or Milestone.  due (Date): Task deadline.  p (Integer) / u (Integer) / e (Integer): Raw 1-5 scales for Priority, Urgency, and Effort.  score (Integer): Calculated algorithmic rank value.  notes (Text): Deeper operational documentation.  checklist_group (Text): Handles sub-phase sorting (e.g., separating "Tech Access Call" from "GHL Training" inside Onboarding).  📊 Relationship Health Engineclient_healthThe localized hub tracking individual customer retention health.  client_name (Text, Primary Key)  last_comm_date (Date): Kept fresh by account managers to track touchpoints.  ghl_usage (Integer): A subjective weekly staff rating (1-5) on software adoption.  leads_vol / appts_vol / deals_closed (Integer): Quantifiable platform volume data.  current_score (Integer): The live 0-100 score compiled from our dynamic mathematical weightings.  health_settingsEliminates hardcoded calculations. Stores Admin configurations for compiling weights.  id (Integer, Primary Key): Locked to row 1 for application-wide defaults.weight_milestone / weight_comm / weight_ghl / weight_leads / weight_appts / weight_deals (Decimal): Percentages that must validate to a combined 100% total.  health_logsid, client_name, score, logged_at. Tracks adjustments chronologically to generate performance sparklines and health trend charts over time.  🚪 Client Portal SubmissionsThese tables absorb data logged directly by external clients inside their portals, automatically retrofitting financial charts and health metrics on the Admin side.client_jobs (Revenue logs): id, job_name, revenue, client_name, client_email, created_at.  client_estimates (Pipeline tracking): id, estimate_name, amount, client_name, client_email, created_at.  ⚡ Core Logic CalculationsWhen editing tasks, the database and application run a custom formula that weighs dynamic metrics. Note the inverted $Effort$ metric—this ensures that short, impactful tasks mathematically score higher and clear the bottleneck first.  The mathematical architecture scales as:$$Score = (Priority \times 0.4) + (Urgency \times 0.4) + ((6 - Effort) \times 0.2)$$In practice, the codebase multiplies this result by $20$ and rounds it to supply a clean, readable $1\text{ to }100$ priority weight scale inside our view sorting routines. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

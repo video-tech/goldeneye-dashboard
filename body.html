@@ -1,0 +1,1617 @@
+    <style>
+        body, html, .main-content, .section, .row, .container, .inner_section { background-color: transparent !important; max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+        
+        /* Unified Theme Wrapper */
+        #theme-wrapper { background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #0f172a 40%, #020617 100%); color: white; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif; min-height: 100vh; width: 100%; box-sizing: border-box; transition: background 0.3s ease; overflow: hidden; }
+        #theme-wrapper.light-mode { background: linear-gradient(-45deg, #f8fafc, #f1f5f9, #e2e8f0, #cbd5e1); color: #1e293b; }
+        
+        /* Shared Glassmorphism */
+        .glass { background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 1.5rem; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); backdrop-filter: blur(16px); position: relative; overflow: hidden; }
+        .glass::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent); }
+        .light-mode .glass { background: rgba(255, 255, 255, 0.9); border: 1px solid rgba(0, 0, 0, 0.05); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05); }
+        
+        .glass-pill { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.15); padding: 0.6rem 1.25rem; border-radius: 9999px !important; color: white; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: all 0.3s ease; backdrop-filter: blur(8px); gap: 8px;}
+        .light-mode .glass-pill { background: #ffffff; border: 1px solid #e2e8f0; color: #1e293b; }
+        
+        .glass-icon-btn { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.15); width: 38px; height: 38px; border-radius: 0.6rem; color: white; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; backdrop-filter: blur(8px); flex-shrink: 0; }
+        .glass-icon-btn:hover { background: rgba(255, 255, 255, 0.1); transform: scale(1.05); }
+        .light-mode .glass-icon-btn { background: #ffffff; border: 1px solid #e2e8f0; color: #1e293b; }
+        
+        .glass-input { background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); color: white; padding: 0.625rem; border-radius: 0.5rem; outline: none; font-size: 0.85rem; width: 100%; transition: 0.3s;}
+        .glass-input:focus { border-color: #3b82f6; }
+        .light-mode .glass-input { background: #ffffff; border: 1px solid #cbd5e1; color: #1e293b; }
+        .light-mode h1, .light-mode h2, .light-mode h3, .light-mode .text-white { color: #0f172a !important; }
+        .light-mode .text-gray-400 { color: #475569 !important; }
+        .light-mode .text-gray-300 { color: #64748b !important; }
+        
+        /* Dashboard Specific */
+        .nav-item { padding: 0.8rem 1rem; border-radius: 0.75rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 0.75rem; transition: all 0.2s; cursor: pointer; margin-bottom: 0.25rem;}
+        .nav-item:hover { background: rgba(255, 255, 255, 0.05); color: white; }
+        .nav-item.active { background: linear-gradient(90deg, rgba(59, 130, 246, 0.2), transparent); border-left: 3px solid #3b82f6; color: white; }
+        .light-mode .nav-item.active { background: #eff6ff; color: #2563eb; border-left: 3px solid #2563eb; }
+        
+        .dropdown-container { position: relative; }
+        .custom-dropdown-menu { position: absolute; top: calc(100% + 8px); right: 0; width: 240px; z-index: 100; display: none; background: rgba(15, 23, 42, 0.98); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 1.25rem; backdrop-filter: blur(24px); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        .custom-dropdown-menu.show { display: block; animation: slideIn 0.2s ease-out; }
+        .light-mode .custom-dropdown-menu { background: #ffffff; border: 1px solid #e2e8f0; }
+        .dropdown-item { padding: 0.8rem 1.25rem; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; border-radius: 8px;}
+        .dropdown-item:hover { background: rgba(255, 255, 255, 0.1); color: #60a5fa; }
+        
+        /* Inputs & Tables */
+        input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.5; cursor: pointer; margin-left: auto; transition: 0.3s; }
+        .light-mode input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0); opacity: 0.4; }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
+
+        th { cursor: pointer; user-select: none; transition: color 0.2s; white-space: nowrap; }
+        th:hover { color: #3b82f6; }
+        .row-checkbox { cursor: pointer; width: 1.1rem; height: 1.1rem; accent-color: #3b82f6; }
+        
+        /* Drawers & Modals */
+        .side-drawer { position: fixed; top: 0; right: 0; height: 100vh; width: 100%; max-width: 450px; background: rgba(15, 23, 42, 0.98); backdrop-filter: blur(24px); border-left: 1px solid rgba(255,255,255,0.1); transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index: 100; display: flex; flex-direction: column; overflow-y: auto; box-shadow: -10px 0 40px rgba(0,0,0,0.5); }
+        .side-drawer.open { transform: translateX(0); }
+        .light-mode .side-drawer { background: rgba(255, 255, 255, 0.98); border-left: 1px solid rgba(0,0,0,0.1); }
+        #drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        #drawer-overlay.show { opacity: 1; pointer-events: auto; }
+        .modal-label { display: block; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; font-weight: 700; color: #94a3b8; margin-bottom: 0.25rem; }
+        
+        .score-bar-bg { width: 60px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px;}
+        .score-bar-fill { height: 100%; border-radius: 99px; transition: width 0.3s, background 0.3s; }
+        .kanban-col, .cp-kanban-col { min-height: 200px; padding-bottom: 2rem; }
+        .kanban-card, .cp-kanban-card { cursor: grab; }
+        .kanban-card:active, .cp-kanban-card:active { cursor: grabbing; }
+        .sortable-ghost { opacity: 0.4; }
+        .view-btn { padding: 0.4rem 1rem; font-size: 0.8rem; font-weight: bold; border-radius: 0.5rem; transition: 0.2s; color: #94a3b8; }
+        .view-btn.active { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+
+        #report-modal, #edit-report-modal, #template-save-modal, #job-modal, #estimate-modal, #invite-modal, #client-request-modal { display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(2, 6, 23, 0.85); backdrop-filter: blur(8px); overflow-y: auto; padding: 2rem 1rem; align-items: center; justify-content: center; }
+        #report-modal-inner, #template-save-modal-inner { max-width: 900px; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 2rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6); }
+        #template-save-modal-inner { max-width: 500px; }
+        
+        .rpt-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin: 1.25rem 0; }
+        .rpt-kpi-tile { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.9rem; padding: 0.85rem 1rem; }
+        #rpt-improving { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 0.9rem; color: inherit; padding: 1rem; min-height: 90px; margin-top: 0.5rem; outline: none; box-sizing: border-box; }
+        .rpt-output-box { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 0.9rem; padding: 1.25rem; font-size: 0.85rem; line-height: 1.7; white-space: pre-wrap; max-height: 280px; overflow-y: auto; }
+        #rpt-html-src { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 0.9rem; padding: 1rem; font-family: monospace; color: #a5f3fc; min-height: 130px; box-sizing: border-box; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+        /* Client Portal Specific */
+        .btn-gold { background: #fbbf24; color: #451a03; font-weight: bold; padding: 0.75rem 1.5rem; border-radius: 0.75rem; transition: 0.3s; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;}
+        .btn-gold:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(251, 191, 36, 0.3); }
+        .btn-gold:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; }
+        .history-table { width: 100%; border-collapse: separate; border-spacing: 0 8px; }
+        .history-table td { padding: 16px; background: rgba(255,255,255,0.03); }
+        .light-mode .history-table td { background: white; }
+        .modal-title { font-size: 1.25rem; font-weight: bold; margin-bottom: 1rem; color: #ffffff; }
+        .light-mode .modal-title { color: #1e293b; }
+        
+        /* Creative Card Media */
+        .creative-media-container { width: 100%; height: 200px; background: rgba(0,0,0,0.2); border-radius: 1rem; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; }
+        .creative-media { max-width: 100%; max-height: 100%; object-fit: contain; }
+    </style>
+
+    <div id="theme-wrapper">
+        <div id="drawer-overlay" onclick="closeAllDrawers()"></div>
+
+        <div id="auth-container" class="glass p-12 max-w-md mx-auto text-center mt-20">
+            <div class="bg-white w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-xl"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="w-12" alt="Logo"></div>
+            <h2 class="text-2xl font-bold mb-2 text-white">Midas HQ</h2>
+            <p class="text-gray-400 text-sm mb-8">Sign in to access your dashboard.</p>
+            <button onclick="signIn()" class="w-full bg-white text-black font-bold py-4 rounded-xl flex items-center justify-center gap-3 hover:scale-[1.02] transition shadow-lg">
+                <i class="fa-brands fa-google text-blue-500"></i> Continue with Google
+            </button>
+        </div>
+
+        <div id="auth-pending-view" class="hidden glass p-12 max-w-md mx-auto text-center mt-20">
+            <div class="bg-yellow-500/20 w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-xl">
+                <i class="fa-solid fa-clock text-4xl text-yellow-400"></i>
+            </div>
+            <h2 class="text-2xl font-bold mb-2">Pending Approval</h2>
+            <p class="text-gray-400 text-sm mb-8 leading-relaxed">Your account is waiting for admin approval, or no active reports were found for your email.</p>
+            <button onclick="signOut()" class="glass-pill mx-auto justify-center w-full !py-3">Sign Out</button>
+        </div>
+
+        <div id="admin-dashboard-container" class="hidden flex h-screen w-full relative z-10">
+            
+            <nav class="glass w-64 m-4 mr-0 flex flex-col hidden md:flex sticky top-4 h-[calc(100vh-2rem)] shrink-0 border-r border-white/5">
+                <div class="p-6 border-b border-white/10 flex items-center gap-3">
+                    <img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-8" alt="Logo">
+                    <h2 class="font-bold text-xl text-white tracking-tight">Golden Eye</h2>
+                </div>
+                <div class="p-4 flex-1 space-y-1 mt-2 overflow-y-auto">
+                    <p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2">Main</p>
+                    <button onclick="navTo('goldeneye')" id="nav-goldeneye" class="w-full nav-item active"><i class="fa-solid fa-chart-line w-5 text-center"></i> Dashboard</button>
+                    <button onclick="navTo('tasks')" id="nav-tasks" class="w-full nav-item"><i class="fa-solid fa-check-square w-5 text-center"></i> Tasks</button>
+                    <button onclick="navTo('clients')" id="nav-clients" class="w-full nav-item"><i class="fa-solid fa-users w-5 text-center"></i> Clients</button>
+                    <button onclick="navTo('sales')" id="nav-sales" class="w-full nav-item"><i class="fa-solid fa-sack-dollar w-5 text-center text-green-400"></i> Sales</button>
+                    <button onclick="navTo('creatives')" id="nav-creatives" class="w-full nav-item"><i class="fa-solid fa-palette w-5 text-center text-purple-400"></i> Creatives</button>
+                    
+                    <div id="admin-only-nav" class="hidden pt-6">
+                        <p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2">Admin</p>
+                        <button onclick="navTo('templates')" id="nav-templates" class="w-full nav-item"><i class="fa-solid fa-layer-group w-5 text-center"></i> Templates</button>
+                        <button onclick="navTo('settings')" id="nav-settings" class="w-full nav-item"><i class="fa-solid fa-gear w-5 text-center"></i> Settings</button>
+                    </div>
+                </div>
+                <div class="p-6 border-t border-white/10 bg-white/5">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-lg shadow-blue-500/50" id="sidebar-avatar">U</div>
+                        <div class="overflow-hidden">
+                            <p class="text-sm font-bold text-white truncate" id="sidebar-name">User Name</p>
+                            <p class="text-[10px] text-gray-400 uppercase tracking-widest" id="sidebar-role">Role</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="toggleTheme()" class="glass-icon-btn flex-1" title="Toggle Theme"><i class="theme-icon fa-solid fa-moon"></i></button>
+                        <button onclick="signOut()" class="glass-icon-btn flex-1 text-red-400 hover:text-red-300 hover:bg-red-500/10 border-red-500/20"><i class="fa-solid fa-sign-out"></i></button>
+                    </div>
+                </div>
+            </nav>
+
+            <main class="flex-1 flex flex-col h-screen overflow-y-auto relative pb-20 md:pb-0">
+                <header class="md:hidden flex justify-between items-center p-4 border-b border-white/10 glass m-4 mb-0 shrink-0">
+                    <div class="flex items-center gap-3"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-6" alt="Logo"><h1 class="font-bold text-white">Golden Eye</h1></div>
+                    <div class="flex gap-2">
+                        <button onclick="navTo('goldeneye')" class="glass-icon-btn"><i class="fa-solid fa-chart-line"></i></button>
+                        <button onclick="navTo('tasks')" class="glass-icon-btn"><i class="fa-solid fa-check-square"></i></button>
+                        <button onclick="navTo('clients')" class="glass-icon-btn"><i class="fa-solid fa-users"></i></button>
+                        <button onclick="navTo('creatives')" class="glass-icon-btn"><i class="fa-solid fa-palette text-purple-400"></i></button>
+                    </div>
+                </header>
+
+                <div id="page-goldeneye" class="p-4 md:p-8 block">
+                    <header class="mb-6 flex justify-between items-end">
+                        <div>
+                            <h1 class="text-3xl font-bold tracking-tight text-white">Midas Dashboard</h1>
+                            <p class="text-gray-400 mt-1">Real-time agency performance metrics.</p>
+                        </div>
+                    </header>
+<div class="glass p-6 mb-6 border-l-4 border-yellow-400 relative overflow-hidden flex flex-col">
+                        <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10 pointer-events-none"></div>
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10 relative">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-xl bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-xl shrink-0"><i class="fa-solid fa-brain"></i></div>
+                                <div>
+                                    <h2 class="text-xl font-bold text-white">Midas Intelligence</h2>
+                                    <p class="text-xs text-gray-400">Cross-account anomaly detection and scale opportunities.</p>
+                                </div>
+                            </div>
+                            <div class="flex flex-col sm:flex-row gap-3 w-full md:w-auto shrink-0">
+    <button onclick="navTo('audits')" class="w-full sm:w-auto bg-black/20 hover:bg-white/10 text-white border border-white/10 font-bold py-2.5 px-6 rounded-lg text-sm shadow-lg transition whitespace-nowrap">
+        <i class="fa-solid fa-clock-rotate-left mr-2"></i> Audit History
+    </button>
+    <button id="btn-run-global-ai" onclick="runGlobalAIAudit()" class="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-400 text-yellow-900 font-bold py-2.5 px-6 rounded-lg text-sm shadow-lg transition whitespace-nowrap">
+        <i class="fa-solid fa-bolt mr-2"></i> Run Morning Audit
+    </button>
+</div>
+                        </div>
+                        <div id="global-ai-output" class="hidden mt-6 pt-6 border-t border-white/10 z-10 relative text-sm text-gray-300 leading-relaxed">
+                            </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                        
+                        <div class="glass p-6 flex flex-col h-[400px]">
+                            <div class="flex justify-between items-center mb-4 shrink-0">
+                                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Client Tasks</h3>
+                                <button onclick="navTo('tasks')" class="text-xs text-blue-400 hover:text-blue-300 hover:underline">View All</button>
+                            </div>
+                            <div id="dash-urgent-tasks" class="space-y-3 flex-1 overflow-y-auto pr-2"></div>
+                        </div>
+
+                        <div class="glass p-6 flex flex-col h-[400px]">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 shrink-0">Alerts & Approvals</h3>
+                            <div class="space-y-4 flex-1 overflow-y-auto pr-2">
+                                <div id="dash-churn-flags-container" class="hidden">
+                                    <h4 class="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-2"><i class="fa-solid fa-triangle-exclamation"></i> Churn Risks</h4>
+                                    <div id="dash-churn-flags" class="space-y-2"></div>
+                                </div>
+                                <div id="dash-client-requests-container" class="hidden">
+                                    <h4 class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-2"><i class="fa-solid fa-bell"></i> Inbound Requests</h4>
+                                    <div id="dash-client-requests" class="space-y-2"></div>
+                                </div>
+                                <div id="dash-creative-alerts-container" class="hidden">
+                                    <h4 class="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-2"><i class="fa-solid fa-palette"></i> Creative Reviews</h4>
+                                    <div id="dash-creative-alerts" class="space-y-2"></div>
+                                </div>
+                                <div id="dash-no-notifications" class="text-center text-xs text-gray-500 italic mt-10">All clear! No alerts.</div>
+                                
+                            </div>
+                        </div>
+
+                        <div class="glass p-6 flex flex-col h-[400px]">
+                            <div class="flex justify-between items-center mb-4 shrink-0">
+                                <h3 class="text-sm font-bold text-yellow-400 uppercase tracking-widest"><i class="fa-solid fa-crown mr-1"></i> HQ Tasks</h3>
+                                <button onclick="goToClient('Midas Media')" class="text-xs text-yellow-400 hover:text-yellow-300 hover:underline">Our Board</button>
+                            </div>
+                            <div id="dash-internal-tasks" class="space-y-3 flex-1 overflow-y-auto pr-2"></div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                        <div class="glass p-6 lg:col-span-2 flex flex-col min-h-[350px]">
+                            <div class="flex justify-between items-start mb-4 relative z-10">
+                                <div>
+                                    <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-1">Monthly Recurring Revenue</h3>
+                                    <h2 class="text-4xl font-extrabold text-white" id="dash-mrr-total">$0</h2>
+                                </div>
+                                <a href="https://goldeneye.midasmediafirm.com/investor-dashboard-page" target="_blank" class="flex items-center gap-2 text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-full hover:bg-blue-500/30 transition cursor-pointer">
+                                    <div class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div> View All
+                                </a>
+                            </div>
+                            <div class="flex-1 relative w-full mt-2">
+                                <canvas id="dashMrrChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="glass p-6 lg:col-span-1 min-h-[350px] flex flex-col justify-between relative text-center">
+                            <div class="flex justify-between items-start mb-2 z-10 relative">
+                                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest text-left">Network Health</h3>
+                                <button onclick="navTo('clients'); setTimeout(() => switchClientView('health'), 50);" class="text-xs font-bold text-blue-400 hover:underline cursor-pointer">
+                                    View Breakdown
+                                </button>
+                            </div>
+                            <div class="relative w-full max-w-[220px] mx-auto mt-4 flex-1 flex justify-center items-center">
+                                <canvas id="dashAvgHealthGauge"></canvas>
+                                <div class="absolute inset-0 flex flex-col items-center justify-center mt-6">
+                                    <h2 class="text-5xl font-extrabold text-white" id="dash-avg-health-val">--</h2>
+                                    <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest" id="dash-avg-health-lbl">Calculating</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass p-6 flex flex-col min-h-[300px]">
+                        <div class="flex justify-between items-center mb-6">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Active Roster</h3>
+                            <span class="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold" id="dash-client-count">0 Clients</span>
+                        </div>
+                        <div class="flex-1 overflow-x-auto">
+                            <table class="w-full text-left text-sm">
+                                <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                    <tr><th class="pb-3 font-semibold">Client Name</th><th class="pb-3 font-semibold text-center">Health</th><th class="pb-3 font-semibold text-right">MRR</th></tr>
+                                </thead>
+                                <tbody id="dash-client-list" class="divide-y divide-white/5"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="page-tasks" class="p-4 md:p-8 space-y-6 hidden">
+                    <header class="mb-2"><h1 class="text-3xl font-bold tracking-tight">Task Dashboard</h1><p class="text-gray-400">Manage operations and internal workflows.</p></header>
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div class="glass p-4 text-center"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total</p><h2 class="text-3xl font-extrabold text-white" id="stat-total">0</h2></div>
+                        <div class="glass p-4 text-center border-b-4 border-red-500/50"><p class="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-1">Overdue</p><h2 class="text-3xl font-extrabold text-red-400" id="stat-overdue">0</h2></div>
+                        <div class="glass p-4 text-center border-b-4 border-yellow-500/50"><p class="text-[10px] font-bold text-yellow-400 uppercase tracking-widest mb-1">Due Today</p><h2 class="text-3xl font-extrabold text-yellow-400" id="stat-today">0</h2></div>
+                        <div class="glass p-4 text-center border-b-4 border-blue-500/50"><p class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">In Progress</p><h2 class="text-3xl font-extrabold text-blue-400" id="stat-progress">0</h2></div>
+                        <div class="glass p-4 text-center border-b-4 border-green-500/50"><p class="text-[10px] font-bold text-green-400 uppercase tracking-widest mb-1">Completed</p><h2 class="text-3xl font-extrabold text-green-400" id="stat-completed">0</h2></div>
+                    </div>
+                    <div class="glass flex flex-col min-h-[600px]">
+                        <div class="p-4 border-b border-white/10 flex flex-wrap justify-between items-center gap-4 bg-white/5">
+                            <div class="flex items-center gap-4 flex-1 min-w-[300px]">
+                                <div class="flex bg-black/40 p-1 rounded-lg border border-white/5"><button onclick="switchTaskView('kanban')" id="btn-view-kanban" class="view-btn active"><i class="fa-solid fa-table-columns mr-2"></i>Board</button><button onclick="switchTaskView('table')" id="btn-view-table" class="view-btn"><i class="fa-solid fa-list mr-2"></i>List</button></div>
+                                <div class="relative w-64 max-w-full"><i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i><input type="text" id="task-search-filter" placeholder="Search tasks..." class="glass-input pl-8 py-1.5" onkeyup="renderActiveTaskView()"></div>
+                            </div>
+                            <div class="flex items-center gap-3"><button id="btn-columns" onclick="openColumnDrawer()" class="glass-pill hidden"><i class="fa-solid fa-table-columns"></i> Columns</button><button onclick="openTaskDrawer('new')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg"><i class="fa-solid fa-plus mr-2"></i> New Task</button></div>
+                        </div>
+                        <div id="t-bulk-bar" class="p-4 bg-blue-900/40 border-b border-blue-500/30 flex justify-between items-center hidden"><div class="flex items-center gap-4"><span class="text-sm font-bold text-blue-300"><span id="t-bulk-count">0</span> Selected</span><button onclick="updateSelectedStatus()" class="text-xs font-bold text-white hover:text-blue-300"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button onclick="deleteSelectedTasks()" class="text-xs font-bold text-red-400 hover:text-red-300"><i class="fa-solid fa-trash mr-1"></i> Delete</button></div><button onclick="clearSelection()" class="text-xs text-gray-400 hover:text-white"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
+                        
+                        <div id="view-kanban" class="flex-1 p-6 overflow-x-auto">
+                            <div class="flex gap-6 h-full min-w-max items-start">
+                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-gray-400 mr-2"></span>To Do <span class="text-gray-500 text-xs ml-1" id="count-todo">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="Not Started" id="col-todo"></div></div>
+                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-blue-400 mr-2"></span>In Progress <span class="text-gray-500 text-xs ml-1" id="count-prog">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="In Progress" id="col-prog"></div></div>
+                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-red-400 mr-2"></span>Blocked <span class="text-gray-500 text-xs ml-1" id="count-rev">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="Blocked" id="col-rev"></div></div>
+                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-green-400 mr-2"></span>Done <span class="text-gray-500 text-xs ml-1" id="count-done">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="Complete" id="col-done"></div></div>
+                            </div>
+                        </div>
+                        <div id="view-table" class="overflow-x-auto flex-1 hidden">
+                            <table class="w-full text-left text-sm"><thead class="bg-white/5 text-xs uppercase tracking-wider text-gray-500 border-b border-white/10" id="t-table-head"></thead><tbody id="t-table-body" class="divide-y divide-white/5"></tbody></table>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="page-clients" class="p-4 md:p-8 space-y-6 hidden">
+                    <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-2">
+                        <div class="flex items-center gap-4">
+                            <div><h1 class="text-3xl font-bold tracking-tight">Clients & Reports</h1><p class="text-gray-400">Monitor individual ad performance and retention.</p></div>
+                            <button id="btn-add-client" onclick="openAddClientModal()" class="hidden bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg text-xs shadow-lg transition">
+                                <i class="fa-solid fa-plus mr-2"></i> New Client
+                            </button>
+                        </div>
+                        <div class="flex items-center flex-wrap gap-3">
+                            <div class="flex items-center gap-1">
+                                <button onclick="cycleClient(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                                <div class="dropdown-container">
+                                    <div class="glass-pill !w-[180px] justify-between" onclick="toggleDropdown('c-account-menu')">
+                                        <span id="c-account-label" class="truncate flex-1 text-center pr-2">All Accounts</span>
+                                        <i class="fa-solid fa-chevron-down text-[10px] shrink-0"></i>
+                                    </div>
+                                    <div id="c-account-menu" class="custom-dropdown-menu max-h-[300px] overflow-y-auto"></div>
+                                </div>
+                                <button onclick="cycleClient(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <button onclick="cycleDate(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                                <div class="dropdown-container flex gap-2">
+                                    <div class="glass-pill" onclick="toggleDropdown('c-date-menu')"><i class="fa-regular fa-calendar-range mr-2 text-yellow-400" id="c-date-icon"></i><span id="c-date-label">Last 7 Days</span><i class="fa-solid fa-chevron-down text-[10px] ml-3"></i></div>
+                                    <div id="c-date-menu" class="custom-dropdown-menu">
+                                        <div class="dropdown-item" onclick="cSelectDate('today', 'Today')">Today</div>
+                                        <div class="dropdown-item" onclick="cSelectDate('yesterday', 'Yesterday')">Yesterday</div>
+                                        <div class="dropdown-item" onclick="cSelectDate('last7', 'Last 7 Days')">Last 7 Days</div>
+                                        <div class="dropdown-item" onclick="cSelectDate('last30', 'Last 30 Days')">Last 30 Days</div>
+                                        <div class="dropdown-item" onclick="cSelectDate('max', 'Maximum Time')">Maximum Time</div>
+                                        <div class="p-3" onclick="event.stopPropagation()">
+                                            <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-3 px-1">Custom Range</p>
+                                            <div class="flex flex-col gap-2">
+                                                <input type="date" id="c-custom-start" class="glass-input !py-1.5 !px-3">
+                                                <input type="date" id="c-custom-end" class="glass-input !py-1.5 !px-3">
+                                                <button onclick="applyDateRange()" class="w-full bg-white text-black font-bold py-2 rounded-xl text-xs mt-2">Apply</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button onclick="cycleDate(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+                            </div>
+                            <div id="global-health-pill" class="glass-pill hidden cursor-pointer border border-white/10 hover:bg-white/10 transition" onclick="switchClientView('health')" title="View Health Details">
+                                <i id="global-health-icon" class="fa-solid fa-heart-pulse mr-2 text-gray-400"></i>
+                                <span id="global-health-score" class="font-bold text-gray-400">--</span>
+                            </div>
+                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" class="hidden bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
+                                <i class="fa-solid fa-arrow-right-arrow-left mr-2"></i> Move Stage
+                            </button>
+                        </div>
+                    </header>
+
+                    <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2">
+                        <button id="tab-btn-ads" onclick="switchClientView('ads')" class="pb-3 text-sm font-bold text-yellow-400 border-b-2 border-yellow-400"><i class="fa-brands fa-facebook mr-2"></i>Ads Performance</button>
+                        <button id="tab-btn-health" onclick="switchClientView('health')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-heart-pulse mr-2"></i>Relationship Health</button>
+                        <button id="tab-btn-seo" onclick="switchClientView('seo')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-brands fa-google mr-2"></i>SEO & Organic</button>
+                        <button id="tab-btn-chat" onclick="switchClientView('chat')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-robot mr-2"></i>AI Agent</button>
+                        <button id="tab-btn-reports" onclick="switchClientView('reports')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-folder-open mr-2"></i>Reports</button>
+<button id="tab-btn-payments" onclick="switchClientView('payments')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-credit-card mr-2"></i>Payments</button>
+
+                    </div>
+
+                    <div id="c-view-ads" class="space-y-6 block">
+                        
+                        <div id="client-specific-tasks-box" class="glass p-6 border-l-4 border-blue-500 hidden flex flex-col min-h-[160px]">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-check-square mr-2 text-blue-400"></i> Active Tasks for <span id="c-task-client-name" class="text-white">Client</span></h3>
+                                <button onclick="openTaskDrawer('new', true)" class="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-md transition">+ Task</button>
+                            </div>
+                            <div id="c-task-list" class="space-y-2 flex-1 overflow-y-auto max-h-[200px] pr-2">
+                                </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Spend</p><h4 class="text-xl font-bold" id="kpi-spend">$0</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Leads</p><h4 class="text-xl font-bold text-green-400" id="kpi-leads">0</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">CPL</p><h4 class="text-xl font-bold text-blue-400" id="kpi-cpl">$0.00</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">CPC</p><h4 class="text-xl font-bold" id="kpi-cpc">$0.00</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">CPM</p><h4 class="text-xl font-bold" id="kpi-cpm">$0.00</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">CTR</p><h4 class="text-xl font-bold" id="kpi-ctr">0%</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Freq.</p><h4 class="text-xl font-bold text-purple-400" id="kpi-freq">0.0</h4></div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div class="glass p-6 lg:col-span-2 min-h-[400px]"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-6 text-center">Volume Over Time</h3><div class="relative w-full h-[350px]"><canvas id="trendChart"></canvas></div></div>
+                            <div class="glass p-6 min-h-[400px]"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-6 text-center">Daily CPL ($)</h3><div class="relative w-full h-[300px]"><canvas id="accountChart"></canvas></div></div>
+                        </div>
+
+                        <div id="ai-box-container" class="glass p-6 border-l-4 border-yellow-400 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hidden">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <i class="fa-solid fa-sparkles text-yellow-400"></i>
+                                    <h3 class="font-bold text-lg">AI Senior Buyer Analysis <span id="ai-client-lbl" class="text-gray-400 text-sm font-normal ml-2"></span></h3>
+                                </div>
+                                <div id="ai-summary-content" class="text-sm leading-relaxed opacity-80">Ready to analyze data for this client.</div>
+                            </div>
+                            <button id="run-ai-btn" onclick="triggerAI()" class="bg-yellow-400 text-yellow-900 font-bold px-6 py-2 rounded-full hover:bg-yellow-300 shadow-lg shrink-0 transition"><i class="fa-solid fa-bolt"></i> Run Analysis</button>
+                        </div>
+
+                        <div id="all-clients-ads-list" class="glass p-6 mt-6 hidden">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Client Performance Breakdown</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                        <tr>
+                                            <th class="pb-3 font-semibold">Client Name</th>
+                                            <th class="pb-3 font-semibold text-right">Spend</th>
+                                            <th class="pb-3 font-semibold text-right">Leads</th>
+                                            <th class="pb-3 font-semibold text-right">CPL</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="all-clients-ads-tbody" class="divide-y divide-white/5">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div id="c-view-health" class="space-y-6 hidden">
+                        <div id="global-health-dashboard" class="space-y-6 hidden">
+                            <div class="flex justify-between items-center px-2">
+                                <div><h2 class="text-xl font-bold">Network Health Overview</h2><p class="text-sm text-gray-400">Aggregated relationship metrics across all active clients.</p></div>
+                            </div>
+                            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg Score</p><h4 class="text-xl font-bold" id="gh-avg-score">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">At Risk (<40)</p><h4 class="text-xl font-bold text-red-400" id="gh-at-risk">0</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Appts</p><h4 class="text-xl font-bold text-purple-400" id="gh-total-appts">0</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Deals</p><h4 class="text-xl font-bold text-green-400" id="gh-total-deals">0</h4></div>
+                            </div>
+                            <div class="glass p-6">
+                                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Client Health Ranking</h3>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm">
+                                        <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                            <tr><th class="pb-3 font-semibold">Client Name</th><th class="pb-3 font-semibold text-center">Score</th><th class="pb-3 font-semibold text-right">Status</th></tr>
+                                        </thead>
+                                        <tbody id="gh-client-ranking" class="divide-y divide-white/5">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="health-dashboard-content" class="space-y-6">
+                            <div class="flex justify-between items-center px-2"><div><h2 class="text-xl font-bold">Health Dashboard</h2><p class="text-sm text-gray-400">Tracking retention probability based on 6 core factors.</p></div><button onclick="openHealthDrawer()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg"><i class="fa-solid fa-pen-to-square mr-2"></i> Update</button></div>
+                            
+                            <div id="client-health-alert-container" class="hidden"></div>
+
+                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Milestones</p><h4 class="text-xl font-bold" id="h-kpi-mile">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Last Comm</p><h4 class="text-xl font-bold" id="h-kpi-comm">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">GHL Usage</p><h4 class="text-xl font-bold text-blue-400" id="h-kpi-ghl">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Lead Vol</p><h4 class="text-xl font-bold" id="h-kpi-leads">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Appts</p><h4 class="text-xl font-bold text-purple-400" id="h-kpi-appts">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Deals</p><h4 class="text-xl font-bold text-green-400" id="h-kpi-deals">--</h4></div>
+                            </div>
+
+                            <div id="latest-health-note-container" class="glass p-4 hidden border-l-4 border-blue-500">
+                                <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1"><i class="fa-solid fa-comment-dots mr-1 text-blue-400"></i> Latest Health Note</h4>
+                                <p id="h-latest-note" class="text-sm text-white italic"></p>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                <div class="glass p-8 flex flex-col items-center justify-center relative min-h-[300px]"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest absolute top-6 left-6">Current Score</h3><div class="relative w-full max-w-[200px] mt-6"><canvas id="healthGaugeChart"></canvas><div class="absolute inset-0 flex flex-col items-center justify-center mt-10"><h2 class="text-5xl font-extrabold text-white" id="health-gauge-number">--</h2></div></div></div>
+                                <div class="glass p-8 lg:col-span-2 min-h-[300px] flex flex-col"><div class="flex justify-between items-start mb-6"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Score History</h3></div><div class="relative w-full flex-1"><canvas id="healthLineChart"></canvas></div></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="c-view-chat" class="space-y-6 hidden">
+                        <div class="glass p-6 flex flex-col h-[600px]">
+                            <div class="flex justify-between items-center mb-4 border-b border-white/10 pb-4 shrink-0">
+                                <div>
+                                    <h3 class="text-lg font-bold text-white"><i class="fa-solid fa-robot text-blue-400 mr-2"></i>Client Intelligence Agent</h3>
+                                    <p class="text-xs text-gray-400 mt-1">Chat with an AI that knows everything about <span id="chat-client-lbl" class="font-bold text-white">this client</span>.</p>
+                                </div>
+                                <div class="relative w-72">
+                                    <input type="password" id="openai-api-key" placeholder="Enter OpenAI API Key (sk-...)" class="glass-input text-xs" onchange="localStorage.setItem('midas_openai_key', this.value)">
+                                </div>
+                            </div>
+                            
+                            <div id="chat-messages" class="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 flex flex-col">
+                                <div class="flex items-start gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-blue-600/20 text-blue-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-robot"></i></div>
+                                    <div class="bg-black/20 p-3 rounded-2xl rounded-tl-none border border-white/5 text-sm text-gray-300 max-w-[80%]">
+                                        Hello! I have access to this client's ad spend, SEO data, health score, and tasks. Ask me anything.
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex gap-2 shrink-0">
+                                <input type="text" id="chat-input" class="glass-input flex-1" placeholder="E.g., Summarize their SEO performance vs Ad Spend..." onkeypress="if(event.key === 'Enter') sendChatMessage()">
+                                <button onclick="sendChatMessage()" id="btn-send-chat" class="bg-blue-600 hover:bg-blue-500 text-white px-6 rounded-lg font-bold shadow-lg transition"><i class="fa-solid fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="c-view-seo" class="space-y-6 hidden">
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Clicks</p><h4 class="text-xl font-bold text-blue-400" id="seo-kpi-clicks">0</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Impressions</p><h4 class="text-xl font-bold text-purple-400" id="seo-kpi-imp">0</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CTR</p><h4 class="text-xl font-bold text-green-400" id="seo-kpi-ctr">0%</h4></div>
+                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg Position</p><h4 class="text-xl font-bold text-yellow-400" id="seo-kpi-pos">0.0</h4></div>
+                        </div>
+                        <div class="glass p-6 min-h-[400px]">
+                            <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-6 text-center">Organic Traffic Trend</h3>
+                            <div class="relative w-full h-[350px]"><canvas id="adminSeoChart"></canvas></div>
+                        </div>
+                        
+                        <div id="seo-ai-box-container" class="glass p-6 border-l-4 border-green-500 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-6">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <i class="fa-solid fa-sparkles text-green-400"></i>
+                                    <h3 class="font-bold text-lg">AI SEO Specialist Analysis <span id="seo-ai-client-lbl" class="text-gray-400 text-sm font-normal ml-2"></span></h3>
+                                </div>
+                                <div id="seo-ai-summary-content" class="text-sm leading-relaxed opacity-80">Ready to analyze organic data for this client.</div>
+                            </div>
+                            <button id="run-seo-ai-btn" onclick="triggerAdminSeoAI()" class="bg-green-600 text-white font-bold px-6 py-2 rounded-full hover:bg-green-500 shadow-lg shrink-0 transition"><i class="fa-solid fa-bolt"></i> Run Analysis</button>
+                        </div>
+                    </div>
+<div id="c-view-payments" class="space-y-6 hidden">
+                        
+                        <div id="payments-all-dashboard" class="space-y-6 hidden">
+                            <div class="flex justify-between items-center px-2">
+                                <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Network Billing Overview</h3>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total MRR</p><h4 class="text-xl font-bold text-white" id="pay-all-mrr">$0</h4></div>
+                                <div class="glass p-4 border-b-2 border-green-500/50"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Paid & Active</p><h4 class="text-xl font-bold text-green-400" id="pay-all-paid">$0</h4></div>
+                                <div class="glass p-4 border-b-2 border-red-500/50"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Overdue</p><h4 class="text-xl font-bold text-red-400" id="pay-all-overdue">$0</h4></div>
+                                <div class="glass p-4 border-b-2 border-gray-500/50"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Unpaid / Cancelled</p><h4 class="text-xl font-bold text-gray-400" id="pay-all-unpaid">$0</h4></div>
+                            </div>
+
+                            <div class="glass p-6">
+                                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Client Billing Status</h3>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm">
+                                        <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                            <tr>
+                                                <th class="pb-3 font-semibold">Client Name</th>
+                                                <th class="pb-3 font-semibold text-center">Status</th>
+                                                <th class="pb-3 font-semibold text-right">Retainer</th>
+                                                <th class="pb-3 font-semibold text-right">Next Deadline</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="pay-all-client-list" class="divide-y divide-white/5">
+                                            </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="payments-client-content" class="space-y-6">
+                            <div class="flex justify-between items-center px-2">
+                                <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Billing & Payments</h3>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Status</p><h4 class="text-xl font-bold" id="pay-kpi-status">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Last Paid</p><h4 class="text-xl font-bold text-white" id="pay-kpi-last">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Next Deadline</p><h4 class="text-xl font-bold text-white" id="pay-kpi-deadline">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Client Since</p><h4 class="text-xl font-bold text-purple-400" id="pay-kpi-tenure">--</h4></div>
+                            </div>
+
+                            <div class="glass p-6 max-w-3xl">
+                                <h3 class="text-lg font-bold mb-4 border-b border-white/10 pb-2">Update Billing Details</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label class="modal-label">Payment Status</label>
+                                        <select id="edit-pay-status" class="glass-input">
+                                            <option value="paid">Paid (Active)</option>
+                                            <option value="overdue">Overdue</option>
+                                            <option value="unpaid">Unpaid / Cancelled</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="modal-label">Client Since</label>
+                                        <input type="date" id="edit-pay-since" class="glass-input">
+                                    </div>
+                                    <div>
+                                        <label class="modal-label">Last Payment Date</label>
+                                        <input type="date" id="edit-pay-last" class="glass-input">
+                                    </div>
+                                    <div>
+                                        <label class="modal-label">Next Deadline</label>
+                                        <input type="date" id="edit-pay-deadline" class="glass-input">
+                                    </div>
+                                </div>
+                                <div class="mt-6 border-t border-white/10 pt-4">
+                                    <div class="flex flex-col sm:flex-row gap-3">
+    <button onclick="saveClientPayments()" id="btn-save-payments" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-lg shadow-lg transition">
+        Save Custom Edits
+    </button>
+    <button onclick="logQuickPayment()" id="btn-quick-pay" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-6 rounded-lg shadow-lg transition flex-1">
+        <i class="fa-solid fa-bolt mr-2"></i> Log Payment (+1 Month)
+    </button>
+</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="c-view-reports" class="space-y-6 hidden">
+                        <div class="flex justify-between items-center px-2">
+                            <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Saved Reports</h3>
+                            <button onclick="openReportModal()" class="bg-yellow-400 text-yellow-900 hover:bg-yellow-300 font-bold py-2 px-5 rounded-lg text-sm transition shadow-lg"><i class="fa-solid fa-plus mr-2"></i> New Report</button>
+                        </div>
+                        <div class="glass p-6 min-h-[400px]">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                        <tr>
+                                            <th class="pb-3 p-2">Date Generated</th>
+                                            <th class="pb-3 p-2">Email Summary Snippet</th>
+                                            <th class="pb-3 p-2 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="client-reports-list" class="divide-y divide-white/5">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div id="page-sales" class="p-4 md:p-8 space-y-6 hidden">
+                    <header class="mb-2">
+                        <h1 class="text-3xl font-bold tracking-tight">Sales Command</h1>
+                        <p class="text-gray-400">Manage pipeline, forecast revenue, and close deals.</p>
+                    </header>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="glass p-4 text-center">
+                            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Pipeline</p>
+                            <h2 class="text-3xl font-extrabold text-white" id="sales-kpi-total">$0</h2>
+                        </div>
+                        <div class="glass p-4 text-center border-b-4 border-yellow-500/50">
+                            <p class="text-[10px] font-bold text-yellow-400 uppercase tracking-widest mb-1">Weighted Forecast</p>
+                            <h2 class="text-3xl font-extrabold text-yellow-400" id="sales-kpi-weighted">$0</h2>
+                        </div>
+                        <div class="glass p-4 text-center border-b-4 border-blue-500/50">
+                            <p class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Hot Leads (< 24h)</p>
+                            <h2 class="text-3xl font-extrabold text-blue-400" id="sales-kpi-hot">0</h2>
+                        </div>
+                        <div class="glass p-4 text-center border-b-4 border-green-500/50">
+                            <p class="text-[10px] font-bold text-green-400 uppercase tracking-widest mb-1">Win Rate</p>
+                            <h2 class="text-3xl font-extrabold text-green-400" id="sales-kpi-win">0%</h2>
+                        </div>
+                    </div>
+
+                    <div class="glass flex flex-col min-h-[600px]">
+                        <div class="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
+                            <div class="relative w-64">
+                                <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                                <input type="text" id="sales-search" placeholder="Search leads..." class="glass-input pl-8 py-1.5" onkeyup="renderSalesBoard()">
+                            </div>
+                            <button onclick="openLeadDrawer('new')" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg">
+                                <i class="fa-solid fa-plus mr-2"></i> New Lead
+                            </button>
+                        </div>
+
+                        <div class="flex-1 p-6 overflow-x-auto">
+                            <div class="flex gap-6 h-full min-w-max items-start">
+                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl">
+                                    <div class="p-4 border-b border-white/5 flex justify-between">
+                                        <h3 class="font-bold text-white text-sm"><i class="fa-solid fa-inbox text-gray-400 mr-2"></i>New <span class="text-gray-500 text-xs ml-1" id="s-count-new">0</span></h3>
+                                    </div>
+                                    <div class="p-3 flex-1 kanban-col space-y-3" data-stage="New" id="col-sales-new"></div>
+                                </div>
+                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl">
+                                    <div class="p-4 border-b border-white/5 flex justify-between">
+                                        <h3 class="font-bold text-white text-sm"><i class="fa-solid fa-phone text-blue-400 mr-2"></i>Discovery <span class="text-gray-500 text-xs ml-1" id="s-count-disc">0</span></h3>
+                                    </div>
+                                    <div class="p-3 flex-1 kanban-col space-y-3" data-stage="Discovery" id="col-sales-disc"></div>
+                                </div>
+                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl">
+                                    <div class="p-4 border-b border-white/5 flex justify-between">
+                                        <h3 class="font-bold text-white text-sm"><i class="fa-solid fa-file-invoice text-yellow-400 mr-2"></i>Proposal Sent <span class="text-gray-500 text-xs ml-1" id="s-count-prop">0</span></h3>
+                                    </div>
+                                    <div class="p-3 flex-1 kanban-col space-y-3" data-stage="Proposal" id="col-sales-prop"></div>
+                                </div>
+                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl">
+                                    <div class="p-4 border-b border-white/5 flex justify-between">
+                                        <h3 class="font-bold text-white text-sm"><i class="fa-solid fa-comments-dollar text-purple-400 mr-2"></i>Negotiation <span class="text-gray-500 text-xs ml-1" id="s-count-neg">0</span></h3>
+                                    </div>
+                                    <div class="p-3 flex-1 kanban-col space-y-3" data-stage="Negotiation" id="col-sales-neg"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="page-creatives" class="p-4 md:p-8 space-y-6 hidden">
+                    <header class="mb-6 flex justify-between items-end">
+                        <div><h1 class="text-3xl font-bold tracking-tight text-white">Ad Creatives</h1><p class="text-gray-400 mt-1">Upload and manage ad media for client approval.</p></div>
+                    </header>
+
+                    <div class="glass p-6 mb-8">
+                        <h3 class="text-lg font-bold mb-4 border-b border-white/10 pb-2">Upload New Creative</h3>
+                        <form id="creative-upload-form" onsubmit="uploadCreative(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <div>
+                                <label class="modal-label">Client</label>
+                                <select id="creative-client" class="glass-input" required></select>
+                            </div>
+                            <div>
+                                <label class="modal-label">Ad Name / Concept</label>
+                                <input type="text" id="creative-name" class="glass-input" placeholder="Summer Promo V1" required>
+                            </div>
+                            <div>
+                                <label class="modal-label">Media File</label>
+                                <input type="file" id="creative-file" class="glass-input" accept="image/*,video/*" required>
+                            </div>
+                            <div>
+                                <button type="submit" id="btn-upload-creative" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg shadow-lg transition">Upload Creative</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="glass p-6">
+                        <h3 class="text-lg font-bold mb-4">Uploaded Creatives</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm">
+                                <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                    <tr>
+                                        <th class="pb-3 p-2">Preview</th>
+                                        <th class="pb-3 p-2">Client</th>
+                                        <th class="pb-3 p-2">Ad Name</th>
+                                        <th class="pb-3 p-2">Status</th>
+                                        <th class="pb-3 p-2">Client Feedback</th>
+                                        <th class="pb-3 p-2">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-creatives-list" class="divide-y divide-white/5">
+                                    </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="page-templates" class="p-4 md:p-8 space-y-6 hidden">
+                    <header class="mb-6 flex justify-between items-end">
+                        <div><h1 class="text-3xl font-bold tracking-tight text-white">Templates</h1><p class="text-gray-400 mt-1">Manage standard operating procedures and recurring task lists.</p></div>
+                    </header>
+                    
+                    <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2 overflow-x-auto">
+                        <button id="tab-btn-tpl-recurring" onclick="switchTemplateView('recurring')" class="whitespace-nowrap pb-3 text-sm font-bold text-blue-400 border-b-2 border-blue-400">Recurring Templates</button>
+                        <button id="tab-btn-tpl-stage" onclick="switchTemplateView('stage')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Stage Checklists</button>
+                    </div>
+
+                    <div id="t-view-recurring" class="space-y-6 block">
+                        <div class="glass p-6">
+                            <div class="flex justify-between items-center mb-6">
+                                <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400">Scheduled Operations</h3>
+                                <button onclick="openTemplateDrawer('recurring', 'new')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-xs shadow-lg">+ New Template</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                        <tr><th class="pb-3">Template Name</th><th class="pb-3">Frequency</th><th class="pb-3 text-center">Active Clients</th><th class="pb-3 text-right">Last Edited</th></tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-white/5">
+                                        <tr class="hover:bg-white/5 transition cursor-pointer" onclick="openTemplateDrawer('recurring', 1)">
+                                            <td class="py-4 font-bold text-white"><i class="fa-solid fa-repeat text-gray-500 mr-2"></i>Weekly Sync Prep</td>
+                                            <td class="py-4 text-blue-400 font-bold">Weekly (Mon)</td>
+                                            <td class="py-4 text-center"><span class="bg-white/10 px-2 py-1 rounded text-xs">12</span></td>
+                                            <td class="py-4 text-right text-gray-500 text-xs">Oct 12, 2024</td>
+                                        </tr>
+                                        <tr class="hover:bg-white/5 transition cursor-pointer" onclick="openTemplateDrawer('recurring', 2)">
+                                            <td class="py-4 font-bold text-white"><i class="fa-solid fa-repeat text-gray-500 mr-2"></i>Monthly Report Generation</td>
+                                            <td class="py-4 text-purple-400 font-bold">Monthly (1st)</td>
+                                            <td class="py-4 text-center"><span class="bg-white/10 px-2 py-1 rounded text-xs">45</span></td>
+                                            <td class="py-4 text-right text-gray-500 text-xs">Nov 01, 2024</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="t-view-stage" class="space-y-6 hidden">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div class="glass p-6 hover:border-blue-500/50 transition cursor-pointer group" onclick="openTemplateDrawer('stage', 'onboarding')">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="w-10 h-10 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center text-xl group-hover:scale-110 transition"><i class="fa-solid fa-rocket"></i></div>
+                                    <span class="text-[10px] font-bold text-gray-500 uppercase bg-black/40 px-2 py-1 rounded">18 Tasks</span>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-2">Onboarding</h3>
+                                <p class="text-sm text-gray-400">Triggered when a new client signs. Includes tech access, GHL setup, and launch call.</p>
+                            </div>
+                            
+                            <div class="glass p-6 hover:border-yellow-500/50 transition cursor-pointer group" onclick="openTemplateDrawer('stage', 'building')">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="w-10 h-10 rounded-lg bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-xl group-hover:scale-110 transition"><i class="fa-solid fa-hammer"></i></div>
+                                    <span class="text-[10px] font-bold text-gray-500 uppercase bg-black/40 px-2 py-1 rounded">12 Tasks</span>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-2">Campaign Building</h3>
+                                <p class="text-sm text-gray-400">Copywriting, creative asset generation, and initial ad setup.</p>
+                            </div>
+
+                            <div class="glass p-6 hover:border-purple-500/50 transition cursor-pointer group" onclick="openTemplateDrawer('stage', 'learning')">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="w-10 h-10 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center text-xl group-hover:scale-110 transition"><i class="fa-solid fa-brain"></i></div>
+                                    <span class="text-[10px] font-bold text-gray-500 uppercase bg-black/40 px-2 py-1 rounded">5 Tasks</span>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-2">Campaign Learning</h3>
+                                <p class="text-sm text-gray-400">Monitoring phase during initial algorithm optimization.</p>
+                            </div>
+
+                            <div class="glass p-6 hover:border-green-500/50 transition cursor-pointer group" onclick="openTemplateDrawer('stage', 'optimizing')">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="w-10 h-10 rounded-lg bg-green-500/20 text-green-400 flex items-center justify-center text-xl group-hover:scale-110 transition"><i class="fa-solid fa-chart-line-up"></i></div>
+                                    <span class="text-[10px] font-bold text-gray-500 uppercase bg-black/40 px-2 py-1 rounded">8 Tasks</span>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-2">Optimizing</h3>
+                                <p class="text-sm text-gray-400">A/B testing, scaling budgets, and refining audience targeting.</p>
+                            </div>
+
+                            <div class="glass p-6 hover:border-red-500/50 transition cursor-pointer group" onclick="openTemplateDrawer('stage', 'offboarding')">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="w-10 h-10 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center text-xl group-hover:scale-110 transition"><i class="fa-solid fa-door-open"></i></div>
+                                    <span class="text-[10px] font-bold text-gray-500 uppercase bg-black/40 px-2 py-1 rounded">6 Tasks</span>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-2">Offboarding</h3>
+                                <p class="text-sm text-gray-400">Removing access, final reporting, and exit interviews.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="page-settings" class="p-4 md:p-8 space-y-6 hidden">
+                    <header class="mb-6 flex justify-between items-end">
+                        <div><h1 class="text-3xl font-bold tracking-tight text-white">Settings</h1><p class="text-gray-400 mt-1">Admin configuration.</p></div>
+                    </header>
+                    <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2 overflow-x-auto">
+                        <button id="tab-btn-set-users" onclick="switchSettingsView('users')" class="whitespace-nowrap pb-3 text-sm font-bold text-blue-400 border-b-2 border-blue-400">Users & Roles</button>
+                        <button id="tab-btn-set-scoring" onclick="switchSettingsView('scoring')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Scoring Weights</button>
+                        <button id="tab-btn-set-milestones" onclick="switchSettingsView('milestones')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Milestones</button>
+                        <button id="tab-btn-set-health" onclick="switchSettingsView('health')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Health Score Config</button>
+                        <button id="tab-btn-set-notifications" onclick="switchSettingsView('notifications')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Notifications</button>
+                        <button id="tab-btn-set-data" onclick="switchSettingsView('data')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Data</button>
+                    </div>
+                    
+                    <div id="s-view-users" class="space-y-6 block glass p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <div><h3 class="text-lg font-bold">Users & Roles</h3><p class="text-gray-400 text-sm">Manage user roles and client access.</p></div>
+                        </div>
+
+                        <div class="bg-black/20 p-5 rounded-xl border border-white/5 mb-6">
+                            <h4 class="font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-envelope-open-text text-blue-400"></i> Pre-Approve New User</h4>
+                            <div class="flex flex-col md:flex-row gap-4 items-end">
+                                <div class="flex-1 w-full">
+                                    <label class="modal-label">Email Address</label>
+                                    <input type="email" id="invite-email" class="glass-input" placeholder="user@example.com">
+                                </div>
+                                <div class="w-full md:w-32">
+                                    <label class="modal-label">Role</label>
+                                    <select id="invite-role" class="glass-input">
+                                        <option value="member">Member</option>
+                                        <option value="admin">Admin</option>
+                                        <option value="investor">Investor</option>
+                                        <option value="client">Client</option>
+                                    </select>
+                                </div>
+                                <div class="w-full md:w-64 relative" id="invite-client-container">
+                                    <label class="modal-label">Client Access</label>
+                                    <div class="glass-input cursor-pointer flex justify-between items-center !py-[0.4rem]" onclick="document.getElementById('invite-client-dropdown').classList.toggle('hidden')">
+                                        <span id="invite-client-text" class="truncate text-gray-300 text-sm">Select clients...</span>
+                                        <i class="fa-solid fa-chevron-down text-[10px] opacity-50"></i>
+                                    </div>
+                                    <div id="invite-client-dropdown" class="hidden absolute top-[calc(100%+4px)] left-0 w-full bg-slate-800 border border-white/10 rounded-lg p-2 max-h-48 overflow-y-auto z-[100] shadow-2xl">
+                                        <div id="invite-client-list" class="space-y-1"></div>
+                                    </div>
+                                </div>
+                                <button onclick="inviteUser(event)" id="btn-send-invite" class="w-full md:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg text-sm shadow-lg whitespace-nowrap"><i class="fa-solid fa-paper-plane mr-2"></i> Send Invite</button>
+                            </div>
+                        </div>
+
+                        <div id="st-users"></div>
+                    </div>
+
+                    <div id="s-view-scoring" class="space-y-6 hidden glass p-6">
+                        <h3 class="text-lg font-bold">Scoring Weights</h3>
+                        <p class="text-gray-400 text-sm mb-4">Adjust the Priority / Urgency / Effort weighting percentages for the Priority Score formula. Must sum to 100%.</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div class="space-y-4">
+                                <div><label class="modal-label">Priority Weight (%)</label><input type="number" id="sw-p" class="glass-input" value="40" oninput="previewScoreWeighting()"></div>
+                                <div><label class="modal-label">Urgency Weight (%)</label><input type="number" id="sw-u" class="glass-input" value="40" oninput="previewScoreWeighting()"></div>
+                                <div><label class="modal-label">Effort Weight (%)</label><input type="number" id="sw-e" class="glass-input" value="20" oninput="previewScoreWeighting()"></div>
+                                <div id="sw-error" class="text-red-400 text-xs hidden">Weights must sum to 100%.</div>
+                                <button onclick="saveScoringWeights()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm mt-4">Save Weights</button>
+                            </div>
+                            <div class="bg-black/20 p-6 rounded-xl border border-white/5">
+                                <h4 class="font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-calculator text-blue-400"></i> Live Preview</h4>
+                                <div class="flex justify-between items-center bg-white/5 p-4 rounded-lg border border-white/10">
+                                    <span class="text-sm text-gray-300">Task Priority: 5<br>Task Urgency: 5<br>Task Effort: 1 (Easy)</span>
+                                    <div class="text-center"><span class="text-3xl font-extrabold text-blue-400" id="sw-preview">100</span><br><span class="text-[10px] text-gray-500 uppercase tracking-widest">Score</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="s-view-milestones" class="space-y-6 hidden glass p-6">
+                        <h3 class="text-lg font-bold">Milestones</h3>
+                        <p class="text-gray-400 text-sm mb-4">Define milestone names and their target day benchmarks.</p>
+                        <div class="flex flex-wrap gap-2 mb-6 bg-black/20 p-4 border border-white/5 rounded-xl">
+                            <div class="flex-1 min-w-[200px]"><label class="modal-label">Milestone Name</label><input type="text" id="ms-name" placeholder="e.g. Ads Launched" class="glass-input"></div>
+                            <div class="w-32"><label class="modal-label">Target Days</label><input type="number" id="ms-days" placeholder="e.g. 7" class="glass-input w-full"></div>
+                            <div class="flex items-end"><button onclick="addMilestoneSetting()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm w-full"><i class="fa-solid fa-plus mr-1"></i> Add</button></div>
+                        </div>
+                        <div id="ms-list" class="space-y-3"></div>
+                    </div>
+
+                    <div id="s-view-health" class="space-y-6 hidden glass p-6">
+                        <h3 class="text-lg font-bold">Health Score Config</h3>
+                        <p class="text-gray-400 text-sm mb-4">Adjust the weighting of each health score factor. Must sum to 100%.</p>
+                        <div class="grid grid-cols-2 md:grid-cols-3 gap-6 max-w-3xl bg-black/20 p-6 border border-white/5 rounded-xl">
+                            <div><label class="modal-label">Milestone Speed (%)</label><input type="number" id="hw-ms" class="glass-input" value="30" oninput="checkHealthWeights()"></div>
+                            <div><label class="modal-label">Last Communication (%)</label><input type="number" id="hw-comm" class="glass-input" value="20" oninput="checkHealthWeights()"></div>
+                            <div><label class="modal-label">GHL Usage (%)</label><input type="number" id="hw-ghl" class="glass-input" value="20" oninput="checkHealthWeights()"></div>
+                            <div><label class="modal-label">Lead Volume (%)</label><input type="number" id="hw-leads" class="glass-input" value="10" oninput="checkHealthWeights()"></div>
+                            <div><label class="modal-label">Appointments (%)</label><input type="number" id="hw-appts" class="glass-input" value="10" oninput="checkHealthWeights()"></div>
+                            <div><label class="modal-label">Closed Revenue (%)</label><input type="number" id="hw-deals" class="glass-input" value="10" oninput="checkHealthWeights()"></div>
+                        </div>
+                        <div id="hw-error" class="text-red-400 text-sm font-bold hidden mt-2 bg-red-500/10 border border-red-500/20 p-3 rounded flex items-center"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Weights must sum to 100%.</div>
+                        <button id="hw-save-btn" onclick="saveHealthWeights()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg text-sm mt-4 shadow-lg"><i class="fa-solid fa-save mr-2"></i> Save Health Config</button>
+                    </div>
+
+                    <div id="s-view-notifications" class="space-y-6 hidden glass p-6">
+                        <h3 class="text-lg font-bold">Notifications</h3>
+                        <p class="text-gray-400 text-sm mb-4">Configure how tag notifications are delivered.</p>
+                        <div class="space-y-3 max-w-md">
+                            <label class="flex justify-between items-center p-4 bg-black/20 border border-white/5 rounded-xl cursor-pointer hover:bg-white/5 transition"><span class="font-bold flex items-center gap-3"><i class="fa-solid fa-bell text-blue-400"></i> In-App Notifications</span><input type="checkbox" checked class="row-checkbox w-5 h-5"></label>
+                            <label class="flex justify-between items-center p-4 bg-black/20 border border-white/5 rounded-xl cursor-pointer hover:bg-white/5 transition"><span class="font-bold flex items-center gap-3"><i class="fa-solid fa-envelope text-yellow-400"></i> Email Notifications</span><input type="checkbox" checked class="row-checkbox w-5 h-5"></label>
+                            <label class="flex justify-between items-center p-4 bg-black/20 border border-white/5 rounded-xl cursor-pointer hover:bg-white/5 transition opacity-60"><span class="font-bold text-gray-400 flex items-center gap-3"><i class="fa-brands fa-slack text-purple-400"></i> Slack Integration</span><span class="text-[10px] uppercase font-bold bg-white/10 px-2 py-1 rounded">Soon</span></label>
+                        </div>
+                    </div>
+
+                    <div id="s-view-data" class="space-y-6 hidden glass p-6">
+                        <h3 class="text-lg font-bold">Data Management</h3>
+                        <p class="text-gray-400 text-sm mb-6">Manage global database imports and exports.</p>
+                        <div class="flex flex-wrap gap-4">
+                            <button onclick="exportDataJson()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl text-sm shadow-lg"><i class="fa-solid fa-download mr-2"></i> Export Data (JSON)</button>
+                            <button class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl text-sm opacity-50 cursor-not-allowed shadow-lg" title="Not available"><i class="fa-solid fa-upload mr-2"></i> Import Template</button>
+                            <button class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-6 rounded-xl text-sm opacity-50 cursor-not-allowed shadow-lg"><i class="fa-solid fa-server mr-2"></i> Manual Backup</button>
+                        </div>
+                    </div>
+                </div>
+<div id="page-audits" class="p-4 md:p-8 space-y-6 hidden">
+    <header class="mb-6 flex justify-between items-end">
+        <div>
+            <h1 class="text-3xl font-bold tracking-tight text-white">Morning Audits</h1>
+            <p class="text-gray-400 mt-1">Review, edit, and manage your daily network analysis logs.</p>
+        </div>
+    </header>
+
+    <div class="glass p-6 min-h-[400px]">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                    <tr>
+                        <th class="pb-3 p-2 w-48">Date Generated</th>
+                        <th class="pb-3 p-2">HTML Snippet</th>
+                        <th class="pb-3 p-2 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="audits-list-body" class="divide-y divide-white/5">
+                    <!-- Audits will load here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="edit-audit-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
+    <div style="max-width: 800px; width: 100%; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 2rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+        <div class="flex justify-between items-start mb-6">
+            <div>
+                <p class="text-xs text-yellow-500 uppercase tracking-widest font-bold mb-1">Edit</p>
+                <h2 class="text-2xl font-bold text-white">Morning Audit</h2>
+            </div>
+            <button onclick="document.getElementById('edit-audit-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl">✕</button>
+        </div>
+        <div class="space-y-4">
+            <div>
+                <label class="modal-label">HTML Report Source Code</label>
+                <textarea id="edit-audit-html" class="glass-input min-h-[300px] font-mono text-xs"></textarea>
+            </div>
+            <button id="btn-save-edit-audit" class="w-full bg-yellow-500 hover:bg-yellow-400 text-yellow-900 font-bold py-3 rounded-xl mt-4 shadow-lg transition">Save Changes</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="stage-transition-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
+                    <div style="max-width: 500px; width: 100%; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.5rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+                        <div class="flex justify-between items-start mb-6">
+                            <div>
+                                <p class="text-xs text-blue-500 uppercase tracking-widest font-bold mb-1">Lifecycle Management</p>
+                                <h2 class="text-2xl font-bold text-white">Stage Transition</h2>
+                            </div>
+                            <button onclick="document.getElementById('stage-transition-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl">✕</button>
+                        </div>
+                        
+                        <div class="bg-black/20 p-5 rounded-xl border border-white/5 mb-6 text-sm">
+                            <div class="flex justify-between items-center mb-4">
+                                <span class="text-gray-400">Current Stage:</span>
+                                <span class="font-bold text-white px-3 py-1 bg-white/10 rounded-md" id="trans-current-stage">Onboarding</span>
+                            </div>
+                            <div class="flex justify-center text-blue-400 mb-4">
+                                <i class="fa-solid fa-arrow-down"></i>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-gray-400">Target Stage:</span>
+                                <select id="trans-target-stage" class="glass-input !w-auto !py-1 !text-sm !font-bold !text-blue-400 !bg-blue-500/20 !border-blue-500/30 cursor-pointer outline-none" onchange="updateTransitionTaskCount()">
+                                    <!-- Options injected via JS -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-between items-center bg-black/20 p-4 border border-white/5 rounded-xl mb-4 cursor-pointer hover:bg-white/5 transition" onclick="const cb = document.getElementById('trans-generate-tasks'); cb.checked = !cb.checked; toggleAutoGenerationNotice();">
+                            <span class="font-bold text-white text-sm flex items-center gap-3"><i class="fa-solid fa-wand-magic-sparkles text-yellow-400"></i> Generate SOP Tasks</span>
+                            <input type="checkbox" id="trans-generate-tasks" checked class="row-checkbox w-5 h-5 pointer-events-none">
+                        </div>
+
+                        <div id="trans-auto-gen-notice" class="bg-blue-900/20 border-l-4 border-blue-500 p-4 mb-6 rounded-r-lg transition-all duration-300">
+                            <h4 class="text-sm font-bold text-white flex items-center gap-2 mb-1"><i class="fa-solid fa-list-check text-blue-400"></i> Auto-Generation Active</h4>
+                            <p class="text-xs text-gray-300">Moving to this stage will automatically pull the SOP template and generate <strong class="text-white" id="trans-task-count">12</strong> new tasks for this client.</p>
+                        </div>
+
+                        <div class="flex gap-3">
+                            <button onclick="document.getElementById('stage-transition-modal').style.display='none'" class="flex-1 glass-pill justify-center !py-3">Cancel</button>
+                            <button id="btn-confirm-transition" onclick="executeStageTransition()" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-full shadow-lg transition">Confirm Move</button>
+                        </div>
+                    </div>
+                </div>
+
+            </main>
+        </div>
+        
+        <div id="client-portal-container" class="hidden space-y-8 p-4 md:p-8">
+            <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+                <div class="flex items-center gap-4">
+                    <img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-12">
+                    <div>
+                        <h1 class="text-3xl font-bold">Welcome, <span id="client-name-display" class="text-yellow-400">Partner</span></h1>
+                        <p class="text-gray-400 text-sm mt-1">Real-time performance metrics.</p>
+                    </div>
+                </div>
+                <div class="flex items-center flex-wrap gap-3">
+                    <div id="admin-switcher" style="display: none !important;" class="hidden glass-pill border-yellow-500/50">
+    <select id="admin-client-list" onchange="portalSwitchClient(this.value)" class="bg-transparent text-xs border-none outline-none text-white cursor-pointer">
+    </select>
+</div>
+                    <button onclick="openInviteModal()" class="glass-pill text-sm !border-purple-500/50 text-purple-400"><i class="fa-solid fa-user-plus mr-2"></i> Invite Team</button>
+                    <div class="relative dropdown-container">
+                        <div class="glass-pill" onclick="toggleDropdown('portal-date-menu')">
+                            <i class="fa-regular fa-calendar text-yellow-400"></i>
+                            <span id="selected-date-label">Last 7 Days</span>
+                            <i class="fa-solid fa-chevron-down text-[10px]"></i>
+                        </div>
+                        <div id="portal-date-menu" class="custom-dropdown-menu">
+                            <div class="dropdown-item" onclick="selectPresetDate('yesterday', 'Yesterday')">Yesterday</div>
+                            <div class="dropdown-item" onclick="selectPresetDate('last7', 'Last 7 Days')">Last 7 Days</div>
+                            <div class="dropdown-item" onclick="selectPresetDate('last30', 'Last 30 Days')">Last 30 Days</div>
+                            <div class="dropdown-item" onclick="selectPresetDate('max', 'Maximum')">Maximum</div>
+                            <div class="border-t border-white/10 my-2"></div>
+                            <div class="p-2 space-y-2" onclick="event.stopPropagation()">
+                                <input type="date" id="start-date" class="glass-input">
+                                <input type="date" id="end-date" class="glass-input">
+                                <button onclick="applyCustomRange()" class="w-full bg-white text-black text-[10px] font-bold py-2 rounded-lg mt-1">Apply</button>
+                            </div>
+                        </div>
+                    </div>
+                    <button onclick="toggleTheme()" class="glass-pill !min-w-0 px-4"><i class="theme-icon fa-solid fa-moon"></i></button>
+                    <button onclick="signOut()" class="glass-pill !min-w-0 px-4 text-red-400"><i class="fa-solid fa-sign-out"></i></button>
+                </div>
+            </header>
+
+            
+
+            <div class="flex items-center gap-6 border-b border-white/10 mb-6 mt-4 px-2 overflow-x-auto">
+                <button id="cp-tab-dashboard" onclick="switchCpTab('dashboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-chart-pie mr-2"></i> Dashboard</button>
+                <button id="cp-tab-pipeline" onclick="switchCpTab('pipeline')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-bars-progress mr-2"></i> Pipeline</button>
+                <button id="cp-tab-creatives" onclick="switchCpTab('creatives')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-palette mr-2"></i> Ad Creatives</button>
+                <button id="cp-tab-settings" onclick="switchCpTab('settings')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-gear mr-2"></i> Settings</button>
+                <button id="cp-tab-seo" onclick="switchCpTab('seo')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-brands fa-google mr-2"></i> Organic SEO</button>
+                <button id="cp-tab-leaderboard" onclick="switchCpTab('leaderboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-trophy mr-2 text-yellow-500"></i> Network Ranks</button>
+                <button id="cp-tab-knowledge" onclick="switchCpTab('knowledge')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-graduation-cap mr-2"></i> Knowledge Base</button>
+            </div>
+
+            <div id="cp-view-dashboard" class="space-y-8 hidden">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Marketing ROI</p><h4 class="text-3xl font-bold text-yellow-400" id="stat-roi">0.0x</h4></div>
+                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">New Leads</p><h4 class="text-3xl font-bold text-green-400" id="stat-leads">0</h4></div>
+                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CPL</p><h4 class="text-3xl font-bold text-purple-400" id="stat-cpl">$0</h4></div>
+                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Total Ad Spend</p><h4 class="text-3xl font-bold" id="stat-spend">$0</h4></div>
+                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Closed Revenue</p><h4 class="text-3xl font-bold text-blue-400" id="stat-revenue">$0</h4></div>
+                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Open Estimates</p><h4 class="text-3xl font-bold text-gray-400" id="stat-estimates">$0</h4></div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="glass p-6 min-h-[400px]"><canvas id="leadsChart"></canvas></div>
+                    <div class="glass p-6 min-h-[400px]"><canvas id="roiChart"></canvas></div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest px-2">Job History</h3>
+                        <div class="glass overflow-x-auto"><table class="history-table w-full"><thead><tr class="text-left text-[10px] text-gray-500"><th>Date</th><th>Ref</th><th>Revenue</th><th class="text-right">Action</th></tr></thead><tbody id="job-history-body"></tbody></table></div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest px-2">Active Project Tasks</h3>
+                        <div id="portal-tasks-container" class="grid grid-cols-1 gap-4"></div>
+                    </div>
+                </div>
+                
+                <div class="glass p-6 border-l-4 border-yellow-400 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-8">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i class="fa-solid fa-sparkles text-yellow-400"></i>
+                            <h3 class="font-bold">AI Performance Summary</h3>
+                        </div>
+                        <div id="ai-summary" class="text-gray-400 leading-relaxed text-sm">Click "Run Analysis" to generate an AI overview of this timeframe.</div>
+                    </div>
+                    <button id="portal-run-ai-btn" onclick="triggerPortalAI()" class="btn-gold text-xs shrink-0 px-6 py-2 rounded-full">
+                        <i class="fa-solid fa-bolt"></i> Run Analysis
+                    </button>
+                </div>
+
+                <div class="glass p-6 border-l-4 border-blue-500 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-8">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i class="fa-solid fa-headset text-blue-400"></i>
+                            <h3 class="font-bold text-white">Need something else?</h3>
+                        </div>
+                        <div class="text-gray-400 leading-relaxed text-sm">Request a new task, campaign adjustment, or schedule a strategy meeting with our team.</div>
+                    </div>
+                    <button onclick="openClientRequestModal()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 px-6 py-3 rounded-full transition shadow-lg">
+                        <i class="fa-solid fa-paper-plane mr-2"></i> Submit Request
+                    </button>
+                </div>
+            </div>
+
+            <div id="cp-view-pipeline" class="space-y-8 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Lead Pipeline</h3>
+                    <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                        <button onclick="openEstimateModal()" class="glass-pill text-xs !py-2 !border-blue-500/50 text-blue-400"><i class="fa-solid fa-calculator mr-2"></i> Log Estimate</button>
+                        <button onclick="openJobModal()" class="btn-gold text-xs !py-2"><i class="fa-solid fa-sack-dollar mr-2"></i> Log Closed Job</button>
+                        <button onclick="openCpLeadDrawer('new')" class="glass-pill text-xs !py-2 shrink-0 border-white/10 text-white"><i class="fa-solid fa-plus mr-2"></i> Add Lead</button>
+                    </div>
+                </div>
+                <div class="flex gap-4 overflow-x-auto pb-4 items-start" id="cp-pipeline-container">
+                    </div>
+            </div>
+
+            <div id="cp-view-creatives" class="space-y-8 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Creative Approvals</h3>
+                    <p class="text-sm text-gray-400">Review your latest ad creatives, provide feedback, or approve them for launch.</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" id="client-creatives-grid">
+                    </div>
+            </div>
+
+            <div id="cp-view-settings" class="space-y-8 hidden glass p-6 max-w-2xl">
+                <h3 class="text-lg font-bold mb-2">Pipeline Settings</h3>
+                <p class="text-gray-400 text-sm mb-6">Customize the stages for your lead pipeline. "Won" and "Lost" are permanently required at the end.</p>
+                
+                <div class="flex gap-2 mb-6 bg-black/20 p-4 border border-white/5 rounded-xl items-end">
+                    <div class="flex-1"><label class="modal-label">New Stage Name</label><input type="text" id="cp-new-stage-name" class="glass-input" placeholder="e.g. Follow Up"></div>
+                    <button onclick="addCpStage()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm"><i class="fa-solid fa-plus mr-1"></i> Add</button>
+                </div>
+                
+                <div class="space-y-2" id="cp-stages-list">
+                    </div>
+            </div>
+            
+            <div id="cp-view-seo" class="space-y-8 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Google Search Console Metrics</h3>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="glass p-6"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Organic Clicks</p><h4 class="text-3xl font-bold text-blue-400" id="cp-seo-clicks">0</h4></div>
+                    <div class="glass p-6"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Impressions</p><h4 class="text-3xl font-bold text-purple-400" id="cp-seo-imp">0</h4></div>
+                    <div class="glass p-6"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CTR</p><h4 class="text-3xl font-bold text-green-400" id="cp-seo-ctr">0%</h4></div>
+                    <div class="glass p-6"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg Position</p><h4 class="text-3xl font-bold text-yellow-400" id="cp-seo-pos">0.0</h4></div>
+                </div>
+                <div class="glass p-6 min-h-[400px]">
+                    <canvas id="cpSeoChart"></canvas>
+                </div>
+            </div>
+
+            <div id="cp-view-leaderboard" class="space-y-8 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
+                    <div>
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Network Leaderboard</h3>
+                        <p class="text-sm text-gray-400 mt-1">See how your performance stacks up against our anonymized network.</p>
+                    </div>
+                </div>
+                
+                <div class="glass p-3 flex items-center justify-center gap-3 bg-gradient-to-r from-blue-900/40 via-purple-900/40 to-blue-900/40 border-y border-white/10 overflow-hidden relative rounded-xl">
+                    <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
+                    <i class="fa-solid fa-fire text-yellow-500 animate-pulse text-lg z-10"></i>
+                    <p id="global-power-ticker-text" class="text-sm font-bold text-white tracking-wide z-10">
+                        Calculating network wins...
+                    </p>
+                </div>
+                
+                <div class="glass p-6">
+                    <div class="space-y-3" id="anonymized-leaderboard-list">
+                        </div>
+                </div>
+            </div>
+
+            <div id="cp-view-knowledge" class="space-y-8 block">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
+                    <div>
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Knowledge Base</h3>
+                        <p class="text-sm text-gray-400 mt-1">Watch the videos below to learn how to navigate your portal.</p>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="glass p-6 flex flex-col">
+                        <h4 class="font-bold text-white mb-4">1. Welcome to Midas HQ</h4>
+                        <div class="w-full aspect-video bg-black/40 rounded-lg mb-6 flex items-center justify-center border border-white/10 overflow-hidden">
+                            <video id="vid_knowledge_1" controls class="w-full h-full outline-none" onended="markVideoWatched('knowledge_1')">
+                                <source src="YOUR_MP4_URL_HERE.mp4" type="video/mp4">
+                            </video>
+                        </div>
+                        <div id="status-knowledge_1" class="mt-auto p-3 bg-black/20 rounded-xl border border-white/5 flex items-center justify-between transition duration-300">
+                            <span class="text-sm text-gray-400 font-bold">Status:</span>
+                            <span class="status-badge text-sm text-gray-500 font-bold"><i class="fa-solid fa-circle-play mr-1"></i> Not Watched</span>
+                        </div>
+                    </div>
+
+                    <div class="glass p-6 flex flex-col">
+                        <h4 class="font-bold text-white mb-4">2. How to use your Dashboard</h4>
+                        <div class="w-full aspect-video bg-black/40 rounded-lg mb-6 flex items-center justify-center border border-white/10 overflow-hidden">
+                            <video id="vid_knowledge_2" controls class="w-full h-full outline-none" onended="markVideoWatched('knowledge_2')">
+                                <source src="YOUR_MP4_URL_HERE.mp4" type="video/mp4">
+                            </video>
+                        </div>
+                        <div id="status-knowledge_2" class="mt-auto p-3 bg-black/20 rounded-xl border border-white/5 flex items-center justify-between transition duration-300">
+                            <span class="text-sm text-gray-400 font-bold">Status:</span>
+                            <span class="status-badge text-sm text-gray-500 font-bold"><i class="fa-solid fa-circle-play mr-1"></i> Not Watched</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <div id="health-drawer" class="side-drawer p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-white"><i class="fa-solid fa-heart-pulse mr-2 text-green-400"></i> Update Account Health</h2>
+                <button type="button" onclick="closeAllDrawers()" class="text-gray-400 hover:text-white text-2xl p-2">✕</button>
+            </div>
+            
+            <p class="text-xs text-gray-400 mb-6 uppercase tracking-wider font-bold">Client: <span id="h-client-name" class="text-white">---</span></p>
+            
+            <div class="space-y-6 flex-1 overflow-y-auto pr-1">
+                <div>
+                    <label class="modal-label">Last Communication Date</label>
+                    <input type="date" id="h-date" class="glass-input">
+                </div>
+                
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-400">GHL Platform Usage</span>
+                        <span class="font-bold text-white"><span id="ghl-val">3</span>/5</span>
+                    </div>
+                    <input type="range" id="h-ghl" min="1" max="5" value="3" class="w-full accent-blue-500" oninput="document.getElementById('ghl-val').innerText=this.value">
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="modal-label">Lead Vol</label>
+                        <input type="number" id="h-leads" class="glass-input" placeholder="0">
+                    </div>
+                    <div>
+                        <label class="modal-label">Appts Set</label>
+                        <input type="number" id="h-appts" class="glass-input" placeholder="0">
+                    </div>
+                    <div>
+                        <label class="modal-label">Deals Closed</label>
+                        <input type="number" id="h-deals" class="glass-input" placeholder="0">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="modal-label">Manual Health Override (Optional Score 1-100)</label>
+                    <input type="number" id="h-manual-override" class="glass-input" placeholder="Leave blank for automatic scoring math">
+                </div>
+
+                <div>
+                    <label class="modal-label">Internal Health Notes</label>
+                    <textarea id="h-note" class="glass-input min-h-[100px]" placeholder="E.g., Client loved the new performance wins..."></textarea>
+                </div>
+
+                <div>
+                    <label class="modal-label mb-2">Phase Benchmarks achieved</label>
+                    <div id="h-milestones" class="space-y-2">
+                        </div>
+                </div>
+            </div>
+
+            <div class="pt-6 border-t border-white/10 mt-6 bg-slate-900/20">
+                <button onclick="saveHealthData()" id="h-save-btn" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg shadow-lg transition">
+                    Save Account Health
+                </button>
+            </div>
+        </div>
+        <div id="column-drawer" class="side-drawer p-6">
+                <div class="flex justify-between items-center mb-6"><h2 class="text-xl font-bold text-white"><i class="fa-solid fa-table-columns mr-2 text-blue-500"></i> Columns</h2><button onclick="closeAllDrawers(); return false;" class="text-gray-400 hover:text-white text-2xl z-[100] p-2">✕</button></div>
+                <div class="flex justify-between items-center mb-4"><p class="text-xs text-gray-400">Optional Columns</p><button onclick="resetColumns()" class="text-[10px] uppercase font-bold text-blue-400 hover:underline">Reset</button></div>
+                <div id="optional-columns-list" class="space-y-2 flex-1"></div>
+                <button onclick="applyColumns()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg mt-6 shadow-lg">Apply</button>
+            </div>
+
+            <form id="template-drawer" onsubmit="triggerTemplateSave(event)" class="side-drawer p-0">
+                <div class="p-6 border-b border-white/10 bg-white/5 relative">
+                    <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 text-gray-400 hover:text-white text-2xl z-[110] bg-black/20 hover:bg-red-500/20 rounded-lg w-8 h-8 flex items-center justify-center transition">✕</button>
+                    <p class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1" id="tpl-drawer-subtitle">Template Editor</p>
+                    <h3 class="text-2xl font-bold text-white mb-4" id="tpl-drawer-title">Template Details</h3>
+                    <input type="hidden" id="tpl-active-type">
+                    <input type="hidden" id="tpl-active-id">
+                </div>
+                <div class="p-6 space-y-6 flex-1 overflow-y-auto" id="tpl-drawer-content">
+                    </div>
+                <div class="p-6 border-t border-white/10 bg-white/5 flex flex-col gap-3">
+                    <button type="submit" id="tpl-save-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg shadow-lg">Save Template</button>
+                </div>
+            </form>
+
+        <form id="task-drawer" onsubmit="saveTask(event)" class="side-drawer p-0">
+            <div class="p-6 border-b border-white/10 bg-white/5 relative">
+                <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 text-gray-400 hover:text-white text-2xl z-[110] bg-black/20 hover:bg-red-500/20 rounded-lg w-8 h-8 flex items-center justify-center transition">✕</button>
+                <h3 class="text-lg font-bold text-white mb-4" id="t-drawer-headline">Task Details</h3>
+                <input type="text" id="t-title" required class="w-full bg-transparent text-2xl font-bold text-white outline-none border-b border-white/20 focus:border-blue-500 mb-4 pb-2" placeholder="Task Title...">
+                <div class="flex gap-2">
+                    <button type="button" onclick="document.getElementById('t-status').value='Complete'" class="bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-bold px-3 py-1.5 rounded-md hover:bg-green-500/30 transition"><i class="fa-solid fa-check mr-1"></i> Complete</button>
+                    <select id="t-status" class="bg-white/10 text-white text-xs font-bold px-3 py-1.5 rounded-md border border-white/10 outline-none"><option value="Not Started">Not Started</option><option value="In Progress">In Progress</option><option value="Blocked">Blocked</option><option value="Complete">Complete</option></select>
+                </div>
+            </div>
+            <div class="p-6 space-y-6 flex-1">
+                <div class="grid grid-cols-2 gap-4">
+                    <div id="t-client-container" class="relative">
+                        <label class="modal-label">Client Name(s)</label>
+                        <div id="t-client-display" class="glass-input cursor-pointer flex justify-between items-center" onclick="document.getElementById('t-client-dropdown').classList.toggle('hidden')">
+                            <span id="t-client-text" class="truncate text-gray-300">Select clients...</span>
+                            <i class="fa-solid fa-chevron-down text-[10px] opacity-50"></i>
+                        </div>
+                        <div id="t-client-dropdown" class="hidden absolute top-[calc(100%+4px)] left-0 w-full bg-slate-800 border border-white/10 rounded-lg p-2 max-h-48 overflow-y-auto z-[100] shadow-2xl">
+                            <label class="flex items-center gap-3 p-2 hover:bg-white/5 rounded cursor-pointer border-b border-white/10 mb-1 transition">
+                                <input type="checkbox" id="t-client-all" class="row-checkbox" onchange="toggleAllTaskClients(this)"> 
+                                <span class="text-sm font-bold text-white">Select All</span>
+                            </label>
+                            <div id="t-client-list-container" class="space-y-1">
+                                </div>
+                        </div>
+                    </div>
+                    <div><label class="modal-label">Stage</label><select id="t-stage" class="glass-input"><option value="Onboarding">Onboarding</option><option value="Camp. Building">Camp. Building</option><option value="Camp. Learning">Camp. Learning</option><option value="Optimizing">Optimizing</option><option value="Offboarding">Offboarding</option></select></div>
+                    <div><label class="modal-label">Assignee</label><input type="text" id="t-assignee" required class="glass-input" placeholder="John Doe"></div>
+                    <div><label class="modal-label">Task Type</label><select id="t-type" class="glass-input"><option value="One-off">One-off</option><option value="Recurring">Recurring</option><option value="Checklist">Checklist</option><option value="Milestone">Milestone</option><option value="Client Request">Client Request</option></select></div>
+                    <div class="col-span-2"><label class="modal-label">Due Date</label><input type="date" id="t-due" class="glass-input"></div>
+                </div>
+                <div class="bg-black/20 border border-white/5 rounded-xl p-5 relative overflow-hidden">
+                    <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-400 to-purple-500"></div>
+                    <div class="flex justify-between items-start mb-4"><h3 class="text-sm font-bold text-white flex items-center gap-2"><i class="fa-solid fa-calculator text-blue-400"></i> Priority Engine</h3><div class="text-right"><span class="text-2xl font-extrabold text-white" id="t-calc-score">0</span><span class="text-xs text-gray-500">/100</span></div></div>
+                    <div class="space-y-4">
+                        <div><div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Priority (Impact)</span><span class="font-bold text-white" id="val-p">3</span></div><input type="range" id="t-p" min="1" max="5" value="3" class="w-full accent-blue-500" oninput="updateTaskScore()"></div>
+                        <div><div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Urgency (Time)</span><span class="font-bold text-white" id="val-u">3</span></div><input type="range" id="t-u" min="1" max="5" value="3" class="w-full accent-purple-500" oninput="updateTaskScore()"></div>
+                        <div><div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Effort (1=Easy, 5=Hard)</span><span class="font-bold text-white" id="val-e">3</span></div><input type="range" id="t-e" min="1" max="5" value="3" class="w-full accent-yellow-500" oninput="updateTaskScore()"></div>
+                    </div>
+                </div>
+                <div><label class="modal-label">Notes</label><textarea id="t-notes" class="glass-input min-h-[100px]"></textarea></div>
+            </div>
+            <div class="p-6 border-t border-white/10 bg-white/5 flex flex-col gap-3"><button type="submit" id="t-save-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg shadow-lg">Save Task</button><button type="button" id="t-delete-btn" onclick="deleteTask()" class="w-full bg-red-500/10 text-red-400 hover:bg-red-500/20 font-bold py-2 rounded-lg hidden">Delete Task</button></div>
+        </form>
+
+        <form id="cp-lead-drawer" onsubmit="saveCpLead(event)" class="side-drawer p-0">
+            <div class="p-6 border-b border-white/10 bg-white/5 relative">
+                <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 text-gray-400 hover:text-white text-2xl z-[110] bg-black/20 hover:bg-red-500/20 rounded-lg w-8 h-8 flex items-center justify-center transition">✕</button>
+                <p class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Lead Details</p>
+                <input type="text" id="cp-ld-name" required class="w-full bg-transparent text-2xl font-bold text-white outline-none border-b border-white/20 focus:border-blue-500 mb-4 pb-2" placeholder="Lead Name...">
+                
+                <select id="cp-ld-stage" class="bg-white/10 text-white text-xs font-bold px-3 py-1.5 rounded-md border border-white/10 outline-none w-full max-w-[200px]">
+                    </select>
+            </div>
+            <div class="p-6 space-y-6 flex-1">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="col-span-2">
+                        <label class="modal-label">Email</label>
+                        <input type="email" id="cp-ld-email" class="glass-input" placeholder="lead@email.com">
+                    </div>
+                    <div class="col-span-2">
+                        <label class="modal-label">Phone</label>
+                        <input type="text" id="cp-ld-phone" class="glass-input" placeholder="555-555-5555">
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t border-white/10 bg-white/5 flex flex-col gap-3">
+                <button type="submit" id="cp-ld-save-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg shadow-lg">Save Lead</button>
+                <button type="button" id="cp-ld-delete-btn" onclick="deleteCpLead()" class="w-full bg-red-500/10 text-red-400 hover:bg-red-500/20 font-bold py-2 rounded-lg hidden">Delete Lead</button>
+            </div>
+        </form>
+
+        <div id="job-modal">
+            <div class="glass p-8 w-full max-w-sm mx-4">
+                <h3 class="modal-title">Log Closed Job</h3>
+                <div class="space-y-4">
+                    <div>
+                        <label class="modal-label">Date Closed</label>
+                        <input type="date" id="input-job-date" class="glass-input">
+                    </div>
+                    <div>
+                        <label class="modal-label">Job Name/Ref</label>
+                        <input type="text" id="input-job-name" class="glass-input" placeholder="Ex: Kitchen Remodel">
+                    </div>
+                    <div>
+                        <label class="modal-label">Amount ($)</label>
+                        <input type="number" id="input-job-value" class="glass-input" placeholder="0.00">
+                    </div>
+                    <div class="flex gap-2 pt-4">
+                        <button onclick="closeJobModal()" class="flex-1 glass-pill justify-center">Cancel</button>
+                        <button onclick="submitJob()" id="submit-btn" class="flex-1 btn-gold justify-center">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="estimate-modal">
+            <div class="glass p-8 w-full max-w-sm mx-4">
+                <h3 class="modal-title">Log Estimate</h3>
+                <div class="space-y-4">
+                    <div>
+                        <label class="modal-label">Date</label>
+                        <input type="date" id="input-est-date" class="glass-input">
+                    </div>
+                    <div>
+                        <label class="modal-label">Estimate Name</label>
+                        <input type="text" id="input-est-name" class="glass-input" placeholder="Ex: Pool Deck Quote">
+                    </div>
+                    <div>
+                        <label class="modal-label">Amount ($)</label>
+                        <input type="number" id="input-est-value" class="glass-input" placeholder="0.00">
+                    </div>
+                    <div class="flex gap-2 pt-4">
+                        <button onclick="closeEstimateModal()" class="flex-1 glass-pill justify-center">Cancel</button>
+                        <button onclick="submitEstimate()" id="submit-est-btn" class="flex-1 btn-gold !bg-blue-500 !text-white justify-center">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ADD CLIENT MODAL -->
+        <div id="add-client-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
+            <div class="glass p-8 w-full max-w-lg mx-4">
+                <div class="flex justify-between items-start mb-6">
+                    <div>
+                        <h3 class="text-2xl font-bold text-white">Add New Client</h3>
+                        <p class="text-xs text-gray-400 mt-1">Configure client details and baseline operational settings.</p>
+                    </div>
+                    <button onclick="document.getElementById('add-client-modal').style.display='none'" class="text-gray-400 hover:text-white text-xl">✕</button>
+                </div>
+                
+                <form id="add-client-form" onsubmit="saveNewClient(event)" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="col-span-2">
+                            <label class="modal-label">Client Name</label>
+                            <input type="text" id="new-client-name" class="glass-input" placeholder="Acme Corp" required>
+                        </div>
+                        <div>
+                            <label class="modal-label">Contract Type</label>
+                            <select id="new-client-contract" class="glass-input" required>
+                                <option value="fixed_3mo">Fixed - 3 Months</option>
+                                <option value="fixed_6mo">Fixed - 6 Months</option>
+                                <option value="fixed_12mo">Fixed - 12 Months</option>
+                                <option value="custom">Custom (Ongoing)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <div>
+                            <label class="modal-label">Monthly Retainer ($)</label>
+                            <input type="number" id="new-client-retainer" class="glass-input" placeholder="2500" required>
+                        </div>
+                    </div>
+                    <div class="pt-4 border-t border-white/10 mt-4">
+                        <button type="submit" id="btn-save-new-client" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl shadow-lg transition">Create Client Profile</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="invite-modal">
+            <div class="glass p-8 w-full max-w-sm mx-4">
+                <h3 class="modal-title">Invite Team Member</h3>
+                <p class="text-xs text-gray-400 mb-4">Give a colleague access to view these metrics.</p>
+                <div class="space-y-4">
+                    <div>
+                        <label class="modal-label">Email Address</label>
+                        <input type="email" id="input-invite-email" class="glass-input" placeholder="colleague@company.com">
+                    </div>
+                    <div class="flex gap-2 pt-4">
+                        <button onclick="closeInviteModal()" class="flex-1 glass-pill justify-center">Cancel</button>
+                        <button onclick="submitClientInvite()" id="submit-invite-btn" class="flex-1 btn-gold !bg-purple-500 !text-white justify-center border border-purple-400">Send Invite</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="client-request-modal">
+            <div class="glass p-8 w-full max-w-sm mx-4">
+                <h3 class="modal-title">Submit a Request</h3>
+                <p class="text-xs text-gray-400 mb-4">Our team will be notified immediately.</p>
+                <div class="space-y-4">
+                    <div>
+                        <label class="modal-label">Request Type</label>
+                        <select id="input-request-type" class="glass-input">
+                            <option value="Task">New Task / Campaign</option>
+                            <option value="Meeting">Schedule a Meeting</option>
+                            <option value="Support">General Support</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="modal-label">Subject</label>
+                        <input type="text" id="input-request-subject" class="glass-input" placeholder="E.g., Update holiday ad copy">
+                    </div>
+                    <div>
+                        <label class="modal-label">Details</label>
+                        <textarea id="input-request-details" class="glass-input min-h-[80px]" placeholder="Provide any necessary details..."></textarea>
+                    </div>
+                    <div class="flex gap-2 pt-4">
+                        <button onclick="closeClientRequestModal()" class="flex-1 glass-pill justify-center">Cancel</button>
+                        <button onclick="submitClientRequest()" id="submit-request-btn" class="flex-1 btn-gold !bg-blue-600 !text-white !border-blue-500 justify-center shadow-lg">Submit</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="edit-report-modal" onclick="if(event.target.id==='edit-report-modal') document.getElementById('edit-report-modal').style.display='none'">
+            <div id="report-modal-inner" style="max-width: 800px; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 2rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+                <div class="flex justify-between items-start mb-6">
+                    <div><p class="rpt-label text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">Edit</p><h2 class="text-2xl font-bold text-white">Saved Report</h2></div>
+                    <button onclick="document.getElementById('edit-report-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl">✕</button>
+                </div>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="modal-label">Email Summary Text</label>
+                        <textarea id="edit-rpt-email" class="glass-input min-h-[150px]"></textarea>
+                    </div>
+                    <div>
+                        <label class="modal-label">HTML Report Source Code</label>
+                        <textarea id="edit-rpt-html" class="glass-input min-h-[150px] font-mono text-xs"></textarea>
+                    </div>
+                    <button id="btn-save-edit-report" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl mt-4 shadow-lg transition">Save Changes</button>
+                </div>
+            </div>
+        </div>
+        <div id="report-modal" onclick="if(event.target.id==='report-modal') document.getElementById('report-modal').style.display='none'">
+            <div id="report-modal-inner" style="max-width: 900px;">
+                <div class="flex justify-between items-start mb-6">
+                    <div><p class="rpt-label text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">Weekly Report</p><h2 id="rpt-account-title" class="text-2xl font-bold text-white">Account</h2></div>
+                    <button onclick="document.getElementById('report-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl">✕</button>
+                </div>
+                
+                <div class="rpt-kpi-grid">
+                    <div class="rpt-kpi-tile"><div class="text-[10px] font-bold text-gray-500 uppercase mb-1">Spend</div><div class="text-xl font-bold text-white" id="rpt-kpi-spend">—</div></div>
+                    <div class="rpt-kpi-tile"><div class="text-[10px] font-bold text-gray-500 uppercase mb-1">Leads</div><div class="text-xl font-bold text-green-400" id="rpt-kpi-leads">—</div></div>
+                    <div class="rpt-kpi-tile"><div class="text-[10px] font-bold text-gray-500 uppercase mb-1">CPL</div><div class="text-xl font-bold text-blue-400" id="rpt-kpi-cpl">—</div></div>
+                    <div class="rpt-kpi-tile"><div class="text-[10px] font-bold text-gray-500 uppercase mb-1">CPC</div><div class="text-xl font-bold text-white" id="rpt-kpi-cpc">—</div></div>
+                </div>
+                
+                <textarea id="rpt-improving" class="text-white" placeholder="What we did / What we're improving (Optional - AI will infer from data if left blank)..."></textarea>
+                <button onclick="generateReport()" id="rpt-gen-btn" class="w-full bg-yellow-400 text-yellow-900 font-bold py-3 rounded-xl mt-4 hover:bg-yellow-300 transition">Generate Report</button>
+                
+                <div id="rpt-results" style="display:none; margin-top:24px;" class="space-y-6">
+                    <div>
+                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Email Summary</h4>
+                        <div class="rpt-output-box text-gray-300" id="rpt-email-output"></div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Live HTML Preview</h4>
+                        <iframe id="rpt-html-preview" class="w-full bg-white rounded-xl border border-white/20" style="height: 450px;"></iframe>
+                    </div>
+
+                    <div>
+                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">HTML Source Code (Copy & Paste)</h4>
+                        <textarea id="rpt-html-src" class="w-full text-xs font-mono" readonly></textarea>
+                    </div>
+
+                    <button onclick="sendToMake()" id="rpt-draft-btn" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl mt-6 hover:bg-blue-500 transition shadow-lg">
+                        <i class="fa-solid fa-paper-plane mr-2"></i> Send to Gmail Drafts
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
