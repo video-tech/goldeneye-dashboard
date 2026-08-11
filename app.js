@@ -1,6 +1,4 @@
         // ================= GLOBAL STATE =================
-	const adAccountAliases = {}; // <-- THE FIX
-        
         const wrapper = document.getElementById('midas-master');
         const supabaseClient = window.supabase.createClient(wrapper.dataset.supaUrl, wrapper.dataset.supaKey);
         
@@ -66,6 +64,79 @@
 };
         const escapeHTML = (str) => str ? String(str).replace(/'/g, "\\'").replace(/"/g, "&quot;") : "";
 
+        // ================= CLIENT <-> ADS JOIN =================
+        // daily_reports rows are joined to clients by Meta ad account id. Meta controls
+        // account_name and can rename it at will (Keen Enterprises arrives as
+        // "371628055, USD"), so names are only a fallback for rows predating the backfill.
+
+        // Meta account ids appear as "act_123", "123", or "371628055, USD" depending on
+        // origin. Reduce to bare digits so all three forms compare equal.
+        const normalizeAccountId = (val) => {
+            if (val === null || val === undefined) return "";
+            return String(val).replace(/\D/g, '');
+        };
+
+        // Legacy fuzzy name match: the equality-or-substring behaviour that every call
+        // site used to hand-roll. Only reached for rows with no ad_account_id.
+        const legacyNameMatch = (accountName, wantNorm) => {
+            if (!wantNorm) return false;
+            const a = normalize(accountName);
+            if (!a) return false;
+            return a === wantNorm || a.includes(wantNorm) || wantNorm.includes(a);
+        };
+
+        // Resolve a client object from either a client object or a client name string.
+        const resolveClient = (client) => {
+            if (!client) return null;
+            if (typeof client !== 'string') return client;
+            const want = normalize(client);
+            return globalClientsData.find(c => normalize(c.name) === want) || null;
+        };
+
+        // The daily_reports rows belonging to a client. Accepts a client object or name.
+        // TODO(migration step 6): drop the legacyNameMatch fallback once every
+        // daily_reports row carries an ad_account_id.
+        function reportsForClient(client, rows) {
+            const source = rows || globalAdsData;
+            if (!client || !Array.isArray(source)) return [];
+
+            const clientObj = resolveClient(client);
+            const wantId = normalizeAccountId(clientObj?.ad_account_id);
+            const wantName = normalize(clientObj?.name || (typeof client === 'string' ? client : ''));
+            if (!wantId && !wantName) return [];
+
+            return source.filter(r => {
+                const rowId = normalizeAccountId(r.ad_account_id);
+                if (rowId && wantId) return rowId === wantId;
+                return legacyNameMatch(r.account_name, wantName);
+            });
+        }
+
+        // Reverse lookup: which client does this report row belong to? Null if unmatched.
+        function clientForReport(row) {
+            if (!row) return null;
+
+            const rowId = normalizeAccountId(row.ad_account_id);
+            if (rowId) {
+                const byId = globalClientsData.find(c => normalizeAccountId(c.ad_account_id) === rowId);
+                if (byId) return byId;
+            }
+
+            const a = normalize(row.account_name);
+            if (!a) return null;
+            return globalClientsData.find(c => {
+                const n = normalize(c.name);
+                return n && (n === a || n.includes(a) || a.includes(n));
+            }) || null;
+        }
+
+        // ================= CLIENT STATUS =================
+        // 'active' = pulled by Make.com each morning and counted in rollups.
+        // 'paused' = not pulled, not counted, but still selectable with full history.
+        // 'archived' = hidden from the dashboard entirely.
+        const isActiveClient = (c) => (c?.status || 'active') === 'active';
+        const isSelectableClient = (c) => (c?.status || 'active') !== 'archived';
+
         // ================= INIT & AUTH =================
         async function initApp() {
             try {
@@ -89,9 +160,29 @@
                         const { data: accessData } = await supabaseClient.from('user_client_access').select('client_name').eq('user_email', clientEmail);
                         if (accessData) allowedClients = accessData.map(d => d.client_name);
                         
-                        const { data: matchedReports } = await supabaseClient.from('daily_reports').select('account_name').or(`client_email.ilike.%${clientEmail}%,email.ilike.%${clientEmail}%`);
+                        const { data: matchedReports } = await supabaseClient.from('daily_reports').select('account_name, ad_account_id').or(`client_email.ilike.%${clientEmail}%,email.ilike.%${clientEmail}%`);
                         if (matchedReports && matchedReports.length > 0) {
-                            const autoMatched = matchedReports.map(r => r.account_name).filter(Boolean);
+                            // Resolve ad accounts to real client names, so the portal shows
+                            // "Keen Enterprises Inc" rather than whatever Meta labelled the
+                            // account (e.g. "371628055, USD").
+                            const { data: clientRows } = await supabaseClient.from('clients').select('name, ad_account_id');
+                            const nameByAccountId = new Map((clientRows || [])
+                                .filter(c => c.ad_account_id)
+                                .map(c => [normalizeAccountId(c.ad_account_id), c.name]));
+
+                            const autoMatched = matchedReports.map(r => {
+                                const id = normalizeAccountId(r.ad_account_id);
+                                if (id && nameByAccountId.has(id)) return nameByAccountId.get(id);
+
+                                // Fallback for rows predating the ad_account_id backfill
+                                const norm = normalize(r.account_name);
+                                const byName = (clientRows || []).find(c => {
+                                    const n = normalize(c.name);
+                                    return n && (n === norm || n.includes(norm) || norm.includes(n));
+                                });
+                                return byName ? byName.name : r.account_name;
+                            }).filter(Boolean);
+
                             allowedClients = [...new Set([...allowedClients, ...autoMatched])];
                         }
                     }
@@ -261,7 +352,7 @@ window.updateVideoUI = function(videoId, isWatched) {
         function portalSwitchClient(accountName) {
             currentActiveClient = accountName; document.getElementById('client-name-display').innerText = accountName.split(' ')[0];
             const normTarget = normalize(accountName);
-            filteredReportData = allRawReports.filter(r => { const normA = normalize(r.account_name); return normA === normTarget || normA.includes(normTarget) || normTarget.includes(normA); });
+            filteredReportData = reportsForClient(accountName, allRawReports);
             masterJobData = allRawJobs.filter(j => normalize(j.client_name) === normTarget);
             masterEstimateData = allRawEstimates.filter(e => normalize(e.client_name) === normTarget);
             clientLeadsData = globalClientLeadsData.filter(l => normalize(l.client_name) === normTarget).map(l => ({ id: l.id, name: l.lead_name, stage: l.stage || 'New Lead', email: l.lead_email || '', phone: l.lead_phone || '' }));
@@ -310,12 +401,6 @@ updateAgencyPowerTicker();
                 body.appendChild(row);
             });
         }
-globalAdsData.forEach(r => {
-        if (normalize(r.account_name) !== normalize('Midas Media')) totalNetworkLeads += parseInt(r.leads || 0);
-    });
-    globalJobsData.forEach(j => {
-        if (normalize(j.client_name) !== normalize('Midas Media')) totalNetworkRev += parseFloat(j.revenue || 0);
-    });
         function renderPortalTasks() {
             const container = document.getElementById('portal-tasks-container'); container.innerHTML = '';
             const clientTasks = globalTasksData.filter(t => normalize(t.client) === normalize(currentActiveClient) && t.status !== 'Complete');
@@ -631,7 +716,25 @@ window.submitClientRequest = async function() {
 
             if (allowedClients && currentUserRole !== 'admin') {
                 const normAllowed = allowedClients.map(a => normalize(a));
-                fAds = fAds.filter(a => { const normA = normalize(a.account_name); return normAllowed.some(all => normA === all || normA.includes(all) || all.includes(normA)); });
+
+                // globalClientsData is not populated until further down, so resolve the
+                // permitted ad account ids straight off the freshly-fetched client rows.
+                // Where ids exist on both sides this decides purely on id and ignores the
+                // name fallback: as a permissions boundary it must fail closed, so during
+                // the migration a client missing an ad_account_id hides rows rather than
+                // risking exposing another client's.
+                const allowedIds = new Set(
+                    fClients.filter(c => normAllowed.includes(normalize(c.name)))
+                            .map(c => normalizeAccountId(c.ad_account_id))
+                            .filter(Boolean)
+                );
+
+                fAds = fAds.filter(a => {
+                    const rowId = normalizeAccountId(a.ad_account_id);
+                    if (rowId && allowedIds.size) return allowedIds.has(rowId);
+                    const normA = normalize(a.account_name);
+                    return normAllowed.some(all => normA === all || normA.includes(all) || all.includes(normA));
+                });
                 fJobs = fJobs.filter(j => { const normJ = normalize(j.client_name); return normAllowed.some(all => normJ === all || normJ.includes(all) || all.includes(normJ)); });
                 fEst = fEst.filter(e => { const normE = normalize(e.client_name); return normAllowed.some(all => normE === all || normE.includes(all) || all.includes(normE)); });
             }
@@ -717,7 +820,7 @@ window.submitClientRequest = async function() {
 
             const isLight = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isLight ? '#64748b' : 'rgba(255,255,255,0.6)';
 
-            const activeClients = globalClientsData.filter(c => (c.status || 'active') === 'active' && normalize(c.name) !== normalize('Midas Media'));
+            const activeClients = globalClientsData.filter(c => isActiveClient(c) && normalize(c.name) !== normalize('Midas Media'));
             const currentTotalMRR = activeClients.reduce((sum, c) => sum + parseFloat(c.monthly_retainer || 0), 0);
             document.getElementById('dash-mrr-total').innerText = '$' + currentTotalMRR.toLocaleString();
             
@@ -975,14 +1078,23 @@ window.submitClientRequest = async function() {
         async function deleteTask(){ if(!activeEditId||currentUserRole!=='admin') return; if(confirm("Delete task?")){ await supabaseClient.from('tasks').delete().eq('id',activeEditId); closeAllDrawers(); await fetchAllGlobalData(globalAllowedClients); if(!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage(); if(!document.getElementById('page-clients').classList.contains('hidden')) renderClientTasks(); if(!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();} }
 
         function initClientsPage() {
-            const accounts = [...new Set(globalClientsData.map(i => i.name).filter(Boolean))].sort(); 
-            const selAccName = accounts.find(a => normalize(a) === normalize(cSelectedAccount)) || cSelectedAccount; 
+            // Paused clients stay selectable so their history remains reachable; only
+            // archived clients drop out of the picker entirely.
+            const selectable = globalClientsData.filter(c => isSelectableClient(c) && c.name);
+            const accounts = [...new Set(selectable.map(i => i.name))].sort();
+            const pausedNames = new Set(selectable.filter(c => !isActiveClient(c)).map(c => c.name));
+
+            const selAccName = accounts.find(a => normalize(a) === normalize(cSelectedAccount)) || cSelectedAccount;
             if(cSelectedAccount !== "ALL" && selAccName !== "ALL") { cSelectedAccount = selAccName; document.getElementById('c-account-label').innerText = cSelectedAccount; }
-            
-            const m=document.getElementById('c-account-menu'); 
-            let h=`<div class="dropdown-item" onclick="cSelectAccount('ALL', 'All Accounts')"><i class="fa-solid fa-layer-group w-4"></i> All Accounts</div>`; 
-            accounts.forEach(a=>{ h+=`<div class="dropdown-item" onclick="cSelectAccount('${escapeHTML(a)}', '${escapeHTML(a)}')"><i class="fa-solid fa-briefcase w-4"></i> ${a}</div>`; }); 
-            m.innerHTML=h; 
+
+            const m=document.getElementById('c-account-menu');
+            let h=`<div class="dropdown-item" onclick="cSelectAccount('ALL', 'All Accounts')"><i class="fa-solid fa-layer-group w-4"></i> All Accounts</div>`;
+            accounts.forEach(a=>{
+                const badge = pausedNames.has(a) ? ` <span class="text-[9px] uppercase tracking-widest text-amber-400 ml-auto pl-2">Paused</span>` : '';
+                const icon = pausedNames.has(a) ? 'fa-circle-pause text-amber-400' : 'fa-briefcase';
+                h+=`<div class="dropdown-item" onclick="cSelectAccount('${escapeHTML(a)}', '${escapeHTML(a)}')"><i class="fa-solid ${icon} w-4"></i> ${a}${badge}</div>`;
+            });
+            m.innerHTML=h;
             filterAdsData();
         }
 
@@ -1037,7 +1149,8 @@ function switchClientView(view) {
 
         function cycleClient(direction) {
             if (!globalClientsData || globalClientsData.length === 0) return;
-            const accounts = [...new Set(globalClientsData.map(i => i.name).filter(Boolean))].sort();
+            // Mirror the picker: cycle through everything except archived clients.
+            const accounts = [...new Set(globalClientsData.filter(c => isSelectableClient(c) && c.name).map(i => i.name))].sort();
             if (accounts.length === 0) return;
 
             let currentIndex = -1;
@@ -1131,6 +1244,12 @@ function filterAdsData() {
                     document.getElementById('ai-box-container').classList.add('hidden');
                     const allClientsTable = document.getElementById('all-clients-ads-list');
                     if (allClientsTable) allClientsTable.classList.remove('hidden');
+
+                    // Per-client controls make no sense in the aggregate view
+                    ['btn-stage-transition', 'btn-toggle-pause'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.classList.add('hidden');
+                    });
                 } else {
                     document.getElementById('client-specific-tasks-box').classList.remove('hidden');
                     document.getElementById('ai-box-container').classList.remove('hidden');
@@ -1155,6 +1274,20 @@ function filterAdsData() {
                         transitionBtn.classList.add('hidden'); // Ensure Team Members don't see it
                     }
 
+                    // Pause / resume control (admin only) — reflects the client's current state
+                    const pauseBtn = document.getElementById('btn-toggle-pause');
+                    if (pauseBtn && currentUserRole === 'admin') {
+                        const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+                        const paused = clientObj && !isActiveClient(clientObj);
+                        document.getElementById('btn-toggle-pause-label').innerText = paused ? 'Resume Client' : 'Pause Client';
+                        document.getElementById('btn-toggle-pause-icon').className = paused ? 'fa-solid fa-circle-play mr-2' : 'fa-solid fa-circle-pause mr-2';
+                        pauseBtn.className = paused
+                            ? 'bg-green-600 hover:bg-green-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition'
+                            : 'bg-amber-600 hover:bg-amber-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition';
+                    } else if (pauseBtn) {
+                        pauseBtn.classList.add('hidden');
+                    }
+
                     renderClientTasks();
                 }
 
@@ -1162,16 +1295,12 @@ function filterAdsData() {
                 let s=new Date(n); s.setHours(0,0,0,0); let e=new Date(n); e.setHours(23,59,59,999);
                 if(cDateRange==='today'){ /* s and e default to today */ } else if(cDateRange==='yesterday'){s.setDate(s.getDate()-1);e.setDate(e.getDate()-1);} else if(cDateRange==='last7'){s.setDate(n.getDate()-6);} else if(cDateRange==='last30'){s.setDate(n.getDate()-29);} else if(cDateRange==='customRange'){s=new Date(cCustomStart+'T00:00:00');e=new Date(cCustomEnd+'T23:59:59');} else {s=new Date(2000,0,1);}
                 
-                const f = globalAdsData.filter(r => { 
+                const inRange = globalAdsData.filter(r => {
                     if (!r.date) return false;
-                    const rd = new Date(r.date.split('T')[0]+'T12:00:00'); 
-                    if (rd < s || rd > e) return false;
-                    if (cSelectedAccount === "ALL") return true;
-                    const normC = normalize(cSelectedAccount);
-                    const normA = normalize(r.account_name);
-                    const aM = normA === normC || normA.includes(normC) || normC.includes(normA); 
-                    return aM; 
+                    const rd = new Date(r.date.split('T')[0]+'T12:00:00');
+                    return rd >= s && rd <= e;
                 });
+                const f = cSelectedAccount === "ALL" ? inRange : reportsForClient(cSelectedAccount, inRange);
 
                 let sp=0, l=0, imp=0, rch=0, clk=0;
                 f.forEach(r=>{sp+=parseFloat(r.spend||0); l+=parseInt(r.leads||0); imp+=parseInt(r.impressions||0); rch+=parseInt(r.reach||0); clk+=parseInt(r.unique_link_clicks||0);});
@@ -1206,13 +1335,9 @@ function filterAdsData() {
 
                 if (cSelectedAccount === "ALL") {
                     let allHtml = '';
-                    const activeClients = globalClientsData.filter(c => (c.status || 'active') === 'active' && normalize(c.name) !== normalize('Midas Media'));
+                    const activeClients = globalClientsData.filter(c => isActiveClient(c) && normalize(c.name) !== normalize('Midas Media'));
                     activeClients.forEach(c => {
-                        const normC = normalize(c.name);
-                        const cAds = f.filter(r => {
-                            const normA = normalize(r.account_name);
-                            return normA === normC || normA.includes(normC) || normC.includes(normA);
-                        });
+                        const cAds = reportsForClient(c, f);
                         let cSpend = 0, cLeads = 0;
                         cAds.forEach(r => { cSpend += parseFloat(r.spend || 0); cLeads += parseInt(r.leads || 0); });
                         const cCpl = cLeads > 0 ? (cSpend / cLeads) : 0;
@@ -1272,7 +1397,7 @@ async function fetchHealthData() {
                 document.getElementById('health-dashboard-content').classList.add('hidden'); 
                 if(healthPill) healthPill.classList.add('hidden');
                 
-                const activeClients = globalClientsData.filter(c => (c.status || 'active') === 'active' && normalize(c.name) !== normalize('Midas Media'));
+                const activeClients = globalClientsData.filter(c => isActiveClient(c) && normalize(c.name) !== normalize('Midas Media'));
                 let tScore = 0; let sClients = 0; let atRisk = 0;
                 let tAppts = 0; let tDeals = 0;
 
@@ -1411,10 +1536,7 @@ async function fetchHealthData() {
         function openHealthDrawer() {
             document.getElementById('h-client-name').innerText = cSelectedAccount; 
             
-            const clientReports = globalAdsData.filter(r => {
-                const normC = normalize(cSelectedAccount); const normA = normalize(r.account_name);
-                return normA === normC || normA.includes(normC) || normC.includes(normA);
-            });
+            const clientReports = reportsForClient(cSelectedAccount);
             const clientEmails = [...new Set(clientReports.map(r => r.client_email || r.email).filter(Boolean).map(e => e.toLowerCase().trim()))];
             
             let autoAppts = 0; let autoDeals = 0;
@@ -1652,12 +1774,8 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
             const htmlCode = document.getElementById('rpt-html-src').value;
             const clientName = cSelectedAccount === "ALL" ? "General" : cSelectedAccount;
 
-            const normC = normalize(clientName);
-            const clientReports = globalAdsData.filter(r => {
-                const normA = normalize(r.account_name);
-                return normA === normC || normA.includes(normC) || normC.includes(normA);
-            });
-            
+            const clientReports = reportsForClient(clientName);
+
             let targetEmail = "";
             const recordWithEmail = clientReports.find(r => r.client_email || r.email);
             if (recordWithEmail) {
@@ -1880,19 +1998,7 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
                 // SINGLE CLIENT MODE
                 const normC = normalize(cSelectedAccount);
                 
-                const clientAds = globalAdsData
-                    .filter(r => {
-                        const rawA = (r.account_name || "").toLowerCase().trim();
-                        const normA = normalize(r.account_name);
-                        let mappedClientName = "";
-                        for (const [adAccount, parentClient] of Object.entries(adAccountAliases)) {
-                            if (rawA.includes(adAccount)) {
-                                mappedClientName = normalize(parentClient);
-                                break;
-                            }
-                        }
-                        return (normA === normC || normA.includes(normC) || normC.includes(normA)) || (mappedClientName === normC);
-                    })
+                const clientAds = reportsForClient(cSelectedAccount)
                     .slice(-90)
                     .map(r => ({ date: r.date ? r.date.split('T')[0] : 'Unknown', spend: r.spend, leads: r.leads }));
                     
@@ -2189,7 +2295,7 @@ window.renderClientPayments = function() {
                 let listHtml = '';
                 
                 // Exclude "Midas Media" internal HQ from billing
-                const activeClients = globalClientsData.filter(c => normalize(c.name) !== normalize('Midas Media') && c.status !== 'archived');
+                const activeClients = globalClientsData.filter(c => normalize(c.name) !== normalize('Midas Media') && isActiveClient(c));
                 
                 // Sort clients: Overdue first, then Paid, then Unpaid, then by MRR size
                 const sortedClients = [...activeClients].sort((a, b) => {
@@ -2497,20 +2603,8 @@ window.openEditReportModal = function(id) {
                 const clientName = report.client_name || cSelectedAccount;
 
                 // Fetch the client's email address using our normal routing logic
-                const normC = normalize(clientName);
-                const clientReports = globalAdsData.filter(r => {
-                    const rawA = String(r.account_name || "").toLowerCase().trim();
-                    const normA = normalize(r.account_name);
-                    let mappedClientName = "";
-                    for (const [adAccount, parentClient] of Object.entries(adAccountAliases)) {
-                        if (rawA.includes(adAccount)) {
-                            mappedClientName = normalize(parentClient);
-                            break;
-                        }
-                    }
-                    return (normA === normC || normA.includes(normC) || normC.includes(normA)) || (mappedClientName === normC);
-                });
-                
+                const clientReports = reportsForClient(clientName);
+
                 let targetEmail = "";
                 const recordWithEmail = clientReports.find(r => r.client_email || r.email);
                 if (recordWithEmail) targetEmail = recordWithEmail.client_email || recordWithEmail.email;
@@ -2561,7 +2655,8 @@ function updateAgencyPowerTicker() {
     let totalNetworkLeads = 0;
     let totalNetworkRev = 0;
 
-    // Aggregate globally, ignoring the selected client filter
+    // Aggregate globally, ignoring the selected client filter. Deliberately unfiltered:
+    // this is a whole-network total, so no client join belongs here.
     globalAdsData.forEach(r => totalNetworkLeads += parseInt(r.leads || 0));
     globalJobsData.forEach(j => totalNetworkRev += parseFloat(j.revenue || 0));
 
@@ -2579,12 +2674,15 @@ function renderAnonymizedLeaderboard() {
     const listEl = document.getElementById('anonymized-leaderboard-list');
     if (!listEl) return;
 
-    // 1. Group leads by client globally
+    // 1. Group leads by resolved client, hiding Midas Media from the leaderboard.
+    // Group on the client's own name rather than account_name so every ad account
+    // rolls up under one entry regardless of what Meta calls it.
     const clientStats = {};
     globalAdsData.forEach(r => {
-        const cName = r.account_name;
-        if(!cName) return;
-        if(!clientStats[cName]) clientStats[cName] = { leads: 0 };
+        const cName = clientForReport(r)?.name || r.account_name;
+        if (!cName) return;
+        if (normalize(cName) === normalize('Midas Media')) return;
+        if (!clientStats[cName]) clientStats[cName] = { leads: 0 };
         clientStats[cName].leads += parseInt(r.leads || 0);
     });
 
@@ -2595,16 +2693,6 @@ function renderAnonymizedLeaderboard() {
     // 3. Fallback Anonymization Arrays (Generates "Roofing Client (Texas)")
     const industries = ["Roofing Client", "Dental Clinic", "HVAC Company", "Plumbing Partner", "Remodeling Contractor", "Law Firm", "Med Spa"];
     const regions = ["Texas", "Florida", "Ohio", "New York", "California", "Illinois", "Arizona"];
-
-    globalAdsData.forEach(r => {
-        const cName = r.account_name;
-        if(!cName) return;
-        // Add this line to hide Midas from the leaderboard
-        if(normalize(cName) === normalize('Midas Media')) return; 
-        
-        if(!clientStats[cName]) clientStats[cName] = { leads: 0 };
-        clientStats[cName].leads += parseInt(r.leads || 0);
-    });
 
     let html = '';
     
@@ -2718,16 +2806,11 @@ window.logQuickPayment = async function() {
             md += `Client | 7D Spend | 7D Leads | 7D CPL | 30D CPL (Baseline) | Trend | Health Score\n`;
             md += `---|---|---|---|---|---|---\n`;
 
-            const activeClients = globalClientsData.filter(c => (c.status || 'active') === 'active' && normalize(c.name) !== normalize('Midas Media'));
+            const activeClients = globalClientsData.filter(c => isActiveClient(c) && normalize(c.name) !== normalize('Midas Media'));
 
             activeClients.forEach(client => {
-                const normName = normalize(client.name);
-                
                 // 1. Isolate Ads Data for this client
-                const clientAds = globalAdsData.filter(r => {
-                    const normA = normalize(r.account_name);
-                    return normA === normName || normA.includes(normName) || normName.includes(normA);
-                });
+                const clientAds = reportsForClient(client);
 
                 // 2. Tally up 7-Day and 30-Day Windows
                 let spend7d = 0, leads7d = 0;
@@ -3067,6 +3150,48 @@ window.openStageTransitionModal = function() {
     document.getElementById('stage-transition-modal').style.display = 'flex';
 };
 
+// Pause / resume a client. Paused clients are skipped by the Make.com morning pull
+// (it filters on status = 'active') and drop out of MRR, health and AI rollups, but
+// stay selectable so their history remains viewable.
+window.toggleClientPause = async function() {
+    if (currentUserRole !== 'admin') return;
+
+    const btn = document.getElementById('btn-toggle-pause');
+    const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+    if (!clientObj) { alert("Could not find that client record."); return; }
+
+    const paused = !isActiveClient(clientObj);
+    const nextStatus = paused ? 'active' : 'paused';
+
+    const msg = paused
+        ? `Resume ${clientObj.name}? Their ad data will start pulling again tomorrow morning and they will count toward MRR and health scores.`
+        : `Pause ${clientObj.name}? The morning data pull will skip them and they will drop out of MRR and health totals. Existing history stays viewable.`;
+    if (!confirm(msg)) return;
+
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
+    btn.disabled = true;
+
+    try {
+        const { error } = await supabaseClient
+            .from('clients')
+            .update({ status: nextStatus })
+            .eq('id', clientObj.id);
+
+        if (error) throw error;
+
+        clientObj.status = nextStatus;
+        initClientsPage();   // refresh picker badges
+        filterAdsData();     // refresh rollups and the button's own label
+        if (!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
+    } catch (err) {
+        alert("Error updating client status: " + err.message);
+        btn.innerHTML = originalHTML;
+    } finally {
+        btn.disabled = false;
+    }
+};
+
 window.executeStageTransition = async function() {
     const btn = document.getElementById('btn-confirm-transition');
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Executing...';
@@ -3211,8 +3336,22 @@ window.saveNewClient = async function(e) {
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Creating...';
     btn.disabled = true;
 
+    // Store the bare digits: Ads Manager shows ids as "act_123" or "123" and the
+    // morning pull matches on the numeric form.
+    const adAccountId = normalizeAccountId(document.getElementById('new-client-ad-account').value);
+    const businessId = document.getElementById('new-client-business-id').value.trim();
+
+    if (!adAccountId) {
+        alert("Meta Ad Account ID must contain digits (e.g. 371628055). Without it no ad data will be pulled for this client.");
+        btn.innerHTML = 'Create Client Profile';
+        btn.disabled = false;
+        return;
+    }
+
     const payload = {
         name: document.getElementById('new-client-name').value.trim(),
+        ad_account_id: adAccountId,
+        business_id: businessId || null,
         contract_type: document.getElementById('new-client-contract').value,
         monthly_retainer: document.getElementById('new-client-retainer').value,
         contract_start_date: new Date().toISOString().split('T')[0],

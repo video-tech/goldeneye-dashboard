@@ -362,6 +362,9 @@
                             <button id="btn-stage-transition" onclick="openStageTransitionModal()" class="hidden bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
                                 <i class="fa-solid fa-arrow-right-arrow-left mr-2"></i> Move Stage
                             </button>
+                            <button id="btn-toggle-pause" onclick="toggleClientPause()" class="hidden bg-amber-600 hover:bg-amber-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
+                                <i id="btn-toggle-pause-icon" class="fa-solid fa-circle-pause mr-2"></i><span id="btn-toggle-pause-label">Pause Client</span>
+                            </button>
                         </div>
                     </header>
 
@@ -1487,6 +1490,15 @@
                             <input type="text" id="new-client-name" class="glass-input" placeholder="Acme Corp" required>
                         </div>
                         <div>
+                            <label class="modal-label">Meta Ad Account ID</label>
+                            <input type="text" id="new-client-ad-account" class="glass-input" placeholder="371628055" required>
+                            <p class="text-[10px] text-gray-500 mt-1">From Ads Manager. Required &mdash; the morning data pull uses this.</p>
+                        </div>
+                        <div>
+                            <label class="modal-label">Business ID <span class="text-gray-500 font-normal">(optional)</span></label>
+                            <input type="text" id="new-client-business-id" class="glass-input" placeholder="1234567890">
+                        </div>
+                        <div>
                             <label class="modal-label">Contract Type</label>
                             <select id="new-client-contract" class="glass-input" required>
                                 <option value="fixed_3mo">Fixed - 3 Months</option>
@@ -1496,7 +1508,6 @@
                             </select>
                         </div>
                         <div>
-                            <div>
                             <label class="modal-label">Monthly Retainer ($)</label>
                             <input type="number" id="new-client-retainer" class="glass-input" placeholder="2500" required>
                         </div>
