@@ -160,7 +160,10 @@
                         const { data: accessData } = await supabaseClient.from('user_client_access').select('client_name').eq('user_email', clientEmail);
                         if (accessData) allowedClients = accessData.map(d => d.client_name);
                         
-                        const { data: matchedReports } = await supabaseClient.from('daily_reports').select('account_name, ad_account_id').or(`client_email.ilike.%${clientEmail}%,email.ilike.%${clientEmail}%`);
+                        // daily_reports has client_email only — there is no `email` column.
+                        // Referencing one made PostgREST reject the whole query, silently
+                        // disabling zero-touch portal onboarding.
+                        const { data: matchedReports } = await supabaseClient.from('daily_reports').select('account_name, ad_account_id').ilike('client_email', `%${clientEmail}%`);
                         if (matchedReports && matchedReports.length > 0) {
                             // Resolve ad accounts to real client names, so the portal shows
                             // "Keen Enterprises Inc" rather than whatever Meta labelled the
