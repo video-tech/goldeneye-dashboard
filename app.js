@@ -3353,6 +3353,7 @@ window.saveNewClient = async function(e) {
 
     const payload = {
         name: document.getElementById('new-client-name').value.trim(),
+        client_email: document.getElementById('new-client-email').value.trim(),
         ad_account_id: adAccountId,
         business_id: businessId || null,
         contract_type: document.getElementById('new-client-contract').value,
