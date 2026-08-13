@@ -15,8 +15,9 @@
         let globalAdsData = [];
         let globalJobsData = [];
         let globalEstimatesData = [];
-        let globalCreativesData = []; 
-        let globalSeoData = []; 
+        let globalCreativesData = [];
+        let globalSeoData = [];
+        let globalCheckinsData = [];
         let allRawSeo = [];
         
         // Dashboard States
@@ -76,6 +77,14 @@
             return String(val).replace(/\D/g, '');
         };
 
+        // Phone numbers arrive in many shapes ("+1 (555) 010-9999", "555-010-9999",
+        // "15550109999"). Compare on the last 10 digits so country code and formatting
+        // never cause a miss.
+        const normalizePhone = (val) => {
+            const digits = String(val ?? '').replace(/\D/g, '');
+            return digits.length > 10 ? digits.slice(-10) : digits;
+        };
+
         // Legacy fuzzy name match: the equality-or-substring behaviour that every call
         // site used to hand-roll. Only reached for rows with no ad_account_id.
         const legacyNameMatch = (accountName, wantNorm) => {
@@ -128,6 +137,17 @@
                 const n = normalize(c.name);
                 return n && (n === a || n.includes(a) || a.includes(n));
             }) || null;
+        }
+
+        // Weekly SMS check-ins for a client, newest week first. Matches on client name
+        // because that's what the intake webhook resolves and writes.
+        function checkinsForClient(client) {
+            const name = typeof client === 'string' ? client : client?.name;
+            if (!name) return [];
+            const want = normalize(name);
+            return globalCheckinsData
+                .filter(c => normalize(c.client_name) === want)
+                .sort((a, b) => String(b.week_start || '').localeCompare(String(a.week_start || '')));
         }
 
         // ================= CLIENT STATUS =================
@@ -687,12 +707,16 @@ window.submitClientRequest = async function() {
     // 👇 1. ADD THIS NEW LINE FOR THE AUDITS QUERY 👇
     let auditsQ = supabaseClient.from('morning_audits').select('*').order('created_at', { ascending: false });
 
+    // Weekly client-reported estimates/closes/revenue, arriving by SMS
+    let checkinsQ = supabaseClient.from('weekly_checkins').select('*').order('week_start', { ascending: false });
+
     if (allowedClients && currentUserRole !== 'admin') {
         clientsQ = clientsQ.in('name', allowedClients); healthQ = healthQ.in('client_name', allowedClients); tasksQ = tasksQ.in('client', allowedClients); crQ = crQ.in('client_name', allowedClients); seoQ = seoQ.in('client_name', allowedClients);
+        checkinsQ = checkinsQ.in('client_name', allowedClients);
     }
 
     // 👇 2. ADD auditsQ TO THE END OF THIS ARRAY 👇
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, jobsQ, estQ, crQ, seoQ, auditsQ ]);
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, jobsQ, estQ, crQ, seoQ, auditsQ, checkinsQ ]);
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
     
@@ -718,6 +742,7 @@ window.submitClientRequest = async function() {
     
     // 👇 3. ADD THIS LINE TO SAVE THE AUDITS TO YOUR GLOBAL VARIABLE 👇
     globalAuditsData = results[8].status === 'fulfilled' ? (results[8].value.data || []) : [];
+    globalCheckinsData = results[9].status === 'fulfilled' ? (results[9].value.data || []) : [];
 
     // ... the rest of the function continues as normal ...
 
@@ -1278,7 +1303,7 @@ function filterAdsData() {
                     if (allClientsTable) allClientsTable.classList.remove('hidden');
 
                     // Per-client controls make no sense in the aggregate view
-                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive'].forEach(id => {
+                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive', 'c-checkins-box'].forEach(id => {
                         const el = document.getElementById(id);
                         if (el) el.classList.add('hidden');
                     });
@@ -1336,6 +1361,7 @@ function filterAdsData() {
                     }
 
                     renderClientTasks();
+                    renderClientCheckins();
                 }
 
                 const n=new Date();
@@ -1580,20 +1606,70 @@ async function fetchHealthData() {
             }
         }
 
+        // Recent weekly SMS check-ins for the selected client. Deliberately kept separate
+        // from the revenue/ROI charts, which sum client_jobs — a client who both texts a
+        // total and logs individual jobs would otherwise be counted twice.
+        function renderClientCheckins() {
+            const box = document.getElementById('c-checkins-box');
+            const list = document.getElementById('c-checkins-list');
+            if (!box || !list) return;
+
+            if (cSelectedAccount === "ALL") { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+
+            const rows = checkinsForClient(cSelectedAccount).slice(0, 8);
+            if (rows.length === 0) {
+                list.innerHTML = `<p class="text-xs text-gray-500 italic">No check-ins yet. They arrive automatically when this client replies to the weekly text.</p>`;
+                return;
+            }
+
+            const money = v => (v === null || v === undefined || v === '') ? '&mdash;' : '$' + Number(v).toLocaleString();
+            const num   = v => (v === null || v === undefined || v === '') ? '&mdash;' : v;
+
+            let html = `<table class="w-full text-left text-sm">
+                <thead class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                    <tr><th class="py-2">Week of</th><th>Estimates</th><th>Closed</th><th>Revenue</th><th></th></tr>
+                </thead><tbody class="divide-y divide-white/5">`;
+
+            rows.forEach(r => {
+                const unsure = r.parse_confidence === 'low';
+                html += `<tr class="${unsure ? 'bg-amber-500/5' : ''}">
+                    <td class="py-2 font-bold">${r.week_start || '&mdash;'}</td>
+                    <td>${num(r.estimates_count)}</td>
+                    <td class="text-green-400 font-bold">${num(r.closes_count)}</td>
+                    <td class="text-blue-400">${money(r.revenue_total)}</td>
+                    <td class="text-right">${unsure
+                        ? `<span class="text-[9px] uppercase tracking-widest text-amber-400" title="Couldn't read this reply confidently — check the original text">Needs review</span>`
+                        : ''}</td>
+                </tr>`;
+                if (unsure && r.raw_reply) {
+                    html += `<tr class="bg-amber-500/5"><td colspan="5" class="pb-2 text-[11px] text-gray-400 italic">&ldquo;${escapeHTML(r.raw_reply)}&rdquo;</td></tr>`;
+                }
+            });
+
+            list.innerHTML = html + `</tbody></table>`;
+        }
+
         function openHealthDrawer() {
             document.getElementById('h-client-name').innerText = cSelectedAccount; 
             
-            const clientReports = reportsForClient(cSelectedAccount);
-            const clientEmails = [...new Set(clientReports.map(r => r.client_email || r.email).filter(Boolean).map(e => e.toLowerCase().trim()))];
-            
-            let autoAppts = 0; let autoDeals = 0;
-            if (clientEmails.length > 0) {
-                autoAppts = globalEstimatesData.filter(e => clientEmails.includes((e.client_email || '').toLowerCase().trim())).length;
-                autoDeals = globalJobsData.filter(j => clientEmails.includes((j.client_email || '').toLowerCase().trim())).length;
-            }
+            // Prefill from the client's most recent weekly SMS check-in. This replaces an
+            // earlier attempt that joined client_jobs/client_estimates on client_email —
+            // a column submitJob/submitEstimate never write, so it always yielded zero.
+            const latestCheckin = checkinsForClient(cSelectedAccount)[0];
+            const autoAppts = latestCheckin?.estimates_count ?? 0;
+            const autoDeals = latestCheckin?.closes_count ?? 0;
 
+            // Math.max so a staff correction is never clobbered by a lower reported figure
             const finalAppts = Math.max(dbClientHealth.appts_vol || 0, autoAppts);
             const finalDeals = Math.max(dbClientHealth.deals_closed || 0, autoDeals);
+
+            const checkinHint = document.getElementById('h-checkin-hint');
+            if (checkinHint) {
+                checkinHint.innerHTML = latestCheckin
+                    ? `<i class="fa-solid fa-comment-sms mr-1 text-blue-400"></i> Prefilled from ${latestCheckin.client_name}'s check-in for week of ${latestCheckin.week_start}${latestCheckin.revenue_total ? ` &middot; $${Number(latestCheckin.revenue_total).toLocaleString()} reported` : ''}`
+                    : `<i class="fa-solid fa-comment-slash mr-1 text-gray-600"></i> No weekly check-in received yet for this client.`;
+            }
 
             document.getElementById('h-date').value = dbClientHealth.last_comm_date || new Date().toISOString().split('T')[0]; 
             document.getElementById('h-ghl').value = dbClientHealth.ghl_usage || 3; 
@@ -3025,22 +3101,58 @@ window.saveHealthData = async function() {
 
             try {
                 // Calculate custom weighted system score if no manual override is active
-                let finalScore = payload.manual_override;
-                if (!finalScore) {
-                    const w = dbHealthSettings; 
-                    const commScore = Math.max(0, 100 - (Math.floor((new Date() - new Date(payload.last_comm_date)) / (1000*60*60*24)) * 5));
-                    finalScore = Math.round(
-                        ((payload.ghl_usage * 20) * (w.weight_ghl / 100)) +
-                        (commScore * (w.weight_comm / 100)) +
-                        (Math.min(100, payload.leads_vol * 2) * (w.weight_leads / 100)) +
-                        (Math.min(100, payload.appts_vol * 10) * (w.weight_apppts / 100))
-                    );
+                const hasOverride = payload.manual_override !== null && !isNaN(payload.manual_override);
+                let finalScore = hasOverride ? payload.manual_override : null;
+
+                if (!hasOverride) {
+                    const w = dbHealthSettings || {};
+
+                    // Each term is scaled to 0-100, then weighted. weight_milestone is
+                    // deliberately absent: the milestone checkboxes are rendered but never
+                    // persisted, so there is no data to score. Normalizing by the weights
+                    // actually applied keeps the ceiling at 100 — without it, excluding
+                    // milestone's 30% would cap every client at 70.
+                    const terms = [];
+                    const addTerm = (weight, value) => {
+                        const wNum = Number(weight);
+                        if (!wNum || !isFinite(value)) return;
+                        terms.push({ w: wNum, v: Math.min(100, Math.max(0, value)) });
+                    };
+
+                    let commScore = 0;
+                    if (payload.last_comm_date) {
+                        const days = Math.floor((new Date() - new Date(payload.last_comm_date)) / 86400000);
+                        if (isFinite(days)) commScore = Math.max(0, 100 - (days * 5));
+                    }
+
+                    addTerm(w.weight_ghl,   (payload.ghl_usage || 0) * 20);
+                    addTerm(w.weight_comm,  commScore);
+                    addTerm(w.weight_leads, payload.leads_vol * 2);
+                    addTerm(w.weight_appts, payload.appts_vol * 10);
+                    addTerm(w.weight_deals, payload.deals_closed * 20);
+
+                    const totalWeight = terms.reduce((sum, t) => sum + t.w, 0);
+                    finalScore = totalWeight > 0
+                        ? Math.round(terms.reduce((sum, t) => sum + (t.v * t.w), 0) / totalWeight)
+                        : null;
                 }
-                payload.current_score = Math.min(100, Math.max(0, finalScore || 70));
+
+                // ?? rather than || so a legitimately calculated 0 isn't rewritten to 70
+                payload.current_score = Math.min(100, Math.max(0, finalScore ?? 70));
 
                 // Upsert structural logic directly into Supabase
-                await supabaseClient.from('client_health').upsert([payload], { onConflict: 'client_name' });
-                
+                const { error: healthErr } = await supabaseClient.from('client_health').upsert([payload], { onConflict: 'client_name' });
+                if (healthErr) throw healthErr;
+
+                // Record the score so the trend chart has real history to plot.
+                // Non-fatal: a logging failure must not look like a failed save.
+                const { error: logErr } = await supabaseClient.from('health_logs').insert([{
+                    client_name: payload.client_name,
+                    score: payload.current_score,
+                    logged_at: new Date().toISOString()
+                }]);
+                if (logErr) console.error("Health score saved, but logging the trend point failed:", logErr);
+
                 // Refresh local caching matrices instantly
                 closeAllDrawers();
                 await fetchAllGlobalData(globalAllowedClients);
@@ -3451,9 +3563,14 @@ window.saveNewClient = async function(e) {
         return;
     }
 
+    // Store bare digits so the weekly check-in webhook can match on the number
+    // regardless of how GHL formats it.
+    const clientPhone = normalizePhone(document.getElementById('new-client-phone').value);
+
     const payload = {
         name: document.getElementById('new-client-name').value.trim(),
         client_email: document.getElementById('new-client-email').value.trim(),
+        client_phone: clientPhone || null,
         ad_account_id: adAccountId,
         business_id: businessId || null,
         contract_type: document.getElementById('new-client-contract').value,
