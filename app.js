@@ -2682,7 +2682,11 @@ function renderAnonymizedLeaderboard() {
     // rolls up under one entry regardless of what Meta calls it.
     const clientStats = {};
     globalAdsData.forEach(r => {
-        const cName = clientForReport(r)?.name || r.account_name;
+        const client = clientForReport(r);
+        // Offboarded clients don't belong on a board current clients can see
+        if (client && !isSelectableClient(client)) return;
+
+        const cName = client?.name || r.account_name;
         if (!cName) return;
         if (normalize(cName) === normalize('Midas Media')) return;
         if (!clientStats[cName]) clientStats[cName] = { leads: 0 };
