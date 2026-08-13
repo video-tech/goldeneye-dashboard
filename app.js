@@ -137,6 +137,10 @@
         const isActiveClient = (c) => (c?.status || 'active') === 'active';
         const isSelectableClient = (c) => (c?.status || 'active') !== 'archived';
 
+        // When true the client picker also lists archived clients, so their history
+        // stays reachable after offboarding.
+        let showArchivedClients = false;
+
         // ================= INIT & AUTH =================
         async function initApp() {
             try {
@@ -1081,11 +1085,13 @@ window.submitClientRequest = async function() {
         async function deleteTask(){ if(!activeEditId||currentUserRole!=='admin') return; if(confirm("Delete task?")){ await supabaseClient.from('tasks').delete().eq('id',activeEditId); closeAllDrawers(); await fetchAllGlobalData(globalAllowedClients); if(!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage(); if(!document.getElementById('page-clients').classList.contains('hidden')) renderClientTasks(); if(!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();} }
 
         function initClientsPage() {
-            // Paused clients stay selectable so their history remains reachable; only
-            // archived clients drop out of the picker entirely.
-            const selectable = globalClientsData.filter(c => isSelectableClient(c) && c.name);
-            const accounts = [...new Set(selectable.map(i => i.name))].sort();
-            const pausedNames = new Set(selectable.filter(c => !isActiveClient(c)).map(c => c.name));
+            // Paused clients are always listed so their history stays reachable.
+            // Archived clients are hidden unless the "show archived" toggle is on.
+            const visible = globalClientsData.filter(c => c.name && (showArchivedClients || isSelectableClient(c)));
+            const accounts = [...new Set(visible.map(i => i.name))].sort();
+
+            const statusByName = {};
+            visible.forEach(c => { statusByName[c.name] = c.status || 'active'; });
 
             const selAccName = accounts.find(a => normalize(a) === normalize(cSelectedAccount)) || cSelectedAccount;
             if(cSelectedAccount !== "ALL" && selAccName !== "ALL") { cSelectedAccount = selAccName; document.getElementById('c-account-label').innerText = cSelectedAccount; }
@@ -1093,13 +1099,36 @@ window.submitClientRequest = async function() {
             const m=document.getElementById('c-account-menu');
             let h=`<div class="dropdown-item" onclick="cSelectAccount('ALL', 'All Accounts')"><i class="fa-solid fa-layer-group w-4"></i> All Accounts</div>`;
             accounts.forEach(a=>{
-                const badge = pausedNames.has(a) ? ` <span class="text-[9px] uppercase tracking-widest text-amber-400 ml-auto pl-2">Paused</span>` : '';
-                const icon = pausedNames.has(a) ? 'fa-circle-pause text-amber-400' : 'fa-briefcase';
+                const st = statusByName[a];
+                let icon = 'fa-briefcase', badge = '';
+                if (st === 'paused') {
+                    icon = 'fa-circle-pause text-amber-400';
+                    badge = ` <span class="text-[9px] uppercase tracking-widest text-amber-400 ml-auto pl-2">Paused</span>`;
+                } else if (st === 'archived') {
+                    icon = 'fa-box-archive text-gray-500';
+                    badge = ` <span class="text-[9px] uppercase tracking-widest text-gray-500 ml-auto pl-2">Archived</span>`;
+                }
                 h+=`<div class="dropdown-item" onclick="cSelectAccount('${escapeHTML(a)}', '${escapeHTML(a)}')"><i class="fa-solid ${icon} w-4"></i> ${a}${badge}</div>`;
             });
+
+            const archivedCount = globalClientsData.filter(c => !isSelectableClient(c)).length;
+            if (archivedCount > 0) {
+                h += `<div class="dropdown-item border-t border-white/10 text-gray-400" onclick="event.stopPropagation(); toggleArchivedVisibility();">
+                        <i class="fa-solid fa-box-archive w-4"></i> ${showArchivedClients ? 'Hide' : 'Show'} archived (${archivedCount})
+                      </div>`;
+            }
+
             m.innerHTML=h;
             filterAdsData();
         }
+
+        // Reveal/hide archived clients in the picker without closing the menu.
+        window.toggleArchivedVisibility = function() {
+            showArchivedClients = !showArchivedClients;
+            initClientsPage();
+            const menu = document.getElementById('c-account-menu');
+            if (menu) menu.classList.add('show');
+        };
 
 function switchClientView(view) {
             const views = ['ads', 'health', 'seo', 'chat', 'reports', 'payments'];
@@ -1152,8 +1181,8 @@ function switchClientView(view) {
 
         function cycleClient(direction) {
             if (!globalClientsData || globalClientsData.length === 0) return;
-            // Mirror the picker: cycle through everything except archived clients.
-            const accounts = [...new Set(globalClientsData.filter(c => isSelectableClient(c) && c.name).map(i => i.name))].sort();
+            // Mirror the picker, including archived clients only when they're shown.
+            const accounts = [...new Set(globalClientsData.filter(c => c.name && (showArchivedClients || isSelectableClient(c))).map(i => i.name))].sort();
             if (accounts.length === 0) return;
 
             let currentIndex = -1;
@@ -1249,7 +1278,7 @@ function filterAdsData() {
                     if (allClientsTable) allClientsTable.classList.remove('hidden');
 
                     // Per-client controls make no sense in the aggregate view
-                    ['btn-stage-transition', 'btn-toggle-pause'].forEach(id => {
+                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive'].forEach(id => {
                         const el = document.getElementById(id);
                         if (el) el.classList.add('hidden');
                     });
@@ -1289,6 +1318,21 @@ function filterAdsData() {
                             : 'bg-amber-600 hover:bg-amber-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition';
                     } else if (pauseBtn) {
                         pauseBtn.classList.add('hidden');
+                    }
+
+                    // Archive / restore control (admin only)
+                    const archiveBtn = document.getElementById('btn-toggle-archive');
+                    if (archiveBtn && currentUserRole === 'admin') {
+                        const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+                        const archived = clientObj && !isSelectableClient(clientObj);
+                        document.getElementById('btn-toggle-archive-label').innerText = archived ? 'Restore' : 'Archive';
+                        document.getElementById('btn-toggle-archive-icon').className = archived ? 'fa-solid fa-rotate-left mr-2' : 'fa-solid fa-box-archive mr-2';
+                        archiveBtn.title = archived ? 'Restore this client to paused' : 'Offboard this client';
+                        archiveBtn.className = 'bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold py-1.5 px-4 rounded-full text-xs transition';
+                        // Pausing an already-archived client is meaningless
+                        if (archived && pauseBtn) pauseBtn.classList.add('hidden');
+                    } else if (archiveBtn) {
+                        archiveBtn.classList.add('hidden');
                     }
 
                     renderClientTasks();
@@ -3190,6 +3234,58 @@ window.toggleClientPause = async function() {
         clientObj.status = nextStatus;
         initClientsPage();   // refresh picker badges
         filterAdsData();     // refresh rollups and the button's own label
+        if (!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
+    } catch (err) {
+        alert("Error updating client status: " + err.message);
+        btn.innerHTML = originalHTML;
+    } finally {
+        btn.disabled = false;
+    }
+};
+
+// Archive (offboard) or restore a client. Archived clients are hidden from the
+// picker unless "show archived" is on, excluded from every rollup and from the
+// anonymized leaderboard, and skipped by the Make.com morning pull. Their history
+// is never deleted — restoring brings it straight back.
+window.toggleClientArchive = async function() {
+    if (currentUserRole !== 'admin') return;
+
+    const btn = document.getElementById('btn-toggle-archive');
+    const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+    if (!clientObj) { alert("Could not find that client record."); return; }
+
+    const archived = !isSelectableClient(clientObj);
+    // Restore lands on 'paused' rather than 'active' so a returning client doesn't
+    // silently start pulling ad spend again before you've checked their setup.
+    const nextStatus = archived ? 'paused' : 'archived';
+
+    const msg = archived
+        ? `Restore ${clientObj.name}? They'll come back as Paused, so you can review their setup before resuming the data pull.`
+        : `Archive ${clientObj.name}? They'll be hidden from the client list, removed from all totals and the client leaderboard, and skipped by the morning pull.\n\nNothing is deleted — you can restore them anytime via "Show archived" in the client dropdown.`;
+    if (!confirm(msg)) return;
+
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
+    btn.disabled = true;
+
+    try {
+        const { error } = await supabaseClient
+            .from('clients')
+            .update({ status: nextStatus })
+            .eq('id', clientObj.id);
+
+        if (error) throw error;
+
+        clientObj.status = nextStatus;
+
+        // Jump back to the aggregate view when archiving, since the client just
+        // left the picker and would otherwise stay selected but hidden.
+        if (nextStatus === 'archived' && !showArchivedClients) {
+            cSelectedAccount = "ALL";
+            document.getElementById('c-account-label').innerText = "All Accounts";
+        }
+
+        initClientsPage();
         if (!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
     } catch (err) {
         alert("Error updating client status: " + err.message);
