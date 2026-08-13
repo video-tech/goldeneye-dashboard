@@ -21,13 +21,19 @@
         document.head.appendChild(faLink);
 
         const base = "https://video-tech.github.io/goldeneye-dashboard";
+
+        // GitHub Pages serves these with Cache-Control: max-age=600, so without a
+        // unique query param a fresh deploy can take ~10 minutes to appear and looks
+        // like a failed push. This makes every page load fetch the current version.
+        const bust = "?v=" + Date.now();
+
         const mount = document.getElementById('midas-master');
         try {
-            const html = await fetch(base + "/body.html").then(r => r.text());
+            const html = await fetch(base + "/body.html" + bust).then(r => r.text());
             mount.innerHTML = html;
 
             const s = document.createElement('script');
-            s.src = base + "/app.js";
+            s.src = base + "/app.js" + bust;
             s.onerror = () => console.error("Goldeneye: failed to load app.js from " + s.src);
             document.body.appendChild(s);
         } catch (e) {
