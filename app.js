@@ -454,6 +454,9 @@ window.updateVideoUI = function(videoId, isWatched) {
 
             renderPortalHistory(); renderPortalTasks(); renderPortalCharts(dailySummary);
             if(!document.getElementById('cp-view-seo').classList.contains('hidden')) renderCpSeo();
+            // The leaderboard is period-scoped too, so it has to redraw when the range
+            // changes — previously only switchCpTab drew it, leaving it stale.
+            if(!document.getElementById('cp-view-leaderboard').classList.contains('hidden')) renderAnonymizedLeaderboard();
             document.getElementById('ai-summary').innerText = "Click \"Run Analysis\" to generate an AI overview of this timeframe.";
 updateAgencyPowerTicker();
         }
