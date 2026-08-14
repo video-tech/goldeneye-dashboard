@@ -317,12 +317,22 @@
             if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...'; btn.disabled = true; }
 
             try {
-                const { error } = await supabaseClient.auth.verifyOtp({
-                    email: pendingAuthEmail,
-                    token,
-                    type: 'email'
-                });
-                if (error) throw error;
+                // Supabase issues the token as type 'magiclink' for an existing user and
+                // 'email' for a first-time signup, and verifyOtp rejects a mismatch as
+                // "invalid". Try both rather than guessing which kind of user this is.
+                let lastError = null;
+                let verified = false;
+
+                for (const type of ['email', 'magiclink']) {
+                    const { error } = await supabaseClient.auth.verifyOtp({
+                        email: pendingAuthEmail,
+                        token,
+                        type
+                    });
+                    if (!error) { verified = true; break; }
+                    lastError = error;
+                }
+                if (!verified) throw lastError;
 
                 // Session is stored; reload so initApp runs against it from a clean state
                 window.location.reload();
