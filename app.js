@@ -1414,7 +1414,7 @@ function filterAdsData() {
                     if (allClientsTable) allClientsTable.classList.remove('hidden');
 
                     // Per-client controls make no sense in the aggregate view
-                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive', 'btn-preview-client'].forEach(id => {
+                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive', 'btn-preview-client', 'btn-edit-client'].forEach(id => {
                         const el = document.getElementById(id);
                         if (el) el.classList.add('hidden');
                     });
@@ -1473,6 +1473,9 @@ function filterAdsData() {
 
                     const previewBtn = document.getElementById('btn-preview-client');
                     if (previewBtn) previewBtn.classList.toggle('hidden', currentUserRole !== 'admin');
+
+                    const editBtn = document.getElementById('btn-edit-client');
+                    if (editBtn) editBtn.classList.toggle('hidden', currentUserRole !== 'admin');
 
                     renderClientTasks();
                 }
@@ -3661,6 +3664,107 @@ window.openStageTransitionModal = function() {
     window.updateTransitionTaskCount();
 
     document.getElementById('stage-transition-modal').style.display = 'flex';
+};
+
+// ================= EDIT CLIENT =================
+window.openEditClientModal = function() {
+    if (currentUserRole !== 'admin') return;
+    const c = globalClientsData.find(x => normalize(x.name) === normalize(cSelectedAccount));
+    if (!c) { alert("Could not find that client record."); return; }
+
+    const modal = document.getElementById('edit-client-modal');
+    // Same trick the add modal uses: hoist it out of any hidden ancestor
+    if (modal.parentElement.id !== 'theme-wrapper') {
+        document.getElementById('theme-wrapper').appendChild(modal);
+    }
+
+    document.getElementById('edit-client-id').value            = c.id;
+    document.getElementById('edit-client-original-name').value = c.name || '';
+    document.getElementById('edit-client-current-name').innerText = c.name || 'this client';
+
+    document.getElementById('edit-client-name').value         = c.name || '';
+    document.getElementById('edit-client-contact-name').value = c.contact_name || '';
+    document.getElementById('edit-client-industry').value     = c.industry || '';
+    document.getElementById('edit-client-email').value        = c.client_email || '';
+    document.getElementById('edit-client-phone').value        = c.client_phone || '';
+    document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
+    document.getElementById('edit-client-business-id').value  = c.business_id || '';
+    document.getElementById('edit-client-retainer').value     = c.monthly_retainer || '';
+    if (c.contract_type) document.getElementById('edit-client-contract').value = c.contract_type;
+
+    modal.style.display = 'flex';
+};
+
+window.saveClientEdits = async function(e) {
+    e.preventDefault();
+    if (currentUserRole !== 'admin') return;
+
+    const btn = document.getElementById('btn-save-client-edits');
+    const id = document.getElementById('edit-client-id').value;
+    const originalName = document.getElementById('edit-client-original-name').value;
+    const newName = document.getElementById('edit-client-name').value.trim();
+
+    const adAccountId = normalizeAccountId(document.getElementById('edit-client-ad-account').value);
+    if (!adAccountId) {
+        alert("Meta Ad Account ID must contain digits (e.g. 371628055). Without it no ad data will be pulled.");
+        return;
+    }
+    if (!newName) { alert("Business name can't be empty."); return; }
+
+    const renaming = normalize(newName) !== normalize(originalName) || newName !== originalName;
+    if (renaming && !confirm(`Rename "${originalName}" to "${newName}"?\n\nTheir tasks, health record, check-ins, reports and team access will all be moved across.`)) return;
+
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
+    btn.disabled = true;
+
+    try {
+        // The rename runs first and atomically: clients.name is the join key for about
+        // ten other tables, so doing it as separate browser updates risks a half-applied
+        // rename that orphans a client's history with no way to tell what moved.
+        if (renaming) {
+            const { error: rpcErr } = await supabaseClient.rpc('rename_client', {
+                old_name: originalName,
+                new_name: newName
+            });
+            if (rpcErr) {
+                throw new Error(
+                    rpcErr.message.includes('function')
+                        ? "Renaming needs the rename_client database function, which isn't installed yet. Other edits weren't saved — change the name back and save again, or install the function first."
+                        : rpcErr.message
+                );
+            }
+        }
+
+        const payload = {
+            name: newName,
+            contact_name: document.getElementById('edit-client-contact-name').value.trim() || null,
+            industry: document.getElementById('edit-client-industry').value.trim() || null,
+            client_email: document.getElementById('edit-client-email').value.trim() || null,
+            client_phone: normalizePhone(document.getElementById('edit-client-phone').value) || null,
+            ad_account_id: adAccountId,
+            business_id: document.getElementById('edit-client-business-id').value.trim() || null,
+            contract_type: document.getElementById('edit-client-contract').value,
+            monthly_retainer: document.getElementById('edit-client-retainer').value || null
+        };
+
+        const { error } = await supabaseClient.from('clients').update(payload).eq('id', id);
+        if (error) throw error;
+
+        document.getElementById('edit-client-modal').style.display = 'none';
+
+        // Follow the client if they were renamed, so the page doesn't go blank
+        if (renaming) cSelectedAccount = newName;
+
+        await fetchAllGlobalData(globalAllowedClients);
+        initClientsPage();
+        if (!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
+    } catch (err) {
+        alert("Could not save changes: " + err.message);
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
 };
 
 // ================= CLIENT PORTAL PREVIEW =================

@@ -402,6 +402,9 @@
                             <button id="btn-preview-client" onclick="previewAsClient()" title="See this client's portal exactly as they do" class="hidden bg-purple-600 hover:bg-purple-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
                                 <i class="fa-solid fa-eye mr-2"></i> View as Client
                             </button>
+                            <button id="btn-edit-client" onclick="openEditClientModal()" title="Edit this client's details" class="hidden bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold py-1.5 px-4 rounded-full text-xs transition">
+                                <i class="fa-solid fa-pen-to-square mr-2"></i> Edit
+                            </button>
                         </div>
                     </header>
 
@@ -1536,6 +1539,76 @@
                     </div>
                     <div class="pt-4 border-t border-white/10 mt-4">
                         <button type="submit" id="btn-save-new-client" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl shadow-lg transition">Create Client Profile</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- EDIT CLIENT MODAL -->
+        <div id="edit-client-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
+            <div class="glass p-8 w-full max-w-lg mx-4">
+                <div class="flex justify-between items-start mb-6">
+                    <div>
+                        <h3 class="text-2xl font-bold text-white">Edit Client</h3>
+                        <p class="text-xs text-gray-400 mt-1">Update details for <span id="edit-client-current-name" class="text-white font-bold">this client</span>.</p>
+                    </div>
+                    <button onclick="document.getElementById('edit-client-modal').style.display='none'" class="text-gray-400 hover:text-white text-xl">✕</button>
+                </div>
+
+                <form id="edit-client-form" onsubmit="saveClientEdits(event)" class="space-y-4">
+                    <input type="hidden" id="edit-client-id">
+                    <input type="hidden" id="edit-client-original-name">
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="modal-label">Business Name</label>
+                            <input type="text" id="edit-client-name" class="glass-input" required>
+                            <p class="text-[10px] text-amber-400/80 mt-1">Renaming also updates tasks, health, check-ins and reports.</p>
+                        </div>
+                        <div>
+                            <label class="modal-label">Contact First Name</label>
+                            <input type="text" id="edit-client-contact-name" class="glass-input" placeholder="John">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Industry</label>
+                            <input type="text" id="edit-client-industry" class="glass-input" placeholder="Cabinets, Basement Finishing, Roofing...">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Client Email(s)</label>
+                            <input type="text" id="edit-client-email" class="glass-input" placeholder="owner@acme.com, manager@acme.com">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Mobile Number</label>
+                            <input type="text" id="edit-client-phone" class="glass-input" placeholder="(555) 010-9999">
+                            <p class="text-[10px] text-gray-500 mt-1">Receives the weekly check-in text.</p>
+                        </div>
+                        <div>
+                            <label class="modal-label">Meta Ad Account ID</label>
+                            <input type="text" id="edit-client-ad-account" class="glass-input" placeholder="371628055" required>
+                            <p class="text-[10px] text-gray-500 mt-1">Wrong id means no ad data at all.</p>
+                        </div>
+                        <div>
+                            <label class="modal-label">Business ID</label>
+                            <input type="text" id="edit-client-business-id" class="glass-input" placeholder="1234567890">
+                        </div>
+                        <div>
+                            <label class="modal-label">Contract Type</label>
+                            <select id="edit-client-contract" class="glass-input">
+                                <option value="fixed_3mo">Fixed - 3 Months</option>
+                                <option value="fixed_6mo">Fixed - 6 Months</option>
+                                <option value="fixed_12mo">Fixed - 12 Months</option>
+                                <option value="custom">Custom (Ongoing)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="modal-label">Monthly Retainer ($)</label>
+                            <input type="number" id="edit-client-retainer" class="glass-input" placeholder="2500">
+                        </div>
+                    </div>
+
+                    <div class="pt-4 border-t border-white/10 mt-4 flex gap-3">
+                        <button type="button" onclick="document.getElementById('edit-client-modal').style.display='none'" class="glass-pill justify-center px-6">Cancel</button>
+                        <button type="submit" id="btn-save-client-edits" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition">Save Changes</button>
                     </div>
                 </form>
             </div>
