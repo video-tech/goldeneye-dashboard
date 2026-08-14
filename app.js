@@ -298,7 +298,8 @@
                 supabaseClient.from('tasks').select('*').in('client', allowedClients),
                 clientLeadsQuery,
                 supabaseClient.from('ad_approvals').select('*').in('client_name', allowedClients),
-                supabaseClient.from('seo_metrics').select('*').in('client_name', allowedClients)
+                supabaseClient.from('seo_metrics').select('*').in('client_name', allowedClients),
+                supabaseClient.from('weekly_checkins').select('*').in('client_name', allowedClients)
             ]);
             
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
@@ -313,6 +314,7 @@
             globalClientLeadsData = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
             globalCreativesData = results[5].status === 'fulfilled' ? (results[5].value.data || []) : [];
             allRawSeo = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
+            globalCheckinsData = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
 
             const switcher = document.getElementById('admin-switcher');
             const select = document.getElementById('admin-client-list');
@@ -417,6 +419,25 @@ window.updateVideoUI = function(videoId, isWatched) {
             });
             masterJobData.forEach(j => { if (!j.created_at) return; const jd = new Date(j.created_at.split('T')[0] + 'T12:00:00'); if (jd >= s && jd <= e) revenue += parseFloat(j.revenue || 0); });
             masterEstimateData.forEach(est => { if (!est.created_at) return; const ed = new Date(est.created_at.split('T')[0] + 'T12:00:00'); if (ed >= s && ed <= e) estimates += parseFloat(est.amount || 0); });
+
+            // Fold in what the client reported by text. Most clients use one channel or
+            // the other, so take the greater of the two rather than adding them — summing
+            // would double-count anyone who both texts a total and logs the same jobs here.
+            const rangeCheckins = checkinsForClient(currentActiveClient).filter(c => {
+                if (!c.week_start) return false;
+                const wd = new Date(c.week_start + 'T12:00:00');
+                return wd >= s && wd <= e;
+            });
+            const textedRevenue   = sumCheckins(rangeCheckins, 'revenue_total');
+            const textedEstimates = sumCheckins(rangeCheckins, 'estimates_count');
+            const textedDeals     = sumCheckins(rangeCheckins, 'closes_count');
+
+            revenue = Math.max(revenue, textedRevenue);
+
+            const estCountEl = document.getElementById('stat-est-count');
+            if (estCountEl) estCountEl.innerText = textedEstimates.toLocaleString();
+            const dealsEl = document.getElementById('stat-deals-count');
+            if (dealsEl) dealsEl.innerText = textedDeals.toLocaleString();
 
             finalStats = { spend, leads, revenue, estimates };
             document.getElementById('stat-spend').innerText = '$' + spend.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -3381,9 +3402,10 @@ window.previewAsClient = async function() {
         document.getElementById('admin-dashboard-container').classList.add('hidden');
         document.getElementById('client-portal-container').classList.remove('hidden');
 
-        const banner = document.getElementById('client-preview-banner');
+        // Toggled via style.display, not the `hidden` class — the banner carries inline
+        // styles and an inline display would override the class either way.
         document.getElementById('client-preview-name').innerText = cSelectedAccount;
-        banner.classList.remove('hidden');
+        document.getElementById('client-preview-banner').style.display = 'flex';
         // Push the portal clear of the fixed banner
         document.getElementById('client-portal-container').style.paddingTop = '64px';
 
@@ -3398,7 +3420,7 @@ window.previewAsClient = async function() {
 };
 
 window.exitClientPreview = async function() {
-    document.getElementById('client-preview-banner').classList.add('hidden');
+    document.getElementById('client-preview-banner').style.display = 'none';
     document.getElementById('client-portal-container').classList.add('hidden');
     document.getElementById('client-portal-container').style.paddingTop = '';
     document.getElementById('admin-dashboard-container').classList.remove('hidden');

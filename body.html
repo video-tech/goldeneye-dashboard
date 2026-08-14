@@ -97,7 +97,7 @@
 
     <div id="theme-wrapper">
 
-        <div id="client-preview-banner" class="hidden" style="position:fixed; top:0; left:0; right:0; z-index:10000; background:linear-gradient(90deg,#7c3aed,#2563eb); color:white; padding:10px 16px; display:flex; align-items:center; justify-content:center; gap:16px; box-shadow:0 4px 20px rgba(0,0,0,0.4);">
+        <div id="client-preview-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:10000; background:linear-gradient(90deg,#7c3aed,#2563eb); color:white; padding:10px 16px; align-items:center; justify-content:center; gap:16px; box-shadow:0 4px 20px rgba(0,0,0,0.4);">
             <span class="text-sm font-bold"><i class="fa-solid fa-eye mr-2"></i>Client preview &mdash; viewing as <span id="client-preview-name">Client</span></span>
             <button onclick="exitClientPreview()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white font-bold py-1 px-4 rounded-full text-xs transition">
                 <i class="fa-solid fa-arrow-left mr-1"></i> Back to dashboard
@@ -1133,13 +1133,15 @@
             </div>
 
             <div id="cp-view-dashboard" class="space-y-8 hidden">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4">
                     <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Marketing ROI</p><h4 class="text-3xl font-bold text-yellow-400" id="stat-roi">0.0x</h4></div>
                     <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">New Leads</p><h4 class="text-3xl font-bold text-green-400" id="stat-leads">0</h4></div>
                     <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CPL</p><h4 class="text-3xl font-bold text-purple-400" id="stat-cpl">$0</h4></div>
                     <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Total Ad Spend</p><h4 class="text-3xl font-bold" id="stat-spend">$0</h4></div>
                     <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Closed Revenue</p><h4 class="text-3xl font-bold text-blue-400" id="stat-revenue">$0</h4></div>
                     <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Open Estimates</p><h4 class="text-3xl font-bold text-gray-400" id="stat-estimates">$0</h4></div>
+                    <div class="glass p-6 border-b-4 border-emerald-500/50"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Estimates Sent</p><h4 class="text-3xl font-bold text-emerald-400" id="stat-est-count">0</h4></div>
+                    <div class="glass p-6 border-b-4 border-emerald-500/50"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Jobs Closed</p><h4 class="text-3xl font-bold text-emerald-400" id="stat-deals-count">0</h4></div>
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
