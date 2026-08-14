@@ -172,6 +172,10 @@
         // stays reachable after offboarding.
         let showArchivedClients = false;
 
+        // Which metric the client leaderboard ranks by. Leads come from the ads pull,
+        // revenue from what clients report by text — two different sources, one board.
+        let leaderboardMetric = 'leads';
+
         // ================= INIT & AUTH =================
         async function initApp() {
             try {
@@ -3150,29 +3154,53 @@ function renderAnonymizedLeaderboard() {
     // rolls up under one entry regardless of what Meta calls it.
     const { s, e } = getPortalRange();
     const clientStats = {};
-    globalAdsData.forEach(r => {
-        if (!reportInRange(r, s, e)) return;
 
-        const client = clientForReport(r);
-        // Offboarded clients don't belong on a board current clients can see
-        if (client && !isSelectableClient(client)) return;
+    const excluded = name => !name || normalize(name) === normalize('Midas Media');
 
-        const cName = client?.name || r.account_name;
-        if (!cName) return;
-        if (normalize(cName) === normalize('Midas Media')) return;
-        if (!clientStats[cName]) clientStats[cName] = { leads: 0, industry: client?.industry || '' };
-        clientStats[cName].leads += parseInt(r.leads || 0);
-    });
+    if (leaderboardMetric === 'revenue') {
+        // Revenue is client-reported via the weekly check-ins, so it groups on
+        // client_name directly rather than resolving an ad account.
+        globalCheckinsData.forEach(c => {
+            if (!c.week_start) return;
+            const wd = new Date(c.week_start + 'T12:00:00');
+            if (wd < s || wd > e) return;
 
-    // 2. Sort by highest leads
+            const client = globalClientsData.find(x => normalize(x.name) === normalize(c.client_name));
+            if (client && !isSelectableClient(client)) return;
+
+            const cName = client?.name || c.client_name;
+            if (excluded(cName)) return;
+            if (!clientStats[cName]) clientStats[cName] = { value: 0, industry: client?.industry || '' };
+            clientStats[cName].value += parseFloat(c.revenue_total || 0);
+        });
+    } else {
+        globalAdsData.forEach(r => {
+            if (!reportInRange(r, s, e)) return;
+
+            const client = clientForReport(r);
+            // Offboarded clients don't belong on a board current clients can see
+            if (client && !isSelectableClient(client)) return;
+
+            const cName = client?.name || r.account_name;
+            if (excluded(cName)) return;
+            if (!clientStats[cName]) clientStats[cName] = { value: 0, industry: client?.industry || '' };
+            clientStats[cName].value += parseInt(r.leads || 0);
+        });
+    }
+
+    // 2. Sort by the selected metric, highest first
     const sortedClients = Object.entries(clientStats)
-        .sort((a, b) => b[1].leads - a[1].leads);
+        .sort((a, b) => b[1].value - a[1].value);
 
     let html = '';
 
     sortedClients.forEach((entry, index) => {
         const actualName = entry[0];
-        const leads = entry[1].leads;
+        const value = entry[1].value;
+        const displayValue = leaderboardMetric === 'revenue'
+            ? '$' + value.toLocaleString(undefined, { maximumFractionDigits: 0 })
+            : value.toLocaleString();
+        const metricLabel = leaderboardMetric === 'revenue' ? 'Revenue' : 'Leads';
         // Real industry from the client record, not the invented one this used to show.
         // Blank for any client whose industry hasn't been filled in yet.
         const industry = entry[1].industry || '';
@@ -3204,15 +3232,29 @@ function renderAnonymizedLeaderboard() {
                     </div>
                 </div>
                 <div class="text-right">
-                    <span class="text-lg font-bold text-white">${leads}</span>
-                    <span class="text-[10px] text-gray-500 uppercase tracking-widest ml-1">Leads</span>
+                    <span class="text-lg font-bold text-white">${displayValue}</span>
+                    <span class="text-[10px] text-gray-500 uppercase tracking-widest ml-1">${metricLabel}</span>
                 </div>
             </div>
         `;
     });
 
-    listEl.innerHTML = html || '<p class="text-gray-500 italic text-center">No data for this period.</p>';
+    listEl.innerHTML = html || (leaderboardMetric === 'revenue'
+        ? '<p class="text-gray-500 italic text-center">No revenue reported for this period yet. Revenue appears here as clients reply to the weekly check-in text.</p>'
+        : '<p class="text-gray-500 italic text-center">No data for this period.</p>');
 }
+
+window.setLeaderboardMetric = function(metric) {
+    leaderboardMetric = metric;
+    ['leads', 'revenue'].forEach(m => {
+        const btn = document.getElementById('lb-metric-' + m);
+        if (!btn) return;
+        btn.className = m === metric
+            ? 'px-4 py-1.5 rounded-md text-xs font-bold bg-white/10 text-white transition'
+            : 'px-4 py-1.5 rounded-md text-xs font-bold text-gray-400 hover:text-white transition';
+    });
+    renderAnonymizedLeaderboard();
+};
 
 window.logQuickPayment = async function() {
             if (cSelectedAccount === "ALL") return;
