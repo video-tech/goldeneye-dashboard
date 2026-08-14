@@ -13,8 +13,6 @@
         let globalHealthData = {};
         let globalTasksData = [];
         let globalAdsData = [];
-        let globalJobsData = [];
-        let globalEstimatesData = [];
         let globalCreativesData = [];
         let globalSeoData = [];
         let globalCheckinsData = [];
@@ -38,8 +36,8 @@
         let dbHealthSettings = null; let dbMilestones = []; let dbClientMilestones = []; let dbClientHealth = null; let dbHealthLogs = [];
         
         // Portal States
-        let allRawReports = []; let allRawJobs = []; let allRawEstimates = [];
-        let filteredReportData = [], masterJobData = [], masterEstimateData = [];
+        let allRawReports = [];
+        let filteredReportData = [];
         let leadChart = null, roiChart = null;
         let selectedDateRange = "last7", customStart = null, customEnd = null;
         let currentActiveClient = "";
@@ -293,28 +291,21 @@
 
             const results = await Promise.allSettled([
                 supabaseClient.from('daily_reports').select('*'),
-                supabaseClient.from('client_jobs').select('*').order('created_at', {ascending:false}),
-                supabaseClient.from('client_estimates').select('*').order('created_at', {ascending:false}),
                 supabaseClient.from('tasks').select('*').in('client', allowedClients),
                 clientLeadsQuery,
                 supabaseClient.from('ad_approvals').select('*').in('client_name', allowedClients),
                 supabaseClient.from('seo_metrics').select('*').in('client_name', allowedClients),
                 supabaseClient.from('weekly_checkins').select('*').in('client_name', allowedClients)
             ]);
-            
+
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
-            const jResData = results[1].status === 'fulfilled' ? (results[1].value.data || []) : [];
-            const eResData = results[2].status === 'fulfilled' ? (results[2].value.data || []) : [];
-            
             allRawReports = rResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
-            allRawJobs = jResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
-            allRawEstimates = eResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
-            
-            globalTasksData = results[3].status === 'fulfilled' ? (results[3].value.data || []) : [];
-            globalClientLeadsData = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
-            globalCreativesData = results[5].status === 'fulfilled' ? (results[5].value.data || []) : [];
-            allRawSeo = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
-            globalCheckinsData = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
+
+            globalTasksData = results[1].status === 'fulfilled' ? (results[1].value.data || []) : [];
+            globalClientLeadsData = results[2].status === 'fulfilled' ? (results[2].value.data || []) : [];
+            globalCreativesData = results[3].status === 'fulfilled' ? (results[3].value.data || []) : [];
+            allRawSeo = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
+            globalCheckinsData = results[5].status === 'fulfilled' ? (results[5].value.data || []) : [];
 
             const switcher = document.getElementById('admin-switcher');
             const select = document.getElementById('admin-client-list');
@@ -395,8 +386,6 @@ window.updateVideoUI = function(videoId, isWatched) {
             currentActiveClient = accountName; document.getElementById('client-name-display').innerText = accountName.split(' ')[0];
             const normTarget = normalize(accountName);
             filteredReportData = reportsForClient(accountName, allRawReports);
-            masterJobData = allRawJobs.filter(j => normalize(j.client_name) === normTarget);
-            masterEstimateData = allRawEstimates.filter(e => normalize(e.client_name) === normTarget);
             clientLeadsData = globalClientLeadsData.filter(l => normalize(l.client_name) === normTarget).map(l => ({ id: l.id, name: l.lead_name, stage: l.stage || 'New Lead', email: l.lead_email || '', phone: l.lead_phone || '' }));
             filterPortalData();
             if(!document.getElementById('cp-view-pipeline').classList.contains('hidden')) renderCpPipeline();
@@ -411,39 +400,34 @@ window.updateVideoUI = function(videoId, isWatched) {
 	    if(!document.getElementById('cp-view-knowledge').classList.contains('hidden')) switchCpTab('knowledge');
             if (selectedDateRange === 'yesterday') { s.setDate(s.getDate() - 1); e.setDate(e.getDate() - 1); } else if (selectedDateRange === 'last7') { s.setDate(s.getDate() - 6); } else if (selectedDateRange === 'last30') { s.setDate(s.getDate() - 29); } else if (selectedDateRange === 'custom') { s = new Date(customStart + 'T00:00:00'); e = new Date(customEnd + 'T23:59:59'); } else { s = new Date(2000, 0, 1); }
 
-            let spend = 0, leads = 0, revenue = 0, estimates = 0; const dailySummary = {};
+            let spend = 0, leads = 0; const dailySummary = {};
 
             filteredReportData.forEach(r => {
                 if (!r.date) return; const rd = new Date(r.date.split('T')[0] + 'T12:00:00');
                 if (rd >= s && rd <= e) { spend += parseFloat(r.spend || 0); leads += parseInt(r.leads || 0); const rdStr = rd.toISOString().split('T')[0]; dailySummary[rdStr] = (dailySummary[rdStr] || 0) + parseInt(r.leads || 0); }
             });
-            masterJobData.forEach(j => { if (!j.created_at) return; const jd = new Date(j.created_at.split('T')[0] + 'T12:00:00'); if (jd >= s && jd <= e) revenue += parseFloat(j.revenue || 0); });
-            masterEstimateData.forEach(est => { if (!est.created_at) return; const ed = new Date(est.created_at.split('T')[0] + 'T12:00:00'); if (ed >= s && ed <= e) estimates += parseFloat(est.amount || 0); });
 
-            // Fold in what the client reported by text. Most clients use one channel or
-            // the other, so take the greater of the two rather than adding them — summing
-            // would double-count anyone who both texts a total and logs the same jobs here.
+            // Outcome figures come entirely from the weekly SMS check-ins. The old portal
+            // forms that wrote client_jobs/client_estimates have been removed — one
+            // reporting channel instead of two competing ones.
             const rangeCheckins = checkinsForClient(currentActiveClient).filter(c => {
                 if (!c.week_start) return false;
                 const wd = new Date(c.week_start + 'T12:00:00');
                 return wd >= s && wd <= e;
             });
-            const textedRevenue   = sumCheckins(rangeCheckins, 'revenue_total');
-            const textedEstimates = sumCheckins(rangeCheckins, 'estimates_count');
-            const textedDeals     = sumCheckins(rangeCheckins, 'closes_count');
-
-            revenue = Math.max(revenue, textedRevenue);
+            const revenue   = sumCheckins(rangeCheckins, 'revenue_total');
+            const estimates = sumCheckins(rangeCheckins, 'estimates_count');
+            const deals     = sumCheckins(rangeCheckins, 'closes_count');
 
             const estCountEl = document.getElementById('stat-est-count');
-            if (estCountEl) estCountEl.innerText = textedEstimates.toLocaleString();
+            if (estCountEl) estCountEl.innerText = estimates.toLocaleString();
             const dealsEl = document.getElementById('stat-deals-count');
-            if (dealsEl) dealsEl.innerText = textedDeals.toLocaleString();
+            if (dealsEl) dealsEl.innerText = deals.toLocaleString();
 
             finalStats = { spend, leads, revenue, estimates };
             document.getElementById('stat-spend').innerText = '$' + spend.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
             document.getElementById('stat-leads').innerText = leads.toLocaleString();
             document.getElementById('stat-revenue').innerText = '$' + revenue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            document.getElementById('stat-estimates').innerText = '$' + estimates.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
             document.getElementById('stat-roi').innerText = (spend > 0 ? (revenue / spend).toFixed(1) : "0.0") + 'x';
             document.getElementById('stat-cpl').innerText = (leads > 0 ? '$' + (spend / leads).toFixed(0) : '$0');
 
@@ -453,12 +437,24 @@ window.updateVideoUI = function(videoId, isWatched) {
 updateAgencyPowerTicker();
         }
 
+        // The client's own weekly text replies, shown back to them so they can see what
+        // was recorded. Replaces the old manually-logged job history.
         function renderPortalHistory() {
-            const body = document.getElementById('job-history-body'); body.innerHTML = '';
-            if (!masterJobData.length) { body.innerHTML = '<tr><td colspan="4" class="text-center py-4 opacity-50">No jobs logged.</td></tr>'; return; }
-            masterJobData.slice(0, 10).forEach(j => {
+            const body = document.getElementById('job-history-body');
+            if (!body) return;
+            body.innerHTML = '';
+
+            const rows = checkinsForClient(currentActiveClient).slice(0, 10);
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="4" class="text-center py-4 opacity-50">No check-ins yet &mdash; reply to the weekly text and it will appear here.</td></tr>';
+                return;
+            }
+
+            const num = v => (v === null || v === undefined || v === '') ? '&mdash;' : v;
+            rows.forEach(c => {
                 const row = document.createElement('tr');
-                row.innerHTML = `<td class="text-xs opacity-50">${new Date(j.created_at).toLocaleDateString()}</td><td class="font-bold">${j.job_name}</td><td class="text-blue-400 font-bold">$${parseFloat(j.revenue).toLocaleString()}</td><td class="text-right"><button onclick="deleteJob(${j.id})" class="text-red-500 opacity-30 hover:opacity-100"><i class="fa-solid fa-trash-can"></i></button></td>`;
+                const rev = c.revenue_total ? '$' + parseFloat(c.revenue_total).toLocaleString() : '&mdash;';
+                row.innerHTML = `<td class="text-xs opacity-50">${c.week_start || '&mdash;'}</td><td class="font-bold">${num(c.estimates_count)}</td><td class="font-bold text-green-400">${num(c.closes_count)}</td><td class="text-right text-blue-400 font-bold">${rev}</td>`;
                 body.appendChild(row);
             });
         }
@@ -507,7 +503,6 @@ updateAgencyPowerTicker();
                         if (lead && lead.stage !== newStage) {
                             lead.stage = newStage; renderCpPipeline();
                             try { await supabaseClient.from('client_leads').update({stage: newStage}).eq('id', id); } catch(err) { console.warn("Could not save to db"); }
-                            if(newStage === 'Won') { openJobModal(); document.getElementById('input-job-name').value = lead.name; document.getElementById('input-job-date').value = new Date().toISOString().split('T')[0]; }
                         }
                     }
                 }));
@@ -552,7 +547,6 @@ updateAgencyPowerTicker();
                 else { const { data, error } = await supabaseClient.from('client_leads').insert([payload]).select(); if(error) throw error; const newId = data ? data[0].id : 'c' + Date.now(); clientLeadsData.push({ id: newId, name: payload.lead_name, stage: payload.stage, email: payload.lead_email, phone: payload.lead_phone }); if(payload.stage === 'Won') isNewWon = true; }
             } catch (err) { console.error("Error saving lead:", err); if(!activeCpLeadId) clientLeadsData.push({ id: 'c' + Date.now(), name: payload.lead_name, stage: payload.stage, email: payload.lead_email, phone: payload.lead_phone }); }
             btn.innerHTML = 'Save Lead'; closeAllDrawers(); renderCpPipeline();
-            if(isNewWon) { openJobModal(); document.getElementById('input-job-name').value = payload.lead_name; document.getElementById('input-job-date').value = new Date().toISOString().split('T')[0]; }
         }
 
         async function deleteCpLead() { if(!activeCpLeadId) return; if(confirm("Delete this lead permanently?")) { try { await supabaseClient.from('client_leads').delete().eq('id', activeCpLeadId); } catch(e) { console.warn("Failed to delete from DB"); } clientLeadsData = clientLeadsData.filter(l => l.id != activeCpLeadId); closeAllDrawers(); renderCpPipeline(); } }
@@ -643,7 +637,6 @@ window.submitClientRequest = async function() {
     }
 };
 
-        async function deleteJob(id) { if(confirm("Delete record?")) { await supabaseClient.from('client_jobs').delete().eq('id', id); masterJobData = masterJobData.filter(j => j.id !== id); filterPortalData(); } }
 
         function renderPortalCharts(dailyLeads) {
             const isLight = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isLight ? '#64748b' : 'rgba(255, 255, 255, 0.4)';
@@ -693,11 +686,6 @@ window.submitClientRequest = async function() {
         function selectPresetDate(v, l) { selectedDateRange = v; document.getElementById('selected-date-label').innerText = l; toggleDropdown('portal-date-menu'); filterPortalData(); }
         function applyCustomRange() { customStart = document.getElementById('start-date').value; customEnd = document.getElementById('end-date').value; if(customStart && customEnd) { selectedDateRange = 'custom'; document.getElementById('selected-date-label').innerText = `${customStart} to ${customEnd}`; toggleDropdown('portal-date-menu'); filterPortalData(); } }
         
-        function openJobModal() { document.getElementById('job-modal').style.display = 'flex'; }
-        function closeJobModal() { document.getElementById('job-modal').style.display = 'none'; }
-        function openEstimateModal() { document.getElementById('estimate-modal').style.display = 'flex'; }
-        function closeEstimateModal() { document.getElementById('estimate-modal').style.display = 'none'; }
-
         function openInviteModal() { document.getElementById('invite-modal').style.display = 'flex'; }
         function closeInviteModal() { document.getElementById('invite-modal').style.display = 'none'; }
         async function submitClientInvite() {
@@ -706,22 +694,6 @@ window.submitClientRequest = async function() {
             const { error } = await supabaseClient.from('pre_approved_users').upsert({ email: email, role: 'client', client_access: [currentActiveClient] });
             if (error) { alert("Error: " + error.message); } else { alert("Invite sent! They can now log in with Google to view this dashboard."); closeInviteModal(); document.getElementById('input-invite-email').value = ''; }
             btn.disabled = false; btn.innerText = "Send Invite";
-        }
-
-        async function submitJob() {
-            const btn = document.getElementById('submit-btn'); const n = document.getElementById('input-job-name').value, v = document.getElementById('input-job-value').value, d = document.getElementById('input-job-date').value;
-            if(!n || !v || !d) { alert("Please fill all fields"); return; } btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            const payload = { job_name: n, revenue: v, client_name: currentActiveClient, created_at: d }; const { error } = await supabaseClient.from('client_jobs').insert([payload]);
-            if (error) { console.error("Save Job Error:", error); alert("Error saving job: " + error.message); } else { document.getElementById('input-job-name').value = ""; document.getElementById('input-job-value').value = ""; document.getElementById('input-job-date').value = ""; closeJobModal(); masterJobData.unshift({ id: Math.random(), ...payload }); filterPortalData(); }
-            btn.disabled = false; btn.innerText = "Save";
-        }
-
-        async function submitEstimate() {
-            const btn = document.getElementById('submit-est-btn'); const n = document.getElementById('input-est-name').value, v = document.getElementById('input-est-value').value, d = document.getElementById('input-est-date').value;
-            if(!n || !v || !d) { alert("Please fill all fields"); return; } btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            const payload = { estimate_name: n, amount: v, client_name: currentActiveClient, created_at: d }; const { error } = await supabaseClient.from('client_estimates').insert([payload]);
-            if (error) { console.error("Save Estimate Error:", error); alert("Error saving estimate: " + error.message); } else { document.getElementById('input-est-name').value = ""; document.getElementById('input-est-value').value = ""; document.getElementById('input-est-date').value = ""; closeEstimateModal(); masterEstimateData.unshift({ id: Math.random(), ...payload }); filterPortalData(); }
-            btn.disabled = false; btn.innerText = "Save";
         }
 
         // =========================================================================================
@@ -733,9 +705,7 @@ window.submitClientRequest = async function() {
     let healthQ = supabaseClient.from('client_health').select('*');
     let tasksQ = supabaseClient.from('tasks').select('*');
     let adsQ = supabaseClient.from('daily_reports').select('*');
-    let jobsQ = supabaseClient.from('client_jobs').select('*');
-    let estQ = supabaseClient.from('client_estimates').select('*');
-    let crQ = supabaseClient.from('ad_approvals').select('*').order('created_at', { ascending: false }); 
+    let crQ = supabaseClient.from('ad_approvals').select('*').order('created_at', { ascending: false });
     let seoQ = supabaseClient.from('seo_metrics').select('*');
     
     // 👇 1. ADD THIS NEW LINE FOR THE AUDITS QUERY 👇
@@ -750,7 +720,7 @@ window.submitClientRequest = async function() {
     }
 
     // 👇 2. ADD auditsQ TO THE END OF THIS ARRAY 👇
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, jobsQ, estQ, crQ, seoQ, auditsQ, checkinsQ ]);
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ ]);
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
     
@@ -769,14 +739,10 @@ window.submitClientRequest = async function() {
     let fHealth = results[1].status === 'fulfilled' ? (results[1].value.data || []) : [];
     let fTasks = results[2].status === 'fulfilled' ? (results[2].value.data || []) : [];
     let fAds = results[3].status === 'fulfilled' ? (results[3].value.data || []) : [];
-    let fJobs = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
-    let fEst = results[5].status === 'fulfilled' ? (results[5].value.data || []) : [];
-    globalCreativesData = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
-    globalSeoData = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
-    
-    // 👇 3. ADD THIS LINE TO SAVE THE AUDITS TO YOUR GLOBAL VARIABLE 👇
-    globalAuditsData = results[8].status === 'fulfilled' ? (results[8].value.data || []) : [];
-    globalCheckinsData = results[9].status === 'fulfilled' ? (results[9].value.data || []) : [];
+    globalCreativesData = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
+    globalSeoData = results[5].status === 'fulfilled' ? (results[5].value.data || []) : [];
+    globalAuditsData = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
+    globalCheckinsData = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
 
     // ... the rest of the function continues as normal ...
 
@@ -801,8 +767,6 @@ window.submitClientRequest = async function() {
                     const normA = normalize(a.account_name);
                     return normAllowed.some(all => normA === all || normA.includes(all) || all.includes(normA));
                 });
-                fJobs = fJobs.filter(j => { const normJ = normalize(j.client_name); return normAllowed.some(all => normJ === all || normJ.includes(all) || all.includes(normJ)); });
-                fEst = fEst.filter(e => { const normE = normalize(e.client_name); return normAllowed.some(all => normE === all || normE.includes(all) || all.includes(normE)); });
             }
 
             if (fHealth) { fHealth.forEach(h => { if(h.client_name) globalHealthData[normalize(h.client_name)] = h.current_score; }); }
@@ -817,7 +781,6 @@ window.submitClientRequest = async function() {
             globalTasksData.forEach(t => t.score = Math.round((((t.p||3)*0.4)+((t.u||3)*0.4)+((6-(t.e||3))*0.2))*20));
             
             globalAdsData = fAds.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
-            globalJobsData = fJobs; globalEstimatesData = fEst;
 
             populateTaskClientDropdown(); 
             if(typeof populateTemplateClientDropdown === 'function') populateTemplateClientDropdown(); 
@@ -1675,9 +1638,8 @@ async function fetchHealthData() {
             }
         }
 
-        // Recent weekly SMS check-ins for the selected client. Deliberately kept separate
-        // from the revenue/ROI charts, which sum client_jobs — a client who both texts a
-        // total and logs individual jobs would otherwise be counted twice.
+        // Recent weekly SMS check-ins for the selected client — now the only source of
+        // client-reported estimates, closes and revenue.
         function renderClientCheckins() {
             const box = document.getElementById('c-checkins-box');
             const list = document.getElementById('c-checkins-list');
@@ -1723,9 +1685,7 @@ async function fetchHealthData() {
         function openHealthDrawer() {
             document.getElementById('h-client-name').innerText = cSelectedAccount; 
             
-            // Prefill from a rolling 4-week window of check-ins. This replaces an earlier
-            // attempt that joined client_jobs/client_estimates on client_email — a column
-            // submitJob/submitEstimate never write, so it always yielded zero.
+            // Prefill from a rolling 4-week window of check-ins.
             const HEALTH_WINDOW_WEEKS = 4;
             const windowCheckins = recentCheckins(cSelectedAccount, HEALTH_WINDOW_WEEKS);
             const autoAppts = sumCheckins(windowCheckins, 'estimates_count');
@@ -2207,16 +2167,10 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
                     .slice(-50)
                     .map(t => ({ title: t.title, status: t.status }));
                     
-                const clientJobs = globalJobsData
-                    .filter(j => normalize(j.client_name).includes(normC))
-                    .slice(-50)
-                    .map(j => ({ date: j.created_at ? j.created_at.split('T')[0] : 'Unknown', revenue: j.revenue }));
-                    
-                const clientEstimates = globalEstimatesData
-                    .filter(e => normalize(e.client_name).includes(normC))
-                    .slice(-50)
-                    .map(e => ({ date: e.created_at ? e.created_at.split('T')[0] : 'Unknown', amount: e.amount }));
-                    
+                const clientOutcomes = checkinsForClient(cSelectedAccount)
+                    .slice(0, 26)
+                    .map(c => ({ week: c.week_start, estimates: c.estimates_count, closed: c.closes_count, revenue: c.revenue_total }));
+
                 const clientHealth = globalHealthData[normC] || 'Unknown';
                 
                 systemPrompt = `You are an elite, highly analytical Agency Data Scientist and AI Agent. You are advising the account manager regarding the client: ${cSelectedAccount}.
@@ -2226,8 +2180,7 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
                 - All Tasks: ${JSON.stringify(clientTasks)}
                 - Ad Performance: ${JSON.stringify(clientAds)}
                 - Organic SEO Performance: ${JSON.stringify(clientSeo)}
-                - Pipeline/Estimates: ${JSON.stringify(clientEstimates)}
-                - Closed Revenue/Jobs: ${JSON.stringify(clientJobs)}
+                - Weekly outcomes reported by the client (estimates sent, jobs closed, revenue): ${JSON.stringify(clientOutcomes)}
                 
                 Rules:
                 1. Base your answers strictly on the provided JSON data.
@@ -2853,7 +2806,7 @@ function updateAgencyPowerTicker() {
     // Aggregate globally, ignoring the selected client filter. Deliberately unfiltered:
     // this is a whole-network total, so no client join belongs here.
     globalAdsData.forEach(r => totalNetworkLeads += parseInt(r.leads || 0));
-    globalJobsData.forEach(j => totalNetworkRev += parseFloat(j.revenue || 0));
+    globalCheckinsData.forEach(c => totalNetworkRev += parseFloat(c.revenue_total || 0));
 
     const tickerEl = document.getElementById('global-power-ticker-text');
     if(tickerEl) {
