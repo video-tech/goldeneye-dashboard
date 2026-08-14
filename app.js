@@ -1486,17 +1486,18 @@ async function fetchHealthData() {
                     });
                 }
 
-                // Totals come from each client's latest check-in where it beats the saved
-                // staff figure, matching the per-client tiles. Counting off client_health
-                // alone showed zero until someone opened the drawer and saved.
+                // Running totals across every check-in, matching the per-client tiles.
+                // Counting off client_health alone showed zero until someone opened the
+                // drawer and saved.
                 let tRevenue = 0;
+                const sumField = (rows, field) => rows.reduce((sum, r) => sum + (parseFloat(r[field]) || 0), 0);
+
                 activeClients.forEach(c => {
                     const health = allHealth?.find(h => normalize(h.client_name) === normalize(c.name));
                     const rows = checkinsForClient(c);
-                    const latest = rows[0];
-                    tAppts += Math.max(health?.appts_vol || 0, latest?.estimates_count ?? 0);
-                    tDeals += Math.max(health?.deals_closed || 0, latest?.closes_count ?? 0);
-                    tRevenue += rows.reduce((sum, r) => sum + (parseFloat(r.revenue_total) || 0), 0);
+                    tAppts   += Math.max(health?.appts_vol    || 0, sumField(rows, 'estimates_count'));
+                    tDeals   += Math.max(health?.deals_closed || 0, sumField(rows, 'closes_count'));
+                    tRevenue += sumField(rows, 'revenue_total');
                 });
 
                 const ghRevEl = document.getElementById('gh-total-revenue');
@@ -1550,15 +1551,18 @@ async function fetchHealthData() {
             let dS="--"; if(dbClientHealth.last_comm_date){ const df=Math.floor((new Date()-new Date(dbClientHealth.last_comm_date))/(1000*60*60*24)); dS=df===0?"Today":`${df} Days`; }
             document.getElementById('h-kpi-comm').innerText=dS; document.getElementById('h-kpi-ghl').innerText=`${dbClientHealth.ghl_usage}/5`; document.getElementById('h-kpi-leads').innerText=(currentAdsStats.l>0?currentAdsStats.l:(dbClientHealth.leads_vol||0)).toLocaleString();
 
-            // Estimates/Deals show the client's own latest report when it's higher than the
-            // saved staff figure, so fresh check-ins appear without waiting for someone to
-            // open the drawer and hit Save. Revenue is the all-time reported total.
+            // Running totals across every check-in, matching the "Total" labels and the
+            // all-time revenue figure beside them. Falls back to the staff-entered value
+            // when it's higher, so manually tracked clients still show something.
             const clientCheckins = checkinsForClient(cSelectedAccount);
-            const latest = clientCheckins[0];
-            const reportedRevenue = clientCheckins.reduce((sum, c) => sum + (parseFloat(c.revenue_total) || 0), 0);
+            const sumBy = (rows, field) => rows.reduce((sum, r) => sum + (parseFloat(r[field]) || 0), 0);
 
-            document.getElementById('h-kpi-appts').innerText = Math.max(dbClientHealth.appts_vol || 0, latest?.estimates_count ?? 0);
-            document.getElementById('h-kpi-deals').innerText = Math.max(dbClientHealth.deals_closed || 0, latest?.closes_count ?? 0);
+            const totalEstimates = sumBy(clientCheckins, 'estimates_count');
+            const totalDeals     = sumBy(clientCheckins, 'closes_count');
+            const reportedRevenue = sumBy(clientCheckins, 'revenue_total');
+
+            document.getElementById('h-kpi-appts').innerText = Math.max(dbClientHealth.appts_vol || 0, totalEstimates);
+            document.getElementById('h-kpi-deals').innerText = Math.max(dbClientHealth.deals_closed || 0, totalDeals);
 
             const revEl = document.getElementById('h-kpi-revenue');
             if (revEl) revEl.innerText = reportedRevenue > 0 ? '$' + reportedRevenue.toLocaleString(undefined, {maximumFractionDigits:0}) : '--';
