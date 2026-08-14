@@ -2842,24 +2842,20 @@ function renderAnonymizedLeaderboard() {
     const sortedClients = Object.entries(clientStats)
         .sort((a, b) => b[1].leads - a[1].leads);
 
-    // 3. Fallback Anonymization Arrays (Generates "Roofing Client (Texas)")
-    const industries = ["Roofing Client", "Dental Clinic", "HVAC Company", "Plumbing Partner", "Remodeling Contractor", "Law Firm", "Med Spa"];
-    const regions = ["Texas", "Florida", "Ohio", "New York", "California", "Illinois", "Arizona"];
-
     let html = '';
-    
+
     sortedClients.forEach((entry, index) => {
         const actualName = entry[0];
         const leads = entry[1].leads;
-        
-        // Pseudo-random but consistent masking based on string length/index
-        const fakeInd = industries[(actualName.length + index) % industries.length];
-        const fakeReg = regions[(actualName.charCodeAt(0) + index) % regions.length];
-        let maskedName = `${fakeInd} (${fakeReg})`;
+
+        // Anonymised by position only. This previously invented an industry and region
+        // from the client's name length ("Med Spa (Arizona)"), which read as real
+        // information to anyone looking at it while being entirely fabricated.
+        let maskedName = `Client #${index + 1}`;
 
         // Highlight the user's actual row so they know where they are
         const isMe = normalize(actualName) === normalize(currentActiveClient);
-        if (isMe) maskedName = "You (Your Company)";
+        if (isMe) maskedName = "You";
 
         // Medals for top 3
         let rankBadge = `<span class="text-gray-500 font-bold w-6 text-center">${index + 1}</span>`;
@@ -2886,6 +2882,8 @@ function renderAnonymizedLeaderboard() {
     });
 
     listEl.innerHTML = html || '<p class="text-gray-500 italic text-center">No data for this period.</p>';
+}
+
 window.logQuickPayment = async function() {
             if (cSelectedAccount === "ALL") return;
             const btn = document.getElementById('btn-quick-pay');
@@ -2938,7 +2936,7 @@ window.logQuickPayment = async function() {
                 btn.innerHTML = '<i class="fa-solid fa-bolt mr-2"></i> Log Payment (+1 Month)';
                 btn.disabled = false;
             }
-        };}
+        };
 // ============================================================================
         // AI BRAIN: PHASE 1 - LOCAL DATA COMPRESSOR
         // ============================================================================
