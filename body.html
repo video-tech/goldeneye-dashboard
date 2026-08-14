@@ -110,9 +110,30 @@
             <div class="bg-white w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-xl"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="w-12" alt="Logo"></div>
             <h2 class="text-2xl font-bold mb-2 text-white">Midas HQ</h2>
             <p class="text-gray-400 text-sm mb-8">Sign in to access your dashboard.</p>
-            <button onclick="signIn()" class="w-full bg-white text-black font-bold py-4 rounded-xl flex items-center justify-center gap-3 hover:scale-[1.02] transition shadow-lg">
-                <i class="fa-brands fa-google text-blue-500"></i> Continue with Google
-            </button>
+
+            <div id="auth-step-email">
+                <input type="email" id="auth-email" class="glass-input mb-3 text-center" placeholder="you@company.com" autocomplete="email"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();sendLoginCode();}">
+                <button onclick="sendLoginCode()" id="btn-send-code" class="w-full bg-white text-black font-bold py-4 rounded-xl flex items-center justify-center gap-3 hover:scale-[1.02] transition shadow-lg">
+                    <i class="fa-solid fa-paper-plane"></i> Email me a sign-in code
+                </button>
+            </div>
+
+            <div id="auth-step-code" class="hidden">
+                <p class="text-sm text-gray-300 mb-4">We sent a 6-digit code to<br><span id="auth-email-display" class="font-bold text-white"></span></p>
+                <input type="text" id="auth-code" class="glass-input mb-3 text-center tracking-[0.5em] text-xl font-bold" placeholder="000000"
+                       inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();verifyLoginCode();}">
+                <button onclick="verifyLoginCode()" id="btn-verify-code" class="w-full bg-white text-black font-bold py-4 rounded-xl flex items-center justify-center gap-3 hover:scale-[1.02] transition shadow-lg">
+                    <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign in
+                </button>
+                <div class="flex justify-between mt-4 text-xs">
+                    <button onclick="backToEmailStep()" class="text-gray-400 hover:text-white">Use a different email</button>
+                    <button onclick="sendLoginCode(true)" class="text-gray-400 hover:text-white">Resend code</button>
+                </div>
+            </div>
+
+            <p id="auth-error" class="text-xs text-red-400 mt-4 hidden"></p>
         </div>
 
         <div id="auth-pending-view" class="hidden glass p-12 max-w-md mx-auto text-center mt-20">

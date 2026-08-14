@@ -255,7 +255,83 @@
         }
         initApp();
 
-        async function signIn() { await supabaseClient.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.href } }); }
+        // ================= EMAIL CODE SIGN-IN =================
+        // A 6-digit code rather than a clickable magic link: the link would open a new
+        // top-level tab, and browsers partition storage for third-party iframes, so the
+        // session created there wouldn't be visible to the dashboard running inside GHL.
+        // Typing the code creates the session in place, wherever the app is embedded.
+        let pendingAuthEmail = '';
+
+        function showAuthError(msg) {
+            const el = document.getElementById('auth-error');
+            if (!el) return;
+            if (!msg) { el.classList.add('hidden'); el.innerText = ''; return; }
+            el.innerText = msg;
+            el.classList.remove('hidden');
+        }
+
+        window.backToEmailStep = function() {
+            showAuthError('');
+            document.getElementById('auth-step-code').classList.add('hidden');
+            document.getElementById('auth-step-email').classList.remove('hidden');
+            document.getElementById('auth-code').value = '';
+        };
+
+        window.sendLoginCode = async function(isResend) {
+            const emailInput = document.getElementById('auth-email');
+            const email = (isResend ? pendingAuthEmail : (emailInput?.value || '')).trim().toLowerCase();
+
+            if (!email || !email.includes('@')) { showAuthError('Enter a valid email address.'); return; }
+            showAuthError('');
+
+            const btn = document.getElementById(isResend ? 'btn-verify-code' : 'btn-send-code');
+            const original = btn ? btn.innerHTML : '';
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...'; btn.disabled = true; }
+
+            try {
+                const { error } = await supabaseClient.auth.signInWithOtp({
+                    email,
+                    options: { shouldCreateUser: true }
+                });
+                if (error) throw error;
+
+                pendingAuthEmail = email;
+                document.getElementById('auth-email-display').innerText = email;
+                document.getElementById('auth-step-email').classList.add('hidden');
+                document.getElementById('auth-step-code').classList.remove('hidden');
+                document.getElementById('auth-code').focus();
+            } catch (err) {
+                showAuthError(err.message || 'Could not send the code. Try again.');
+            } finally {
+                if (btn) { btn.innerHTML = original; btn.disabled = false; }
+            }
+        };
+
+        window.verifyLoginCode = async function() {
+            const token = (document.getElementById('auth-code')?.value || '').trim();
+            if (token.length < 6) { showAuthError('Enter the 6-digit code from your email.'); return; }
+            showAuthError('');
+
+            const btn = document.getElementById('btn-verify-code');
+            const original = btn ? btn.innerHTML : '';
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...'; btn.disabled = true; }
+
+            try {
+                const { error } = await supabaseClient.auth.verifyOtp({
+                    email: pendingAuthEmail,
+                    token,
+                    type: 'email'
+                });
+                if (error) throw error;
+
+                // Session is stored; reload so initApp runs against it from a clean state
+                window.location.reload();
+            } catch (err) {
+                showAuthError(err.message || 'That code was not accepted. Codes expire after a few minutes.');
+                if (btn) { btn.innerHTML = original; btn.disabled = false; }
+            }
+        };
+
         async function signOut() { await supabaseClient.auth.signOut(); window.location.reload(); }
         
         function toggleTheme() { 
@@ -716,7 +792,7 @@ window.submitClientRequest = async function() {
             const btn = document.getElementById('submit-invite-btn'); const email = document.getElementById('input-invite-email').value.trim();
             if(!email) return alert("Please enter an email address"); btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             const { error } = await supabaseClient.from('pre_approved_users').upsert({ email: email, role: 'client', client_access: [currentActiveClient] });
-            if (error) { alert("Error: " + error.message); } else { alert("Invite sent! They can now log in with Google to view this dashboard."); closeInviteModal(); document.getElementById('input-invite-email').value = ''; }
+            if (error) { alert("Error: " + error.message); } else { alert("Invite sent! They can now sign in with their email to view this dashboard."); closeInviteModal(); document.getElementById('input-invite-email').value = ''; }
             btn.disabled = false; btn.innerText = "Send Invite";
         }
 
