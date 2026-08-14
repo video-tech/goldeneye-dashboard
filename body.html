@@ -1516,9 +1516,10 @@
                             <p class="text-[10px] text-gray-500 mt-1">Grants portal access and receives reports. Separate multiple with commas.</p>
                         </div>
                         <div class="col-span-2">
-                            <label class="modal-label">Mobile Number <span class="text-gray-500 font-normal">(optional)</span></label>
-                            <input type="text" id="new-client-phone" class="glass-input" placeholder="(555) 010-9999">
-                            <p class="text-[10px] text-gray-500 mt-1">Receives the weekly check-in text. Leave blank to skip them.</p>
+                            <p class="text-[10px] text-gray-500 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                                <i class="fa-solid fa-comment-sms mr-1 text-emerald-400"></i>
+                                Add the people who should receive the weekly check-in text via <strong class="text-gray-300">Edit</strong> once this client is created &mdash; you can list several.
+                            </p>
                         </div>
                         <div>
                             <label class="modal-label">Meta Ad Account ID</label>
@@ -1584,9 +1585,12 @@
                             <input type="text" id="edit-client-email" class="glass-input" placeholder="owner@acme.com, manager@acme.com">
                         </div>
                         <div class="col-span-2">
-                            <label class="modal-label">Mobile Number</label>
-                            <input type="text" id="edit-client-phone" class="glass-input" placeholder="(555) 010-9999">
-                            <p class="text-[10px] text-gray-500 mt-1">Receives the weekly check-in text.</p>
+                            <label class="modal-label">Check-in Contacts</label>
+                            <div id="edit-client-contacts-list" class="space-y-2"></div>
+                            <button type="button" onclick="addContactRow()" class="mt-2 text-xs text-blue-400 hover:text-blue-300 font-bold">
+                                <i class="fa-solid fa-plus mr-1"></i> Add contact
+                            </button>
+                            <p class="text-[10px] text-gray-500 mt-1">Everyone listed gets the weekly check-in text, and their replies are combined into one weekly figure for this client.</p>
                         </div>
                         <div>
                             <label class="modal-label">Meta Ad Account ID</label>

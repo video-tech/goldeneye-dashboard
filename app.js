@@ -16,6 +16,7 @@
         let globalCreativesData = [];
         let globalSeoData = [];
         let globalCheckinsData = [];
+        let globalContactsData = [];
         let allRawSeo = [];
         
         // Dashboard States
@@ -160,6 +161,51 @@
         }
 
         const sumCheckins = (rows, field) => rows.reduce((sum, r) => sum + (parseFloat(r[field]) || 0), 0);
+
+        // A client can have several people reporting — one row per person per week — so
+        // anything displaying weeks has to roll them up. Totals elsewhere already sum
+        // across rows and need no change; this is for the views that list weeks.
+        // Returns newest week first, each with combined totals and its contributors.
+        function checkinsByWeek(client) {
+            const byWeek = new Map();
+
+            checkinsForClient(client).forEach(c => {
+                const wk = c.week_start || 'Unknown';
+                if (!byWeek.has(wk)) {
+                    byWeek.set(wk, {
+                        week_start: wk,
+                        estimates_count: 0,
+                        closes_count: 0,
+                        revenue_total: 0,
+                        // null when nobody reported a number, versus a real reported 0
+                        reportedEstimates: false,
+                        reportedCloses: false,
+                        reportedRevenue: false,
+                        needsReview: false,
+                        contributors: []
+                    });
+                }
+                const w = byWeek.get(wk);
+
+                if (c.estimates_count !== null && c.estimates_count !== undefined) { w.estimates_count += parseFloat(c.estimates_count) || 0; w.reportedEstimates = true; }
+                if (c.closes_count    !== null && c.closes_count    !== undefined) { w.closes_count    += parseFloat(c.closes_count)    || 0; w.reportedCloses    = true; }
+                if (c.revenue_total   !== null && c.revenue_total   !== undefined) { w.revenue_total   += parseFloat(c.revenue_total)   || 0; w.reportedRevenue   = true; }
+
+                if (c.parse_confidence === 'low') w.needsReview = true;
+                w.contributors.push(c);
+            });
+
+            return [...byWeek.values()].sort((a, b) => String(b.week_start).localeCompare(String(a.week_start)));
+        }
+
+        // How many people are set up to report for a client, so a week that came in short
+        // can be flagged rather than read as a genuinely quiet week.
+        function activeContactCount(client) {
+            const name = typeof client === 'string' ? client : client?.name;
+            if (!name) return 0;
+            const want = normalize(name);
+            return globalContactsData.filter(c => normalize(c.client_name) === want && c.active !== false).length;
+        }
 
         // ================= CLIENT STATUS =================
         // 'active' = pulled by Make.com each morning and counted in rollups.
@@ -389,7 +435,8 @@
                 clientLeadsQuery,
                 supabaseClient.from('ad_approvals').select('*').in('client_name', allowedClients),
                 supabaseClient.from('seo_metrics').select('*').in('client_name', allowedClients),
-                supabaseClient.from('weekly_checkins').select('*').in('client_name', allowedClients)
+                supabaseClient.from('weekly_checkins').select('*').in('client_name', allowedClients),
+                supabaseClient.from('client_contacts').select('*').in('client_name', allowedClients)
             ]);
 
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
@@ -400,6 +447,7 @@
             globalCreativesData = results[3].status === 'fulfilled' ? (results[3].value.data || []) : [];
             allRawSeo = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
             globalCheckinsData = results[5].status === 'fulfilled' ? (results[5].value.data || []) : [];
+            globalContactsData = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
 
             const switcher = document.getElementById('admin-switcher');
             const select = document.getElementById('admin-client-list');
@@ -562,17 +610,22 @@ updateAgencyPowerTicker();
             if (!body) return;
             body.innerHTML = '';
 
-            const rows = checkinsForClient(currentActiveClient).slice(0, 10);
-            if (!rows.length) {
+            // Combined per week — a client with several reps reporting should see one
+            // line per week, not one per person
+            const weeks = checkinsByWeek(currentActiveClient).slice(0, 10);
+            if (!weeks.length) {
                 body.innerHTML = '<tr><td colspan="4" class="text-center py-4 opacity-50">No check-ins yet &mdash; reply to the weekly text and it will appear here.</td></tr>';
                 return;
             }
 
-            const num = v => (v === null || v === undefined || v === '') ? '&mdash;' : v;
-            rows.forEach(c => {
+            weeks.forEach(w => {
                 const row = document.createElement('tr');
-                const rev = c.revenue_total ? '$' + parseFloat(c.revenue_total).toLocaleString() : '&mdash;';
-                row.innerHTML = `<td class="text-xs opacity-50">${c.week_start || '&mdash;'}</td><td class="font-bold">${num(c.estimates_count)}</td><td class="font-bold text-green-400">${num(c.closes_count)}</td><td class="text-right text-blue-400 font-bold">${rev}</td>`;
+                const names = [...new Set(w.contributors.map(c => c.contact_name).filter(Boolean))];
+                const who = names.length > 1 ? `<span class="text-[10px] opacity-50 ml-2">${escapeHTML(names.join(', '))}</span>` : '';
+                row.innerHTML = `<td class="text-xs opacity-50">${w.week_start}${who}</td>`
+                    + `<td class="font-bold">${w.reportedEstimates ? w.estimates_count : '&mdash;'}</td>`
+                    + `<td class="font-bold text-green-400">${w.reportedCloses ? w.closes_count : '&mdash;'}</td>`
+                    + `<td class="text-right text-blue-400 font-bold">${w.reportedRevenue ? '$' + w.revenue_total.toLocaleString() : '&mdash;'}</td>`;
                 body.appendChild(row);
             });
         }
@@ -832,13 +885,17 @@ window.submitClientRequest = async function() {
     // Weekly client-reported estimates/closes/revenue, arriving by SMS
     let checkinsQ = supabaseClient.from('weekly_checkins').select('*').order('week_start', { ascending: false });
 
+    // Who gets texted for each client — several people for clients with sales teams
+    let contactsQ = supabaseClient.from('client_contacts').select('*');
+
     if (allowedClients && currentUserRole !== 'admin') {
         clientsQ = clientsQ.in('name', allowedClients); healthQ = healthQ.in('client_name', allowedClients); tasksQ = tasksQ.in('client', allowedClients); crQ = crQ.in('client_name', allowedClients); seoQ = seoQ.in('client_name', allowedClients);
         checkinsQ = checkinsQ.in('client_name', allowedClients);
+        contactsQ = contactsQ.in('client_name', allowedClients);
     }
 
     // 👇 2. ADD auditsQ TO THE END OF THIS ARRAY 👇
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ ]);
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ ]);
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
     
@@ -861,6 +918,7 @@ window.submitClientRequest = async function() {
     globalSeoData = results[5].status === 'fulfilled' ? (results[5].value.data || []) : [];
     globalAuditsData = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
     globalCheckinsData = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
+    globalContactsData = results[8].status === 'fulfilled' ? (results[8].value.data || []) : [];
 
     // ... the rest of the function continues as normal ...
 
@@ -1770,41 +1828,76 @@ async function fetchHealthData() {
             // aggregate view, so no visibility toggling needed here.
             if (cSelectedAccount === "ALL") return;
 
-            const rows = checkinsForClient(cSelectedAccount).slice(0, 8);
-            if (rows.length === 0) {
+            // One row per week, combining everyone who reported for this client
+            const weeks = checkinsByWeek(cSelectedAccount).slice(0, 8);
+            if (weeks.length === 0) {
                 list.innerHTML = `<p class="text-xs text-gray-500 italic">No check-ins yet. They arrive automatically when this client replies to the weekly text.</p>`;
                 return;
             }
 
-            const money = v => (v === null || v === undefined || v === '') ? '&mdash;' : '$' + Number(v).toLocaleString();
-            const num   = v => (v === null || v === undefined || v === '') ? '&mdash;' : v;
+            const expected = activeContactCount(cSelectedAccount);
 
             let html = `<table class="w-full text-left text-sm">
                 <thead class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
-                    <tr><th class="py-2">Week of</th><th>Estimates</th><th>Closed</th><th>Revenue</th><th></th></tr>
+                    <tr><th class="py-2">Week of</th><th>Estimates</th><th>Closed</th><th>Revenue</th><th>Reported</th><th></th></tr>
                 </thead><tbody class="divide-y divide-white/5">`;
 
-            rows.forEach(r => {
-                const unsure = r.parse_confidence === 'low';
-                html += `<tr class="${unsure ? 'bg-amber-500/5' : ''}">
-                    <td class="py-2 font-bold">${r.week_start || '&mdash;'}</td>
-                    <td>${num(r.estimates_count)}</td>
-                    <td class="text-green-400 font-bold">${num(r.closes_count)}</td>
-                    <td class="text-blue-400">${money(r.revenue_total)}</td>
-                    <td class="text-right">${unsure
-                        ? `<span class="text-[9px] uppercase tracking-widest text-amber-400" title="Couldn't read this reply confidently — check the original text">Needs review</span>`
+            weeks.forEach((w, i) => {
+                const reporters = new Set(w.contributors.map(c => c.contact_phone || c.contact_name || 'unknown')).size;
+                const short = expected > 0 && reporters < expected;
+                const rowTint = w.needsReview ? 'bg-amber-500/5' : '';
+                const multi = w.contributors.length > 1;
+
+                html += `<tr class="${rowTint}">
+                    <td class="py-2 font-bold">
+                        ${multi ? `<button onclick="toggleCheckinWeek(${i})" class="text-gray-400 hover:text-white mr-1"><i id="cw-icon-${i}" class="fa-solid fa-chevron-right text-[9px]"></i></button>` : '<span class="inline-block w-4"></span>'}${w.week_start}
+                    </td>
+                    <td>${w.reportedEstimates ? w.estimates_count : '&mdash;'}</td>
+                    <td class="text-green-400 font-bold">${w.reportedCloses ? w.closes_count : '&mdash;'}</td>
+                    <td class="text-blue-400">${w.reportedRevenue ? '$' + w.revenue_total.toLocaleString() : '&mdash;'}</td>
+                    <td class="${short ? 'text-amber-400' : 'text-gray-500'} text-[11px]">${expected > 0 ? `${reporters} of ${expected}` : reporters}</td>
+                    <td class="text-right">${w.needsReview
+                        ? `<span class="text-[9px] uppercase tracking-widest text-amber-400" title="A reply couldn't be read confidently — check the original text">Needs review</span>`
                         : ''}</td>
                 </tr>`;
-                if (unsure && r.raw_reply) {
-                    html += `<tr class="bg-amber-500/5"><td colspan="5" class="pb-2 text-[11px] text-gray-400 italic">&ldquo;${escapeHTML(r.raw_reply)}&rdquo;</td></tr>`;
+
+                // Per-person breakdown, hidden until the week is expanded
+                if (multi) {
+                    html += `<tr id="cw-detail-${i}" class="hidden"><td colspan="6" class="pb-3 pl-8">
+                        <table class="w-full text-left text-[11px] text-gray-400">`;
+                    w.contributors.forEach(c => {
+                        html += `<tr>
+                            <td class="py-1 pr-4">${escapeHTML(c.contact_name || c.contact_phone || 'Unknown')}</td>
+                            <td class="pr-4">${c.estimates_count ?? '&mdash;'} est</td>
+                            <td class="pr-4">${c.closes_count ?? '&mdash;'} closed</td>
+                            <td class="pr-4">${c.revenue_total ? '$' + Number(c.revenue_total).toLocaleString() : '&mdash;'}</td>
+                            <td class="italic opacity-70">${c.parse_confidence === 'low' && c.raw_reply ? '&ldquo;' + escapeHTML(c.raw_reply) + '&rdquo;' : ''}</td>
+                        </tr>`;
+                    });
+                    html += `</table></td></tr>`;
+                }
+
+                // Single-reply weeks show their raw text inline when it couldn't be parsed
+                if (!multi && w.needsReview) {
+                    const raw = w.contributors[0]?.raw_reply;
+                    if (raw) html += `<tr class="bg-amber-500/5"><td colspan="6" class="pb-2 pl-8 text-[11px] text-gray-400 italic">&ldquo;${escapeHTML(raw)}&rdquo;</td></tr>`;
                 }
             });
 
             list.innerHTML = html + `</tbody></table>`;
         }
 
+        window.toggleCheckinWeek = function(i) {
+            const row = document.getElementById('cw-detail-' + i);
+            const icon = document.getElementById('cw-icon-' + i);
+            if (!row) return;
+            const open = !row.classList.contains('hidden');
+            row.classList.toggle('hidden', open);
+            if (icon) icon.className = `fa-solid fa-chevron-${open ? 'right' : 'down'} text-[9px]`;
+        };
+
         function openHealthDrawer() {
-            document.getElementById('h-client-name').innerText = cSelectedAccount; 
+            document.getElementById('h-client-name').innerText = cSelectedAccount;
             
             // Prefill from a rolling 4-week window of check-ins.
             const HEALTH_WINDOW_WEEKS = 4;
@@ -2288,9 +2381,16 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
                     .slice(-50)
                     .map(t => ({ title: t.title, status: t.status }));
                     
-                const clientOutcomes = checkinsForClient(cSelectedAccount)
+                // Rolled up per week so the model sees a trend, not one entry per rep
+                const clientOutcomes = checkinsByWeek(cSelectedAccount)
                     .slice(0, 26)
-                    .map(c => ({ week: c.week_start, estimates: c.estimates_count, closed: c.closes_count, revenue: c.revenue_total }));
+                    .map(w => ({
+                        week: w.week_start,
+                        estimates: w.reportedEstimates ? w.estimates_count : null,
+                        closed: w.reportedCloses ? w.closes_count : null,
+                        revenue: w.reportedRevenue ? w.revenue_total : null,
+                        reporters: w.contributors.length
+                    }));
 
                 const clientHealth = globalHealthData[normC] || 'Unknown';
                 
@@ -3728,7 +3828,7 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-contact-name').value = c.contact_name || '';
     document.getElementById('edit-client-industry').value     = c.industry || '';
     document.getElementById('edit-client-email').value        = c.client_email || '';
-    document.getElementById('edit-client-phone').value        = c.client_phone || '';
+    renderContactRows(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
     document.getElementById('edit-client-business-id').value  = c.business_id || '';
     document.getElementById('edit-client-retainer').value     = c.monthly_retainer || '';
@@ -3736,6 +3836,75 @@ window.openEditClientModal = function() {
 
     modal.style.display = 'flex';
 };
+
+// ---- Check-in contacts editor ----
+// One row per person who should receive the weekly text. Stored in client_contacts
+// rather than on the client, since several reps can report for one business.
+window.renderContactRows = function(clientName) {
+    const list = document.getElementById('edit-client-contacts-list');
+    if (!list) return;
+    const want = normalize(clientName);
+    const rows = globalContactsData.filter(c => normalize(c.client_name) === want);
+    list.innerHTML = '';
+    if (rows.length === 0) { addContactRow(); return; }
+    rows.forEach(r => addContactRow(r));
+};
+
+window.addContactRow = function(contact) {
+    const list = document.getElementById('edit-client-contacts-list');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'contact-row flex gap-2 items-start';
+    row.dataset.contactId = contact?.id || '';
+    row.innerHTML = `
+        <input type="text" class="glass-input !py-1.5 contact-name" placeholder="Name" value="${escapeHTML(contact?.contact_name || '')}">
+        <input type="text" class="glass-input !py-1.5 contact-phone" placeholder="(555) 010-9999" value="${escapeHTML(contact?.phone || '')}">
+        <input type="text" class="glass-input !py-1.5 !w-28 contact-title" placeholder="Role" value="${escapeHTML(contact?.title || '')}">
+        <button type="button" onclick="this.closest('.contact-row').remove()" class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
+            <i class="fa-solid fa-xmark"></i>
+        </button>`;
+    list.appendChild(row);
+};
+
+// Reconcile the edited list against what's stored: delete rows the admin removed,
+// upsert the rest. Keyed on phone, which is also what the inbound webhook matches on.
+async function saveClientContacts(clientName) {
+    const rows = [...document.querySelectorAll('#edit-client-contacts-list .contact-row')];
+
+    const entered = rows.map(r => ({
+        id: r.dataset.contactId || null,
+        contact_name: r.querySelector('.contact-name').value.trim() || null,
+        phone: normalizePhone(r.querySelector('.contact-phone').value),
+        title: r.querySelector('.contact-title').value.trim() || null
+    })).filter(c => c.phone);
+
+    const phones = entered.map(c => c.phone);
+    const dupes = phones.filter((p, i) => phones.indexOf(p) !== i);
+    if (dupes.length) throw new Error(`The same number is listed twice: ${dupes[0]}`);
+
+    const want = normalize(clientName);
+    const existing = globalContactsData.filter(c => normalize(c.client_name) === want);
+
+    const keptIds = new Set(entered.map(c => c.id).filter(Boolean));
+    const removed = existing.filter(c => !keptIds.has(c.id));
+    if (removed.length) {
+        const { error } = await supabaseClient.from('client_contacts').delete().in('id', removed.map(c => c.id));
+        if (error) throw error;
+    }
+
+    if (entered.length) {
+        const payload = entered.map(c => ({
+            ...(c.id ? { id: c.id } : {}),
+            client_name: clientName,
+            contact_name: c.contact_name,
+            phone: c.phone,
+            title: c.title,
+            active: true
+        }));
+        const { error } = await supabaseClient.from('client_contacts').upsert(payload, { onConflict: 'phone' });
+        if (error) throw error;
+    }
+}
 
 window.saveClientEdits = async function(e) {
     e.preventDefault();
@@ -3783,7 +3952,6 @@ window.saveClientEdits = async function(e) {
             contact_name: document.getElementById('edit-client-contact-name').value.trim() || null,
             industry: document.getElementById('edit-client-industry').value.trim() || null,
             client_email: document.getElementById('edit-client-email').value.trim() || null,
-            client_phone: normalizePhone(document.getElementById('edit-client-phone').value) || null,
             ad_account_id: adAccountId,
             business_id: document.getElementById('edit-client-business-id').value.trim() || null,
             contract_type: document.getElementById('edit-client-contract').value,
@@ -3792,6 +3960,9 @@ window.saveClientEdits = async function(e) {
 
         const { error } = await supabaseClient.from('clients').update(payload).eq('id', id);
         if (error) throw error;
+
+        // After the rename, so contacts are filed under the client's current name
+        await saveClientContacts(newName);
 
         document.getElementById('edit-client-modal').style.display = 'none';
 
@@ -4108,16 +4279,13 @@ window.saveNewClient = async function(e) {
         return;
     }
 
-    // Store bare digits so the weekly check-in webhook can match on the number
-    // regardless of how GHL formats it.
-    const clientPhone = normalizePhone(document.getElementById('new-client-phone').value);
-
+    // Check-in contacts live in client_contacts and are added via Edit after creation,
+    // since a client can have several people reporting.
     const payload = {
         name: document.getElementById('new-client-name').value.trim(),
         contact_name: document.getElementById('new-client-contact-name').value.trim() || null,
         industry: document.getElementById('new-client-industry').value.trim() || null,
         client_email: document.getElementById('new-client-email').value.trim(),
-        client_phone: clientPhone || null,
         ad_account_id: adAccountId,
         business_id: businessId || null,
         contract_type: document.getElementById('new-client-contract').value,
