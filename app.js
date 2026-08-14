@@ -308,8 +308,9 @@
         };
 
         window.verifyLoginCode = async function() {
-            const token = (document.getElementById('auth-code')?.value || '').trim();
-            if (token.length < 6) { showAuthError('Enter the 6-digit code from your email.'); return; }
+            // Strip spaces/dashes people paste along with the code
+            const token = (document.getElementById('auth-code')?.value || '').replace(/[\s-]/g, '').trim();
+            if (token.length < 6) { showAuthError('Enter the full code from your email.'); return; }
             showAuthError('');
 
             const btn = document.getElementById('btn-verify-code');

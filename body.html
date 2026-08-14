@@ -120,9 +120,11 @@
             </div>
 
             <div id="auth-step-code" class="hidden">
-                <p class="text-sm text-gray-300 mb-4">We sent a 6-digit code to<br><span id="auth-email-display" class="font-bold text-white"></span></p>
-                <input type="text" id="auth-code" class="glass-input mb-3 text-center tracking-[0.5em] text-xl font-bold" placeholder="000000"
-                       inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+                <p class="text-sm text-gray-300 mb-4">We sent a sign-in code to<br><span id="auth-email-display" class="font-bold text-white"></span></p>
+                <!-- maxlength is deliberately generous: Supabase's OTP length is a project
+                     setting, and a too-short limit silently truncates a pasted code. -->
+                <input type="text" id="auth-code" class="glass-input mb-3 text-center tracking-[0.3em] text-xl font-bold" placeholder="Enter code"
+                       inputmode="numeric" maxlength="12" autocomplete="one-time-code"
                        onkeydown="if(event.key==='Enter'){event.preventDefault();verifyLoginCode();}">
                 <button onclick="verifyLoginCode()" id="btn-verify-code" class="w-full bg-white text-black font-bold py-4 rounded-xl flex items-center justify-center gap-3 hover:scale-[1.02] transition shadow-lg">
                     <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign in
