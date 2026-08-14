@@ -2612,6 +2612,28 @@ window.renderClientPayments = function() {
             if (activeBtn) activeBtn.className = 'whitespace-nowrap pb-3 text-sm font-bold text-blue-400 border-b-2 border-blue-400 transition';
             
             if (view === 'milestones') renderMilestonesSettings();
+            if (view === 'users') { renderUsersTable(); populateInviteClientList(); }
+        };
+
+        // Checkbox list of clients for the invite form
+        window.populateInviteClientList = function() {
+            const list = document.getElementById('invite-client-list');
+            if (!list) return;
+            const names = globalClientsData.filter(c => isSelectableClient(c) && c.name).map(c => c.name).sort();
+            list.innerHTML = names.map(n =>
+                `<label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/5 cursor-pointer">
+                    <input type="checkbox" value="${escapeHTML(n)}" onchange="updateInviteClientLabel()" class="row-checkbox">
+                    <span class="text-xs text-gray-300">${escapeHTML(n)}</span>
+                </label>`).join('') || '<p class="text-xs text-gray-500 italic px-2">No clients yet.</p>';
+        };
+
+        window.updateInviteClientLabel = function() {
+            const chosen = [...document.querySelectorAll('#invite-client-list input[type=checkbox]:checked')];
+            const lbl = document.getElementById('invite-client-text');
+            if (!lbl) return;
+            lbl.innerText = chosen.length === 0 ? 'Select clients...'
+                : chosen.length === 1 ? chosen[0].value
+                : `${chosen.length} clients selected`;
         };
 
         window.exportDataJson = window.exportDataJson || function() { console.log("Export data stub"); };
@@ -2692,7 +2714,186 @@ window.deleteMilestoneSetting = async function(id) {
 };
         window.checkHealthWeights = window.checkHealthWeights || function() { console.log("Check health weights stub"); };
         window.saveHealthWeights = window.saveHealthWeights || function() { console.log("Save health weights stub"); };
-        window.inviteUser = window.inviteUser || function(e) { e.preventDefault(); console.log("Invite user stub"); };
+        // ================= USERS & ROLES =================
+        // Access comes from two tables: user_profiles (people who have signed in) and
+        // pre_approved_users (invited, not yet registered). user_client_access scopes
+        // which clients a member or investor can see.
+        window.renderUsersTable = async function() {
+            const el = document.getElementById('st-users');
+            if (!el) return;
+            el.innerHTML = '<p class="text-sm text-gray-500 italic">Loading users&hellip;</p>';
+
+            const [profRes, preRes, accRes] = await Promise.allSettled([
+                supabaseClient.from('user_profiles').select('*'),
+                supabaseClient.from('pre_approved_users').select('*'),
+                supabaseClient.from('user_client_access').select('*')
+            ]);
+
+            const profiles = profRes.status === 'fulfilled' ? (profRes.value.data || []) : [];
+            const invites  = preRes.status  === 'fulfilled' ? (preRes.value.data  || []) : [];
+            const access   = accRes.status  === 'fulfilled' ? (accRes.value.data  || []) : [];
+
+            const key = e => String(e || '').toLowerCase().trim();
+
+            // Merge both sources on email; a registered profile wins over its invite
+            const byEmail = new Map();
+            invites.forEach(i => {
+                if (!i.email) return;
+                byEmail.set(key(i.email), {
+                    email: i.email, name: '', role: i.role || 'pending',
+                    registered: false,
+                    clients: Array.isArray(i.client_access) ? i.client_access : []
+                });
+            });
+            profiles.forEach(p => {
+                if (!p.email) return;
+                const existing = byEmail.get(key(p.email));
+                byEmail.set(key(p.email), {
+                    email: p.email,
+                    name: p.full_name || '',
+                    role: p.role || 'pending',
+                    registered: true,
+                    clients: existing ? existing.clients : []
+                });
+            });
+            // user_client_access is the live source once someone has registered
+            access.forEach(a => {
+                const u = byEmail.get(key(a.user_email));
+                if (u && a.client_name && !u.clients.includes(a.client_name)) u.clients.push(a.client_name);
+            });
+
+            const users = [...byEmail.values()].sort((a, b) =>
+                (a.role || '').localeCompare(b.role || '') || a.email.localeCompare(b.email));
+
+            if (!users.length) {
+                el.innerHTML = '<p class="text-sm text-gray-500 italic">No users yet. Invite someone above.</p>';
+                return;
+            }
+
+            const roleOpts = ['admin', 'member', 'investor', 'client', 'pending'];
+            let html = `<div class="overflow-x-auto"><table class="w-full text-left text-sm">
+                <thead class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                    <tr><th class="py-2">User</th><th>Role</th><th>Client Access</th><th>Status</th><th></th></tr>
+                </thead><tbody class="divide-y divide-white/5">`;
+
+            users.forEach(u => {
+                const opts = roleOpts.map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('');
+                const clientList = u.clients.length
+                    ? u.clients.map(c => `<span class="text-[10px] bg-white/5 border border-white/10 rounded px-1.5 py-0.5 mr-1 inline-block mb-1">${escapeHTML(c)}</span>`).join('')
+                    : (u.role === 'admin' ? '<span class="text-[10px] text-gray-500">All clients</span>' : '<span class="text-[10px] text-amber-400">None &mdash; cannot see any data</span>');
+
+                html += `<tr>
+                    <td class="py-3 pr-4">
+                        <div class="font-bold text-white">${escapeHTML(u.name || u.email)}</div>
+                        ${u.name ? `<div class="text-[11px] text-gray-500">${escapeHTML(u.email)}</div>` : ''}
+                    </td>
+                    <td class="pr-4">
+                        <select onchange="updateUserRole('${escapeHTML(u.email)}', this.value, this)" class="glass-input !py-1 !text-xs !w-28">${opts}</select>
+                    </td>
+                    <td class="pr-4 max-w-[280px]">${clientList}</td>
+                    <td class="pr-4">${u.registered
+                        ? '<span class="text-[10px] uppercase tracking-widest text-green-400">Registered</span>'
+                        : '<span class="text-[10px] uppercase tracking-widest text-gray-500">Invited</span>'}</td>
+                    <td class="text-right">
+                        <button onclick="revokeUser('${escapeHTML(u.email)}')" class="text-red-500/60 hover:text-red-400 text-xs" title="Revoke all access">
+                            <i class="fa-solid fa-user-slash"></i>
+                        </button>
+                    </td>
+                </tr>`;
+            });
+
+            el.innerHTML = html + '</tbody></table></div>';
+        };
+
+        window.updateUserRole = async function(email, role, selectEl) {
+            if (currentUserRole !== 'admin') return;
+
+            const original = selectEl ? selectEl.value : role;
+            try {
+                // Update whichever table holds them — a user may be registered, invited, or both
+                const [{ error: pErr }, { error: iErr }] = await Promise.all([
+                    supabaseClient.from('user_profiles').update({ role }).eq('email', email),
+                    supabaseClient.from('pre_approved_users').update({ role }).eq('email', email)
+                ]);
+                if (pErr && iErr) throw pErr;
+                if (selectEl) {
+                    selectEl.classList.add('!border-green-500');
+                    setTimeout(() => selectEl.classList.remove('!border-green-500'), 1500);
+                }
+            } catch (err) {
+                alert("Could not change role: " + err.message);
+                if (selectEl) selectEl.value = original;
+            }
+        };
+
+        window.revokeUser = async function(email) {
+            if (currentUserRole !== 'admin') return;
+            if (email && email.toLowerCase() === String(clientEmail).toLowerCase()) {
+                alert("You can't revoke your own access.");
+                return;
+            }
+            if (!confirm(`Revoke all access for ${email}?\n\nThey'll be removed from the invite list and their client access, and their role set to pending. Their Supabase login itself isn't deleted.`)) return;
+
+            try {
+                await Promise.all([
+                    supabaseClient.from('user_profiles').update({ role: 'pending' }).eq('email', email),
+                    supabaseClient.from('pre_approved_users').delete().eq('email', email),
+                    supabaseClient.from('user_client_access').delete().eq('user_email', email)
+                ]);
+                renderUsersTable();
+            } catch (err) {
+                alert("Could not revoke access: " + err.message);
+            }
+        };
+
+        // Admin invite. Writes the pre-approval and, for scoped roles, the per-client rows
+        // that actually drive what they can see.
+        window.inviteUser = async function(e) {
+            if (e && e.preventDefault) e.preventDefault();
+            if (currentUserRole !== 'admin') return;
+
+            const emailEl = document.getElementById('invite-email');
+            const roleEl  = document.getElementById('invite-role');
+            const btn     = document.getElementById('btn-send-invite');
+
+            const email = (emailEl?.value || '').trim().toLowerCase();
+            const role  = (roleEl?.value  || 'member').trim().toLowerCase();
+            if (!email) { alert("Enter an email address."); return; }
+
+            const chosen = [...document.querySelectorAll('#invite-client-list input[type=checkbox]:checked')].map(c => c.value);
+            if (role !== 'admin' && chosen.length === 0) {
+                if (!confirm(`No clients selected. ${email} will be able to sign in but won't see any data until you grant access. Continue?`)) return;
+            }
+
+            const originalHTML = btn ? btn.innerHTML : '';
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Inviting...'; btn.disabled = true; }
+
+            try {
+                const { error } = await supabaseClient.from('pre_approved_users')
+                    .upsert({ email, role, client_access: chosen }, { onConflict: 'email' });
+                if (error) throw error;
+
+                // user_client_access is what the app actually reads for scoping
+                if (chosen.length) {
+                    await supabaseClient.from('user_client_access').delete().eq('user_email', email);
+                    const rows = chosen.map(c => ({ user_email: email, client_name: c }));
+                    const { error: accErr } = await supabaseClient.from('user_client_access').insert(rows);
+                    if (accErr) throw accErr;
+                }
+
+                if (emailEl) emailEl.value = '';
+                document.querySelectorAll('#invite-client-list input[type=checkbox]:checked').forEach(c => c.checked = false);
+                const lbl = document.getElementById('invite-client-text');
+                if (lbl) lbl.innerText = 'Select clients...';
+
+                renderUsersTable();
+                alert(`${email} can now sign in as ${role}.`);
+            } catch (err) {
+                alert("Could not send invite: " + err.message);
+            } finally {
+                if (btn) { btn.innerHTML = originalHTML; btn.disabled = false; }
+            }
+        };
         window.previewScoreWeighting = window.previewScoreWeighting || function() { console.log("Preview score stub"); };
         window.saveScoringWeights = window.saveScoringWeights || function() { console.log("Save scoring weights stub"); };
         window.uploadCreative = window.uploadCreative || function(e) { e.preventDefault(); console.log("Upload creative stub"); };
