@@ -392,13 +392,6 @@
                                 </div>
                         </div>
 
-                        <div id="c-checkins-box" class="glass p-6 border-l-4 border-emerald-500 hidden flex flex-col">
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-comment-sms mr-2 text-emerald-400"></i> Weekly Check-ins</h3>
-                                <span class="text-[10px] text-gray-500 uppercase tracking-widest">Client reported</span>
-                            </div>
-                            <div id="c-checkins-list" class="overflow-x-auto"></div>
-                        </div>
 
                         <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
                             <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Spend</p><h4 class="text-xl font-bold" id="kpi-spend">$0</h4></div>
@@ -451,11 +444,12 @@
                             <div class="flex justify-between items-center px-2">
                                 <div><h2 class="text-xl font-bold">Network Health Overview</h2><p class="text-sm text-gray-400">Aggregated relationship metrics across all active clients.</p></div>
                             </div>
-                            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
+                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                                 <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg Score</p><h4 class="text-xl font-bold" id="gh-avg-score">--</h4></div>
                                 <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">At Risk (<40)</p><h4 class="text-xl font-bold text-red-400" id="gh-at-risk">0</h4></div>
-                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Appts</p><h4 class="text-xl font-bold text-purple-400" id="gh-total-appts">0</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Estimates</p><h4 class="text-xl font-bold text-purple-400" id="gh-total-appts">0</h4></div>
                                 <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Deals</p><h4 class="text-xl font-bold text-green-400" id="gh-total-deals">0</h4></div>
+                                <div class="glass p-4 border-b-4 border-emerald-500/50"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Revenue Reported</p><h4 class="text-xl font-bold text-emerald-400" id="gh-total-revenue">--</h4></div>
                             </div>
                             <div class="glass p-6">
                                 <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Client Health Ranking</h3>
@@ -476,13 +470,22 @@
                             
                             <div id="client-health-alert-container" class="hidden"></div>
 
-                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
                                 <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Milestones</p><h4 class="text-xl font-bold" id="h-kpi-mile">--</h4></div>
                                 <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Last Comm</p><h4 class="text-xl font-bold" id="h-kpi-comm">--</h4></div>
                                 <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">GHL Usage</p><h4 class="text-xl font-bold text-blue-400" id="h-kpi-ghl">--</h4></div>
                                 <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Lead Vol</p><h4 class="text-xl font-bold" id="h-kpi-leads">--</h4></div>
-                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Appts</p><h4 class="text-xl font-bold text-purple-400" id="h-kpi-appts">--</h4></div>
+                                <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Estimates</p><h4 class="text-xl font-bold text-purple-400" id="h-kpi-appts">--</h4></div>
                                 <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Deals</p><h4 class="text-xl font-bold text-green-400" id="h-kpi-deals">--</h4></div>
+                                <div class="glass p-4 border-b-4 border-emerald-500/50"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Revenue Reported</p><h4 class="text-xl font-bold text-emerald-400" id="h-kpi-revenue">--</h4></div>
+                            </div>
+
+                            <div id="c-checkins-box" class="glass p-6 border-l-4 border-emerald-500 flex flex-col">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-comment-sms mr-2 text-emerald-400"></i> Weekly Check-ins</h3>
+                                    <span class="text-[10px] text-gray-500 uppercase tracking-widest">Client reported by text</span>
+                                </div>
+                                <div id="c-checkins-list" class="overflow-x-auto"></div>
                             </div>
 
                             <div id="latest-health-note-container" class="glass p-4 hidden border-l-4 border-blue-500">

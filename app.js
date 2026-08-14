@@ -1303,7 +1303,7 @@ function filterAdsData() {
                     if (allClientsTable) allClientsTable.classList.remove('hidden');
 
                     // Per-client controls make no sense in the aggregate view
-                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive', 'c-checkins-box'].forEach(id => {
+                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive'].forEach(id => {
                         const el = document.getElementById(id);
                         if (el) el.classList.add('hidden');
                     });
@@ -1361,7 +1361,6 @@ function filterAdsData() {
                     }
 
                     renderClientTasks();
-                    renderClientCheckins();
                 }
 
                 const n=new Date();
@@ -1483,11 +1482,25 @@ async function fetchHealthData() {
                         if (isActive) {
                             if (h.current_score > 0) { tScore += h.current_score; sClients++; }
                             if (h.current_score > 0 && h.current_score < 40) atRisk++;
-                            tAppts += (h.appts_vol || 0);
-                            tDeals += (h.deals_closed || 0);
                         }
                     });
                 }
+
+                // Totals come from each client's latest check-in where it beats the saved
+                // staff figure, matching the per-client tiles. Counting off client_health
+                // alone showed zero until someone opened the drawer and saved.
+                let tRevenue = 0;
+                activeClients.forEach(c => {
+                    const health = allHealth?.find(h => normalize(h.client_name) === normalize(c.name));
+                    const rows = checkinsForClient(c);
+                    const latest = rows[0];
+                    tAppts += Math.max(health?.appts_vol || 0, latest?.estimates_count ?? 0);
+                    tDeals += Math.max(health?.deals_closed || 0, latest?.closes_count ?? 0);
+                    tRevenue += rows.reduce((sum, r) => sum + (parseFloat(r.revenue_total) || 0), 0);
+                });
+
+                const ghRevEl = document.getElementById('gh-total-revenue');
+                if (ghRevEl) ghRevEl.innerText = tRevenue > 0 ? '$' + tRevenue.toLocaleString(undefined, {maximumFractionDigits:0}) : '--';
 
                 const aScore = sClients > 0 ? Math.round(tScore / sClients) : 0;
                 document.getElementById('gh-avg-score').innerText = aScore;
@@ -1535,7 +1548,22 @@ async function fetchHealthData() {
 
             document.getElementById('h-kpi-mile').innerText=`${dbClientMilestones.length}/${dbMilestones.length}`;
             let dS="--"; if(dbClientHealth.last_comm_date){ const df=Math.floor((new Date()-new Date(dbClientHealth.last_comm_date))/(1000*60*60*24)); dS=df===0?"Today":`${df} Days`; }
-            document.getElementById('h-kpi-comm').innerText=dS; document.getElementById('h-kpi-ghl').innerText=`${dbClientHealth.ghl_usage}/5`; document.getElementById('h-kpi-leads').innerText=(currentAdsStats.l>0?currentAdsStats.l:(dbClientHealth.leads_vol||0)).toLocaleString(); document.getElementById('h-kpi-appts').innerText=dbClientHealth.appts_vol||0; document.getElementById('h-kpi-deals').innerText=dbClientHealth.deals_closed||0;
+            document.getElementById('h-kpi-comm').innerText=dS; document.getElementById('h-kpi-ghl').innerText=`${dbClientHealth.ghl_usage}/5`; document.getElementById('h-kpi-leads').innerText=(currentAdsStats.l>0?currentAdsStats.l:(dbClientHealth.leads_vol||0)).toLocaleString();
+
+            // Estimates/Deals show the client's own latest report when it's higher than the
+            // saved staff figure, so fresh check-ins appear without waiting for someone to
+            // open the drawer and hit Save. Revenue is the all-time reported total.
+            const clientCheckins = checkinsForClient(cSelectedAccount);
+            const latest = clientCheckins[0];
+            const reportedRevenue = clientCheckins.reduce((sum, c) => sum + (parseFloat(c.revenue_total) || 0), 0);
+
+            document.getElementById('h-kpi-appts').innerText = Math.max(dbClientHealth.appts_vol || 0, latest?.estimates_count ?? 0);
+            document.getElementById('h-kpi-deals').innerText = Math.max(dbClientHealth.deals_closed || 0, latest?.closes_count ?? 0);
+
+            const revEl = document.getElementById('h-kpi-revenue');
+            if (revEl) revEl.innerText = reportedRevenue > 0 ? '$' + reportedRevenue.toLocaleString(undefined, {maximumFractionDigits:0}) : '--';
+
+            renderClientCheckins();
 
             const s=dbClientHealth.current_score||0; 
             document.getElementById('health-gauge-number').innerText=s;
@@ -1614,8 +1642,9 @@ async function fetchHealthData() {
             const list = document.getElementById('c-checkins-list');
             if (!box || !list) return;
 
-            if (cSelectedAccount === "ALL") { box.classList.add('hidden'); return; }
-            box.classList.remove('hidden');
+            // Lives inside #health-dashboard-content, which is already hidden in the
+            // aggregate view, so no visibility toggling needed here.
+            if (cSelectedAccount === "ALL") return;
 
             const rows = checkinsForClient(cSelectedAccount).slice(0, 8);
             if (rows.length === 0) {
