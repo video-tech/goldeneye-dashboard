@@ -395,10 +395,31 @@ window.updateVideoUI = function(videoId, isWatched) {
 
         function getLocalYYYYMMDD(dateObj) { return dateObj.getFullYear() + '-' + String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + String(dateObj.getDate()).padStart(2, '0'); }
 
+        // The portal's currently selected window. Shared so the leaderboard and the
+        // network ticker report the same period as the stat tiles — they used to sum all
+        // of history while being labelled "this period".
+        function getPortalRange() {
+            const today = new Date();
+            let s = new Date(today); s.setHours(0,0,0,0);
+            let e = new Date(today); e.setHours(23,59,59,999);
+            if (selectedDateRange === 'yesterday') { s.setDate(s.getDate() - 1); e.setDate(e.getDate() - 1); }
+            else if (selectedDateRange === 'last7')  { s.setDate(s.getDate() - 6); }
+            else if (selectedDateRange === 'last30') { s.setDate(s.getDate() - 29); }
+            else if (selectedDateRange === 'custom') { s = new Date(customStart + 'T00:00:00'); e = new Date(customEnd + 'T23:59:59'); }
+            else { s = new Date(2000, 0, 1); }
+            return { s, e };
+        }
+
+        // Is this report row inside the portal's selected window?
+        function reportInRange(r, s, e) {
+            if (!r.date) return false;
+            const rd = new Date(r.date.split('T')[0] + 'T12:00:00');
+            return rd >= s && rd <= e;
+        }
+
         function filterPortalData() {
-            const today = new Date(); let s = new Date(today); s.setHours(0,0,0,0); let e = new Date(today); e.setHours(23,59,59,999);
 	    if(!document.getElementById('cp-view-knowledge').classList.contains('hidden')) switchCpTab('knowledge');
-            if (selectedDateRange === 'yesterday') { s.setDate(s.getDate() - 1); e.setDate(e.getDate() - 1); } else if (selectedDateRange === 'last7') { s.setDate(s.getDate() - 6); } else if (selectedDateRange === 'last30') { s.setDate(s.getDate() - 29); } else if (selectedDateRange === 'custom') { s = new Date(customStart + 'T00:00:00'); e = new Date(customEnd + 'T23:59:59'); } else { s = new Date(2000, 0, 1); }
+            const { s, e } = getPortalRange();
 
             let spend = 0, leads = 0; const dailySummary = {};
 
@@ -2803,10 +2824,15 @@ function updateAgencyPowerTicker() {
     let totalNetworkLeads = 0;
     let totalNetworkRev = 0;
 
-    // Aggregate globally, ignoring the selected client filter. Deliberately unfiltered:
-    // this is a whole-network total, so no client join belongs here.
-    globalAdsData.forEach(r => totalNetworkLeads += parseInt(r.leads || 0));
-    globalCheckinsData.forEach(c => totalNetworkRev += parseFloat(c.revenue_total || 0));
+    // Across every client (no client filter — this is a whole-network total) but scoped
+    // to the selected period, since the ticker text says "this period".
+    const { s, e } = getPortalRange();
+    globalAdsData.forEach(r => { if (reportInRange(r, s, e)) totalNetworkLeads += parseInt(r.leads || 0); });
+    globalCheckinsData.forEach(c => {
+        if (!c.week_start) return;
+        const wd = new Date(c.week_start + 'T12:00:00');
+        if (wd >= s && wd <= e) totalNetworkRev += parseFloat(c.revenue_total || 0);
+    });
 
     const tickerEl = document.getElementById('global-power-ticker-text');
     if(tickerEl) {
@@ -2822,11 +2848,14 @@ function renderAnonymizedLeaderboard() {
     const listEl = document.getElementById('anonymized-leaderboard-list');
     if (!listEl) return;
 
-    // 1. Group leads by resolved client, hiding Midas Media from the leaderboard.
+    // 1. Group leads by resolved client for the selected period, hiding Midas Media.
     // Group on the client's own name rather than account_name so every ad account
     // rolls up under one entry regardless of what Meta calls it.
+    const { s, e } = getPortalRange();
     const clientStats = {};
     globalAdsData.forEach(r => {
+        if (!reportInRange(r, s, e)) return;
+
         const client = clientForReport(r);
         // Offboarded clients don't belong on a board current clients can see
         if (client && !isSelectableClient(client)) return;
