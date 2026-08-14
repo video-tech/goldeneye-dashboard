@@ -2866,7 +2866,7 @@ function renderAnonymizedLeaderboard() {
         const cName = client?.name || r.account_name;
         if (!cName) return;
         if (normalize(cName) === normalize('Midas Media')) return;
-        if (!clientStats[cName]) clientStats[cName] = { leads: 0 };
+        if (!clientStats[cName]) clientStats[cName] = { leads: 0, industry: client?.industry || '' };
         clientStats[cName].leads += parseInt(r.leads || 0);
     });
 
@@ -2879,10 +2879,11 @@ function renderAnonymizedLeaderboard() {
     sortedClients.forEach((entry, index) => {
         const actualName = entry[0];
         const leads = entry[1].leads;
+        // Real industry from the client record, not the invented one this used to show.
+        // Blank for any client whose industry hasn't been filled in yet.
+        const industry = entry[1].industry || '';
 
-        // Anonymised by position only. This previously invented an industry and region
-        // from the client's name length ("Med Spa (Arizona)"), which read as real
-        // information to anyone looking at it while being entirely fabricated.
+        // Anonymised by position only.
         let maskedName = `Client #${index + 1}`;
 
         // Highlight the user's actual row so they know where they are
@@ -2903,7 +2904,10 @@ function renderAnonymizedLeaderboard() {
             <div class="p-4 rounded-xl border ${rowStyle} flex justify-between items-center transition">
                 <div class="flex items-center gap-4">
                     <div class="text-xl w-8 text-center">${rankBadge}</div>
-                    <div class="font-bold ${isMe ? 'text-blue-400' : 'text-gray-300'}">${maskedName}</div>
+                    <div>
+                        <div class="font-bold ${isMe ? 'text-blue-400' : 'text-gray-300'}">${maskedName}</div>
+                        ${industry ? `<div class="text-[10px] uppercase tracking-widest text-gray-500 mt-0.5">${escapeHTML(industry)}</div>` : ''}
+                    </div>
                 </div>
                 <div class="text-right">
                     <span class="text-lg font-bold text-white">${leads}</span>
@@ -3674,6 +3678,7 @@ window.saveNewClient = async function(e) {
     const payload = {
         name: document.getElementById('new-client-name').value.trim(),
         contact_name: document.getElementById('new-client-contact-name').value.trim() || null,
+        industry: document.getElementById('new-client-industry').value.trim() || null,
         client_email: document.getElementById('new-client-email').value.trim(),
         client_phone: clientPhone || null,
         ad_account_id: adAccountId,
