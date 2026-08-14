@@ -1498,9 +1498,14 @@
                 
                 <form id="add-client-form" onsubmit="saveNewClient(event)" class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
-                        <div class="col-span-2">
-                            <label class="modal-label">Client Name</label>
+                        <div>
+                            <label class="modal-label">Business Name</label>
                             <input type="text" id="new-client-name" class="glass-input" placeholder="Acme Corp" required>
+                        </div>
+                        <div>
+                            <label class="modal-label">Contact First Name <span class="text-gray-500 font-normal">(optional)</span></label>
+                            <input type="text" id="new-client-contact-name" class="glass-input" placeholder="John">
+                            <p class="text-[10px] text-gray-500 mt-1">Used to address the weekly text.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">Client Email(s)</label>
