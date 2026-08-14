@@ -317,19 +317,22 @@
             if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...'; btn.disabled = true; }
 
             try {
-                // Supabase issues the token as type 'magiclink' for an existing user and
-                // 'email' for a first-time signup, and verifyOtp rejects a mismatch as
-                // "invalid". Try both rather than guessing which kind of user this is.
+                // Supabase types the token differently depending on the account's state --
+                // 'magiclink' for an existing user, 'signup' for a first-ever code, 'email'
+                // for a plain OTP -- and verifyOtp reports any mismatch as "expired or
+                // invalid", identically to a genuinely bad code. Try each rather than
+                // guessing which kind of user this is.
                 let lastError = null;
                 let verified = false;
 
-                for (const type of ['email', 'magiclink']) {
+                for (const type of ['email', 'magiclink', 'signup']) {
                     const { error } = await supabaseClient.auth.verifyOtp({
                         email: pendingAuthEmail,
                         token,
                         type
                     });
-                    if (!error) { verified = true; break; }
+                    if (!error) { console.log('[auth] verified as type:', type); verified = true; break; }
+                    console.log('[auth] type', type, 'rejected:', error.message);
                     lastError = error;
                 }
                 if (!verified) throw lastError;
