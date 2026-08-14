@@ -150,6 +150,19 @@
                 .sort((a, b) => String(b.week_start || '').localeCompare(String(a.week_start || '')));
         }
 
+        // Check-ins from the last N weeks. The health score reads a rolling window rather
+        // than all-time totals: scoring on lifetime figures would only ever climb, so a
+        // client who closed plenty last year but nothing recently would still look healthy.
+        function recentCheckins(client, weeks = 4) {
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - (weeks * 7));
+            const cutoffStr = cutoff.toISOString().split('T')[0];
+            // week_start is YYYY-MM-DD, so a string compare orders correctly
+            return checkinsForClient(client).filter(c => String(c.week_start || '') >= cutoffStr);
+        }
+
+        const sumCheckins = (rows, field) => rows.reduce((sum, r) => sum + (parseFloat(r[field]) || 0), 0);
+
         // ================= CLIENT STATUS =================
         // 'active' = pulled by Make.com each morning and counted in rollups.
         // 'paused' = not pulled, not counted, but still selectable with full history.
@@ -1303,7 +1316,7 @@ function filterAdsData() {
                     if (allClientsTable) allClientsTable.classList.remove('hidden');
 
                     // Per-client controls make no sense in the aggregate view
-                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive'].forEach(id => {
+                    ['btn-stage-transition', 'btn-toggle-pause', 'btn-toggle-archive', 'btn-preview-client'].forEach(id => {
                         const el = document.getElementById(id);
                         if (el) el.classList.add('hidden');
                     });
@@ -1359,6 +1372,9 @@ function filterAdsData() {
                     } else if (archiveBtn) {
                         archiveBtn.classList.add('hidden');
                     }
+
+                    const previewBtn = document.getElementById('btn-preview-client');
+                    if (previewBtn) previewBtn.classList.toggle('hidden', currentUserRole !== 'admin');
 
                     renderClientTasks();
                 }
@@ -1686,12 +1702,14 @@ async function fetchHealthData() {
         function openHealthDrawer() {
             document.getElementById('h-client-name').innerText = cSelectedAccount; 
             
-            // Prefill from the client's most recent weekly SMS check-in. This replaces an
-            // earlier attempt that joined client_jobs/client_estimates on client_email —
-            // a column submitJob/submitEstimate never write, so it always yielded zero.
-            const latestCheckin = checkinsForClient(cSelectedAccount)[0];
-            const autoAppts = latestCheckin?.estimates_count ?? 0;
-            const autoDeals = latestCheckin?.closes_count ?? 0;
+            // Prefill from a rolling 4-week window of check-ins. This replaces an earlier
+            // attempt that joined client_jobs/client_estimates on client_email — a column
+            // submitJob/submitEstimate never write, so it always yielded zero.
+            const HEALTH_WINDOW_WEEKS = 4;
+            const windowCheckins = recentCheckins(cSelectedAccount, HEALTH_WINDOW_WEEKS);
+            const autoAppts = sumCheckins(windowCheckins, 'estimates_count');
+            const autoDeals = sumCheckins(windowCheckins, 'closes_count');
+            const windowRevenue = sumCheckins(windowCheckins, 'revenue_total');
 
             // Math.max so a staff correction is never clobbered by a lower reported figure
             const finalAppts = Math.max(dbClientHealth.appts_vol || 0, autoAppts);
@@ -1699,9 +1717,9 @@ async function fetchHealthData() {
 
             const checkinHint = document.getElementById('h-checkin-hint');
             if (checkinHint) {
-                checkinHint.innerHTML = latestCheckin
-                    ? `<i class="fa-solid fa-comment-sms mr-1 text-blue-400"></i> Prefilled from ${latestCheckin.client_name}'s check-in for week of ${latestCheckin.week_start}${latestCheckin.revenue_total ? ` &middot; $${Number(latestCheckin.revenue_total).toLocaleString()} reported` : ''}`
-                    : `<i class="fa-solid fa-comment-slash mr-1 text-gray-600"></i> No weekly check-in received yet for this client.`;
+                checkinHint.innerHTML = windowCheckins.length
+                    ? `<i class="fa-solid fa-comment-sms mr-1 text-blue-400"></i> Prefilled from ${windowCheckins.length} check-in${windowCheckins.length === 1 ? '' : 's'} over the last ${HEALTH_WINDOW_WEEKS} weeks${windowRevenue ? ` &middot; $${windowRevenue.toLocaleString()} reported` : ''}`
+                    : `<i class="fa-solid fa-comment-slash mr-1 text-gray-600"></i> No check-ins in the last ${HEALTH_WINDOW_WEEKS} weeks &mdash; scoring will use whatever you enter here.`;
             }
 
             document.getElementById('h-date').value = dbClientHealth.last_comm_date || new Date().toISOString().split('T')[0]; 
@@ -3344,6 +3362,54 @@ window.openStageTransitionModal = function() {
     window.updateTransitionTaskCount();
 
     document.getElementById('stage-transition-modal').style.display = 'flex';
+};
+
+// ================= CLIENT PORTAL PREVIEW =================
+// Lets an admin see a client's portal exactly as that client does, without logging
+// out or opening an incognito window. Read-only in spirit: it reuses the real portal
+// code path, so anything submitted here would save for real — it's for looking, not
+// for entering data on a client's behalf.
+window.previewAsClient = async function() {
+    if (currentUserRole !== 'admin') return;
+    if (cSelectedAccount === "ALL") { alert("Pick a specific client first."); return; }
+
+    const btn = document.getElementById('btn-preview-client');
+    const originalHTML = btn ? btn.innerHTML : '';
+    if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Loading...'; btn.disabled = true; }
+
+    try {
+        document.getElementById('admin-dashboard-container').classList.add('hidden');
+        document.getElementById('client-portal-container').classList.remove('hidden');
+
+        const banner = document.getElementById('client-preview-banner');
+        document.getElementById('client-preview-name').innerText = cSelectedAccount;
+        banner.classList.remove('hidden');
+        // Push the portal clear of the fixed banner
+        document.getElementById('client-portal-container').style.paddingTop = '64px';
+
+        await initClientPortal([cSelectedAccount]);
+        window.scrollTo(0, 0);
+    } catch (err) {
+        alert("Could not open client preview: " + err.message);
+        exitClientPreview();
+    } finally {
+        if (btn) { btn.innerHTML = originalHTML; btn.disabled = false; }
+    }
+};
+
+window.exitClientPreview = async function() {
+    document.getElementById('client-preview-banner').classList.add('hidden');
+    document.getElementById('client-portal-container').classList.add('hidden');
+    document.getElementById('client-portal-container').style.paddingTop = '';
+    document.getElementById('admin-dashboard-container').classList.remove('hidden');
+
+    // initClientPortal overwrites shared globals (globalTasksData, globalSeoData and
+    // friends) with client-scoped data, so the admin view has to be rehydrated rather
+    // than just revealed again.
+    await fetchAllGlobalData(globalAllowedClients);
+    if (typeof initClientsPage === 'function') initClientsPage();
+    if (!document.getElementById('page-goldeneye').classList.contains('hidden') && typeof renderGoldenEye === 'function') renderGoldenEye();
+    window.scrollTo(0, 0);
 };
 
 // Pause / resume a client. Paused clients are skipped by the Make.com morning pull

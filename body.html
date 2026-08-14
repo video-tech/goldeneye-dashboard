@@ -96,6 +96,14 @@
     </style>
 
     <div id="theme-wrapper">
+
+        <div id="client-preview-banner" class="hidden" style="position:fixed; top:0; left:0; right:0; z-index:10000; background:linear-gradient(90deg,#7c3aed,#2563eb); color:white; padding:10px 16px; display:flex; align-items:center; justify-content:center; gap:16px; box-shadow:0 4px 20px rgba(0,0,0,0.4);">
+            <span class="text-sm font-bold"><i class="fa-solid fa-eye mr-2"></i>Client preview &mdash; viewing as <span id="client-preview-name">Client</span></span>
+            <button onclick="exitClientPreview()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white font-bold py-1 px-4 rounded-full text-xs transition">
+                <i class="fa-solid fa-arrow-left mr-1"></i> Back to dashboard
+            </button>
+        </div>
+
         <div id="drawer-overlay" onclick="closeAllDrawers()"></div>
 
         <div id="auth-container" class="glass p-12 max-w-md mx-auto text-center mt-20">
@@ -367,6 +375,9 @@
                             </button>
                             <button id="btn-toggle-archive" onclick="toggleClientArchive()" title="Archive client" class="hidden bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold py-1.5 px-4 rounded-full text-xs transition">
                                 <i id="btn-toggle-archive-icon" class="fa-solid fa-box-archive mr-2"></i><span id="btn-toggle-archive-label">Archive</span>
+                            </button>
+                            <button id="btn-preview-client" onclick="previewAsClient()" title="See this client's portal exactly as they do" class="hidden bg-purple-600 hover:bg-purple-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
+                                <i class="fa-solid fa-eye mr-2"></i> View as Client
                             </button>
                         </div>
                     </header>
