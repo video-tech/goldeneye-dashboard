@@ -537,19 +537,46 @@ window.updateVideoUI = function(videoId, isWatched) {
 
         function getLocalYYYYMMDD(dateObj) { return dateObj.getFullYear() + '-' + String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + String(dateObj.getDate()).padStart(2, '0'); }
 
+        // Every date-range calculation in the app, in one place so the admin pages, the
+        // portal and the SEO views can't drift apart.
+        //
+        // "Last 7/30 days" ends YESTERDAY, not today. The morning pull only ever has data
+        // through yesterday, so including today added an always-empty day and put the
+        // totals one day out of step with Ads Manager, which also excludes the current
+        // partial day.
+        function dateRangeFor(rangeKey, cStart, cEnd) {
+            const now = new Date();
+            let s = new Date(now);
+            let e = new Date(now);
+
+            if (rangeKey === 'today') {
+                // s and e both today
+            } else if (rangeKey === 'yesterday') {
+                s.setDate(s.getDate() - 1);
+                e.setDate(e.getDate() - 1);
+            } else if (rangeKey === 'last7') {
+                e.setDate(e.getDate() - 1);
+                s = new Date(e); s.setDate(s.getDate() - 6);
+            } else if (rangeKey === 'last30') {
+                e.setDate(e.getDate() - 1);
+                s = new Date(e); s.setDate(s.getDate() - 29);
+            } else if ((rangeKey === 'custom' || rangeKey === 'customRange') && cStart && cEnd) {
+                s = new Date(cStart + 'T00:00:00');
+                e = new Date(cEnd + 'T23:59:59');
+            } else {
+                s = new Date(2000, 0, 1);   // max / everything
+            }
+
+            s.setHours(0, 0, 0, 0);
+            e.setHours(23, 59, 59, 999);
+            return { s, e };
+        }
+
         // The portal's currently selected window. Shared so the leaderboard and the
         // network ticker report the same period as the stat tiles — they used to sum all
         // of history while being labelled "this period".
         function getPortalRange() {
-            const today = new Date();
-            let s = new Date(today); s.setHours(0,0,0,0);
-            let e = new Date(today); e.setHours(23,59,59,999);
-            if (selectedDateRange === 'yesterday') { s.setDate(s.getDate() - 1); e.setDate(e.getDate() - 1); }
-            else if (selectedDateRange === 'last7')  { s.setDate(s.getDate() - 6); }
-            else if (selectedDateRange === 'last30') { s.setDate(s.getDate() - 29); }
-            else if (selectedDateRange === 'custom') { s = new Date(customStart + 'T00:00:00'); e = new Date(customEnd + 'T23:59:59'); }
-            else { s = new Date(2000, 0, 1); }
-            return { s, e };
+            return dateRangeFor(selectedDateRange, customStart, customEnd);
         }
 
         // Is this report row inside the portal's selected window?
@@ -1411,25 +1438,8 @@ function switchClientView(view) {
         function applyDateRange() { const s=document.getElementById('c-custom-start').value; const e=document.getElementById('c-custom-end').value; if(s&&e){ cDateRange='customRange'; cCustomStart=s; cCustomEnd=e; document.getElementById('c-date-label').innerText=`${new Date(s+'T12:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})} - ${new Date(e+'T12:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})}`; document.getElementById('c-date-menu').classList.remove('show'); filterAdsData(); } }
 
 window.cycleDate = function(direction) {
-            const n = new Date();
-            let s = new Date(n); s.setHours(0,0,0,0);
-            let e = new Date(n); e.setHours(23,59,59,999);
-
             // 1. Recreate the current active window
-            if (cDateRange === 'today') {
-                // Already set to today
-            } else if (cDateRange === 'yesterday') {
-                s.setDate(s.getDate() - 1); e.setDate(e.getDate() - 1);
-            } else if (cDateRange === 'last7') {
-                s.setDate(s.getDate() - 6);
-            } else if (cDateRange === 'last30') {
-                s.setDate(s.getDate() - 29);
-            } else if (cDateRange === 'customRange') {
-                s = new Date(cCustomStart + 'T00:00:00');
-                e = new Date(cCustomEnd + 'T23:59:59');
-            } else if (cDateRange === 'max') {
-                s = new Date(2000, 0, 1);
-            }
+            let { s, e } = dateRangeFor(cDateRange, cCustomStart, cCustomEnd);
 
             // 2. Shift the dates by +1 or -1 days
             s.setDate(s.getDate() + direction);
@@ -1542,9 +1552,7 @@ function filterAdsData() {
                     renderClientTasks();
                 }
 
-                const n=new Date();
-                let s=new Date(n); s.setHours(0,0,0,0); let e=new Date(n); e.setHours(23,59,59,999);
-                if(cDateRange==='today'){ /* s and e default to today */ } else if(cDateRange==='yesterday'){s.setDate(s.getDate()-1);e.setDate(e.getDate()-1);} else if(cDateRange==='last7'){s.setDate(n.getDate()-6);} else if(cDateRange==='last30'){s.setDate(n.getDate()-29);} else if(cDateRange==='customRange'){s=new Date(cCustomStart+'T00:00:00');e=new Date(cCustomEnd+'T23:59:59');} else {s=new Date(2000,0,1);}
+                const { s, e } = dateRangeFor(cDateRange, cCustomStart, cCustomEnd);
                 
                 const inRange = globalAdsData.filter(r => {
                     if (!r.date) return false;
@@ -2200,17 +2208,7 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
         // ============================================================================
 
  window.renderAdminSeo = function() {
-            const today = new Date();
-            let s = new Date(today); s.setHours(0,0,0,0); 
-            let e = new Date(today); e.setHours(23,59,59,999);
-            
-            if(cDateRange==='today'){ /* s and e default to today */ }
-            else if(cDateRange==='yesterday'){ s.setDate(s.getDate()-1); e.setDate(e.getDate()-1);
-            } 
-            else if(cDateRange==='last7'){ s.setDate(today.getDate()-6); } 
-            else if(cDateRange==='last30'){ s.setDate(today.getDate()-29); }
-            else if(cDateRange==='customRange' && cCustomStart){ s = new Date(cCustomStart + 'T00:00:00'); e = new Date(cCustomEnd + 'T23:59:59'); }
-            else if(cDateRange==='max'){ s = new Date(2000, 0, 1); } // Explicitly grabs all data since year 2000
+            const { s, e } = dateRangeFor(cDateRange, cCustomStart, cCustomEnd);
 
             const f = globalSeoData.filter(r => {
                 if (!r.date) return false;
@@ -2264,14 +2262,7 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
         };
 
  window.renderCpSeo = function() {
-            const today = new Date(); 
-            let s = new Date(today); s.setHours(0,0,0,0); 
-            let e = new Date(today); e.setHours(23,59,59,999);
-            if (selectedDateRange === 'yesterday') { s.setDate(today.getDate() - 1); e.setDate(e.getDate() - 1); }
-            else if (selectedDateRange === 'last7') { s.setDate(today.getDate() - 6); } 
-            else if (selectedDateRange === 'last30') { s.setDate(today.getDate() - 29); } 
-            else if (selectedDateRange === 'custom') { s = new Date(customStart + 'T00:00:00'); e = new Date(customEnd + 'T23:59:59'); }
-            else { s = new Date(2000, 0, 1); }
+            const { s, e } = getPortalRange();
 
             const f = allRawSeo.filter(r => {
                 if (!r.date) return false;
