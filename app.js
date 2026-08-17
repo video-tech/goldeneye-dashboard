@@ -579,16 +579,19 @@ window.renderGetStarted = function() {
 
         if (expand) {
             if (s.step_type === 'video' && s.embed_url) {
+                // A step that asks them to go and *do* something stays open until they
+                // say they did it — finishing the video isn't the same as granting access.
+                const autoComplete = !s.requires_confirm;
                 inner += isDirectVideo(s.embed_url)
                     ? `<div class="w-full aspect-video bg-black/40 rounded-lg overflow-hidden border border-white/10 mb-4">
                            <video id="ob-vid-${s.id}" controls playsinline class="w-full h-full outline-none"
                                   onloadedmetadata="obVideoReady('${s.id}')"
                                   ontimeupdate="obVideoProgress('${s.id}')"
-                                  onended="obCompleteStep('${s.id}')">
+                                  ${autoComplete ? `onended="obCompleteStep('${s.id}')"` : ''}>
                                <source src="${escapeHTML(s.embed_url)}">
                            </video>
                        </div>
-                       <p class="text-[11px] text-gray-500 mb-3"><span id="ob-watched-${s.id}">0</span>% watched &mdash; this marks itself complete when you reach the end.</p>`
+                       <p class="text-[11px] text-gray-500 mb-3"><span id="ob-watched-${s.id}">0</span>% watched${autoComplete ? ' &mdash; this marks itself complete when you reach the end.' : ''}</p>`
                     : `<div class="w-full aspect-video bg-black/40 rounded-lg overflow-hidden border border-white/10 mb-4">
                            <iframe src="${escapeHTML(s.embed_url)}" class="w-full h-full" frameborder="0" allowfullscreen></iframe>
                        </div>`;
@@ -603,11 +606,14 @@ window.renderGetStarted = function() {
 
             // Videos that can't report progress, forms, and plain actions all need a
             // manual confirm. A self-hosted video completes on its own.
-            const needsButton = !(s.step_type === 'video' && isDirectVideo(s.embed_url));
+            // Only a self-hosted video that completes itself needs no button
+            const selfCompleting = s.step_type === 'video' && isDirectVideo(s.embed_url) && !s.requires_confirm;
             inner += `<div class="flex flex-wrap items-center gap-3">`;
-            if (needsButton) {
+            if (!selfCompleting) {
+                const label = s.confirm_label
+                    || (s.step_type === 'form' ? "I've submitted this" : "Mark as done");
                 inner += `<button onclick="obCompleteStep('${s.id}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
-                              <i class="fa-solid fa-check mr-2"></i>${s.step_type === 'form' ? "I've submitted this" : "Mark as done"}
+                              <i class="fa-solid fa-check mr-2"></i>${escapeHTML(label)}
                           </button>`;
             }
 
@@ -4320,10 +4326,19 @@ window.addOnboardingStepRow = function(step) {
             <input type="text" class="glass-input !py-1.5 !w-44 ob-assignee" placeholder="Assignee" value="${escapeHTML(step?.assignee || '')}">
             <input type="number" class="glass-input !py-1.5 !w-24 !text-center ob-days" placeholder="Days" value="${step?.due_days ?? 0}">
         </div>
-        <label class="ob-help-wrap flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer">
-            <input type="checkbox" class="row-checkbox ob-help" ${step?.offer_help ? 'checked' : ''}>
-            Offer a "book a call with us" option on this step
-        </label>`;
+        <div class="ob-client-opts space-y-2">
+            <div class="flex gap-2 items-center">
+                <label class="flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer whitespace-nowrap">
+                    <input type="checkbox" class="row-checkbox ob-confirm" ${step?.requires_confirm ? 'checked' : ''} onchange="toggleOnboardingOwnerFields(this)">
+                    Needs them to confirm they did it
+                </label>
+                <input type="text" class="glass-input !py-1.5 flex-1 ob-confirm-label" placeholder="Button wording, e.g. I've given you access" value="${escapeHTML(step?.confirm_label || '')}">
+            </div>
+            <label class="flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer">
+                <input type="checkbox" class="row-checkbox ob-help" ${step?.offer_help ? 'checked' : ''}>
+                Offer a "book a call with us" option on this step
+            </label>
+        </div>`;
     container.appendChild(row);
     toggleOnboardingOwnerFields(row.querySelector('.ob-owner'));
 };
@@ -4340,8 +4355,10 @@ window.toggleOnboardingOwnerFields = function(el) {
     type.style.display = isAgency ? 'none' : '';
     row.querySelector('.ob-assignee').style.display = isAgency ? '' : 'none';
     row.querySelector('.ob-days').style.display = isAgency ? '' : 'none';
-    // Only a client can ask us for help with their own step
-    row.querySelector('.ob-help-wrap').style.display = isAgency ? 'none' : '';
+    // These only mean anything for a step the client performs
+    row.querySelector('.ob-client-opts').style.display = isAgency ? 'none' : '';
+    // The label field is pointless unless a confirmation is being asked for
+    row.querySelector('.ob-confirm-label').style.display = row.querySelector('.ob-confirm').checked ? '' : 'none';
 
     const needsEmbed = !isAgency && type.value !== 'action';
     embed.style.display = needsEmbed ? '' : 'none';
@@ -4367,6 +4384,8 @@ window.saveOnboardingSteps = async function() {
             assignee: isAgency ? (r.querySelector('.ob-assignee').value.trim() || null) : null,
             due_days: isAgency ? (parseInt(r.querySelector('.ob-days').value) || 0) : 0,
             offer_help: !isAgency && r.querySelector('.ob-help').checked,
+            requires_confirm: !isAgency && r.querySelector('.ob-confirm').checked,
+            confirm_label: !isAgency ? (r.querySelector('.ob-confirm-label').value.trim() || null) : null,
             sort_order: i + 1,
             active: true
         };
@@ -4397,6 +4416,7 @@ window.saveOnboardingSteps = async function() {
                     owner: s.owner, title: s.title, description: s.description,
                     step_type: s.step_type, embed_url: s.embed_url,
                     assignee: s.assignee, due_days: s.due_days, offer_help: s.offer_help,
+                    requires_confirm: s.requires_confirm, confirm_label: s.confirm_label,
                     sort_order: s.sort_order, active: s.active
                 };
                 if (s.id) row.id = s.id;
