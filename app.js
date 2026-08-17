@@ -438,7 +438,9 @@
                 supabaseClient.from('ad_approvals').select('*').in('client_name', allowedClients),
                 supabaseClient.from('seo_metrics').select('*').in('client_name', allowedClients),
                 supabaseClient.from('weekly_checkins').select('*').in('client_name', allowedClients),
-                supabaseClient.from('client_contacts').select('*').in('client_name', allowedClients)
+                supabaseClient.from('client_contacts').select('*').in('client_name', allowedClients),
+                supabaseClient.from('onboarding_steps').select('*').order('sort_order'),
+                supabaseClient.from('client_onboarding_progress').select('*').in('client_name', allowedClients)
             ]);
 
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
@@ -450,6 +452,8 @@
             allRawSeo = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
             globalCheckinsData = results[5].status === 'fulfilled' ? (results[5].value.data || []) : [];
             globalContactsData = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
+            globalOnboardingSteps = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
+            globalOnboardingProgress = results[8].status === 'fulfilled' ? (results[8].value.data || []) : [];
 
             const switcher = document.getElementById('admin-switcher');
             const select = document.getElementById('admin-client-list');
@@ -462,19 +466,18 @@
             
             setTimeout(() => {
                 portalSwitchClient(allowedClients[0]);
-                
-                // Check if it is the user's first time loading the portal
-                if (!localStorage.getItem('midas_first_visit_done')) {
-                    switchCpTab('knowledge'); // Force them to the knowledge base
-                    localStorage.setItem('midas_first_visit_done', 'true'); // Drop a cookie to remember them
-                } else {
-                    switchCpTab('dashboard'); // Normal default view
-                }
+
+                // Land on Get Started until the client has actually finished it. This
+                // replaces a localStorage flag that fired once per browser rather than
+                // per client, so a returning client on a new device saw it again and
+                // someone who never finished never saw it twice.
+                updateGetStartedTabVisibility();
+                switchCpTab(onboardingIsComplete(currentActiveClient) ? 'dashboard' : 'getstarted');
             }, 50);
         }
 
         function switchCpTab(tabName) {
-    ['knowledge', 'dashboard', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
+    ['getstarted', 'knowledge', 'dashboard', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
         if(el) el.classList.add('hidden');
@@ -490,40 +493,227 @@
         activeBtn.classList.add('border-yellow-400');
     }
 
+    if(tabName === 'getstarted') renderGetStarted();
     if(tabName === 'pipeline') renderCpPipeline();
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
     if(tabName === 'seo') renderCpSeo();
     if(tabName === 'leaderboard') renderAnonymizedLeaderboard();
-    if(tabName === 'knowledge') {
-        ['knowledge_1', 'knowledge_2'].forEach(id => {
-            const isWatched = localStorage.getItem(`midas_watched_${cSelectedAccount}_${id}`) === 'true';
-            updateVideoUI(id, isWatched);
-        });
-    }
+    if(tabName === 'knowledge') renderKnowledgeBase();
 }
 
-window.markVideoWatched = function(videoId) {
-    const storageKey = `midas_watched_${cSelectedAccount}_${videoId}`;
-    localStorage.setItem(storageKey, 'true');
-    updateVideoUI(videoId, true);
+// ================= CLIENT ONBOARDING (Get Started) =================
+// Progress lives in Supabase, not localStorage, so it survives a device change and
+// the agency can see where a client actually is.
+
+function onboardingProgressFor(clientName, stepId) {
+    const want = normalize(clientName);
+    return globalOnboardingProgress.find(p => normalize(p.client_name) === want && p.step_id === stepId) || null;
+}
+
+function activeOnboardingSteps() {
+    return globalOnboardingSteps
+        .filter(s => s.active !== false)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+}
+
+function onboardingIsComplete(clientName) {
+    const steps = activeOnboardingSteps();
+    if (!steps.length) return true;
+    return steps.every(s => onboardingProgressFor(clientName, s.id)?.completed_at);
+}
+
+// A Loom share link can't report watch progress, so self-hosted MP4s are the norm here.
+// Kept tolerant of either: anything that isn't a direct video file renders as an iframe.
+const isDirectVideo = url => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url || '');
+
+window.renderGetStarted = function() {
+    const list = document.getElementById('ob-steps-list');
+    if (!list) return;
+
+    const steps = activeOnboardingSteps();
+    const client = currentActiveClient;
+    const done = steps.filter(s => onboardingProgressFor(client, s.id)?.completed_at).length;
+
+    const label = document.getElementById('ob-progress-label');
+    const bar = document.getElementById('ob-progress-bar');
+    if (label) label.innerText = `${done} of ${steps.length} complete`;
+    if (bar) bar.style.width = steps.length ? `${Math.round((done / steps.length) * 100)}%` : '0%';
+
+    const allDone = document.getElementById('ob-all-done');
+    if (allDone) allDone.classList.toggle('hidden', !(steps.length && done === steps.length));
+
+    let firstOpen = true;
+    list.innerHTML = '';
+
+    steps.forEach((s, i) => {
+        const prog = onboardingProgressFor(client, s.id);
+        const complete = !!prog?.completed_at;
+        // Expand the first thing they still have to do; collapse the rest
+        const expand = !complete && firstOpen;
+        if (expand) firstOpen = false;
+
+        const card = document.createElement('div');
+        card.className = `glass p-6 border-l-4 ${complete ? 'border-emerald-500' : expand ? 'border-blue-500' : 'border-white/10'}`;
+
+        let inner = `
+            <div class="flex items-start justify-between gap-4 ${expand ? 'mb-4' : ''}">
+                <div class="flex items-start gap-3">
+                    <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${complete ? 'bg-emerald-500 text-white' : 'bg-white/10 text-gray-400'}">
+                        ${complete ? '<i class="fa-solid fa-check"></i>' : i + 1}
+                    </div>
+                    <div>
+                        <h4 class="font-bold ${complete ? 'text-gray-400 line-through' : 'text-white'}">${escapeHTML(s.title)}</h4>
+                        ${s.description && !complete ? `<p class="text-sm text-gray-400 mt-1">${escapeHTML(s.description)}</p>` : ''}
+                    </div>
+                </div>
+                ${complete ? '<span class="text-[10px] uppercase tracking-widest text-emerald-400 whitespace-nowrap">Done</span>' : ''}
+            </div>`;
+
+        if (expand) {
+            if (s.step_type === 'video' && s.embed_url) {
+                inner += isDirectVideo(s.embed_url)
+                    ? `<div class="w-full aspect-video bg-black/40 rounded-lg overflow-hidden border border-white/10 mb-4">
+                           <video id="ob-vid-${s.id}" controls playsinline class="w-full h-full outline-none"
+                                  onloadedmetadata="obVideoReady('${s.id}')"
+                                  ontimeupdate="obVideoProgress('${s.id}')"
+                                  onended="obCompleteStep('${s.id}')">
+                               <source src="${escapeHTML(s.embed_url)}">
+                           </video>
+                       </div>
+                       <p class="text-[11px] text-gray-500 mb-3"><span id="ob-watched-${s.id}">0</span>% watched &mdash; this marks itself complete when you reach the end.</p>`
+                    : `<div class="w-full aspect-video bg-black/40 rounded-lg overflow-hidden border border-white/10 mb-4">
+                           <iframe src="${escapeHTML(s.embed_url)}" class="w-full h-full" frameborder="0" allowfullscreen></iframe>
+                       </div>`;
+            }
+
+            if (s.step_type === 'form' && s.embed_url) {
+                inner += `<div class="w-full rounded-lg overflow-hidden border border-white/10 mb-4 bg-white" style="height:70vh">
+                              <iframe src="${escapeHTML(s.embed_url)}" class="w-full h-full" frameborder="0"></iframe>
+                          </div>
+                          <p class="text-[11px] text-gray-500 mb-3">This ticks off automatically once you submit the form.</p>`;
+            }
+
+            // Videos that can't report progress, forms, and plain actions all need a
+            // manual confirm. A self-hosted video completes on its own.
+            const needsButton = !(s.step_type === 'video' && isDirectVideo(s.embed_url));
+            if (needsButton) {
+                inner += `<button onclick="obCompleteStep('${s.id}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
+                              <i class="fa-solid fa-check mr-2"></i>${s.step_type === 'form' ? "I've submitted this" : "Mark as done"}
+                          </button>`;
+            }
+        }
+
+        card.innerHTML = inner;
+        list.appendChild(card);
+    });
 };
 
-window.updateVideoUI = function(videoId, isWatched) {
-    const container = document.getElementById(`status-${videoId}`);
-    if (!container) return;
-    const badge = container.querySelector('.status-badge');
-    if (isWatched) {
-        container.classList.replace('bg-black/20', 'bg-green-500/10');
-        container.classList.replace('border-white/5', 'border-green-500/20');
-        badge.className = 'status-badge text-sm text-green-400 font-bold';
-        badge.innerHTML = '<i class="fa-solid fa-check-circle mr-1"></i> Watched';
-    } else {
-        container.classList.replace('bg-green-500/10', 'bg-black/20');
-        container.classList.replace('border-green-500/20', 'border-white/5');
-        badge.className = 'status-badge text-sm text-gray-500 font-bold';
-        badge.innerHTML = '<i class="fa-solid fa-circle-play mr-1"></i> Not Watched';
+// Restore playback position so a client returning mid-video isn't sent back to zero
+window.obVideoReady = function(stepId) {
+    const v = document.getElementById('ob-vid-' + stepId);
+    const prog = onboardingProgressFor(currentActiveClient, stepId);
+    if (!v || !prog?.watch_percent || prog.completed_at) return;
+    if (v.duration && isFinite(v.duration)) v.currentTime = (prog.watch_percent / 100) * v.duration;
+};
+
+// timeupdate fires ~4x/sec; only persist when the furthest point advances by 10% or more
+const obLastSaved = {};
+window.obVideoProgress = function(stepId) {
+    const v = document.getElementById('ob-vid-' + stepId);
+    if (!v || !v.duration || !isFinite(v.duration)) return;
+
+    const pct = Math.min(100, Math.round((v.currentTime / v.duration) * 100));
+    const el = document.getElementById('ob-watched-' + stepId);
+    if (el) el.innerText = pct;
+
+    const last = obLastSaved[stepId] || 0;
+    if (pct >= last + 10) {
+        obLastSaved[stepId] = pct;
+        saveOnboardingProgress(stepId, { watch_percent: pct });
     }
+};
+
+async function saveOnboardingProgress(stepId, fields) {
+    const row = {
+        client_name: currentActiveClient,
+        step_id: stepId,
+        completed_by: clientEmail || null,
+        ...fields
+    };
+    const { error } = await supabaseClient
+        .from('client_onboarding_progress')
+        .upsert(row, { onConflict: 'client_name,step_id' });
+    if (error) { console.error('Could not save onboarding progress:', error); return null; }
+
+    // Keep local state in step so the UI doesn't need a refetch
+    const existing = onboardingProgressFor(currentActiveClient, stepId);
+    if (existing) Object.assign(existing, row);
+    else globalOnboardingProgress.push(row);
+    return row;
+}
+
+window.obCompleteStep = async function(stepId) {
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    if (!step) return;
+    if (onboardingProgressFor(currentActiveClient, stepId)?.completed_at) return;
+
+    await saveOnboardingProgress(stepId, {
+        completed_at: new Date().toISOString(),
+        watch_percent: step.step_type === 'video' ? 100 : null
+    });
+
+    // Tick off the agency-side task this step represents, if one is named
+    if (step.linked_task_title) {
+        const { error } = await supabaseClient.from('tasks')
+            .update({ status: 'Complete', updated_at: new Date().toISOString() })
+            .eq('client', currentActiveClient)
+            .eq('title', step.linked_task_title);
+        if (error) console.error('Could not complete the linked task:', error);
+    }
+
+    renderGetStarted();
+    updateGetStartedTabVisibility();
+};
+
+// The tab only exists while there's something left to do
+window.updateGetStartedTabVisibility = function() {
+    const tab = document.getElementById('cp-tab-getstarted');
+    if (!tab) return;
+    const steps = activeOnboardingSteps();
+    const show = steps.length > 0 && !onboardingIsComplete(currentActiveClient);
+    tab.classList.toggle('hidden', !show);
+};
+
+// The Knowledge Base is the same videos as the onboarding sequence, but as a permanent
+// library: no completion state, always available to rewatch. Replaces two hardcoded
+// cards whose watch status lived in localStorage under the admin's selected client.
+window.renderKnowledgeBase = function() {
+    const grid = document.getElementById('kb-video-grid');
+    if (!grid) return;
+
+    const videos = activeOnboardingSteps().filter(s => s.step_type === 'video' && s.embed_url);
+    if (!videos.length) {
+        grid.innerHTML = '<p class="text-sm text-gray-500 italic md:col-span-2">No walkthrough videos yet.</p>';
+        return;
+    }
+
+    grid.innerHTML = videos.map(s => {
+        const player = isDirectVideo(s.embed_url)
+            ? `<video controls playsinline class="w-full h-full outline-none"><source src="${escapeHTML(s.embed_url)}"></video>`
+            : `<iframe src="${escapeHTML(s.embed_url)}" class="w-full h-full" frameborder="0" allowfullscreen></iframe>`;
+
+        const done = !!onboardingProgressFor(currentActiveClient, s.id)?.completed_at;
+
+        return `<div class="glass p-6 flex flex-col">
+            <div class="flex items-start justify-between gap-3 mb-4">
+                <h4 class="font-bold text-white">${escapeHTML(s.title)}</h4>
+                ${done ? '<span class="text-[10px] uppercase tracking-widest text-emerald-400 whitespace-nowrap"><i class="fa-solid fa-check mr-1"></i>Watched</span>' : ''}
+            </div>
+            <div class="w-full aspect-video bg-black/40 rounded-lg mb-3 border border-white/10 overflow-hidden">${player}</div>
+            ${s.description ? `<p class="text-xs text-gray-400 mt-auto">${escapeHTML(s.description)}</p>` : ''}
+        </div>`;
+    }).join('');
 };
 
         function portalSwitchClient(accountName) {
