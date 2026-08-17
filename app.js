@@ -3790,7 +3790,7 @@ window.updateTransitionTaskCount = function() {
             .filter(t => normalize(t.client || '') === normalize(clientObj?.name || '') && t.stage === targetStage)
             .map(t => String(t.title || '').trim().toLowerCase())
     );
-    const toCreate = templates.filter(t => !existing.has(String(t.title || '').trim().toLowerCase()));
+    const toCreate = templates.filter(t => !existing.has(String(t.task_title || '').trim().toLowerCase()));
 
     document.getElementById('trans-task-count').innerText = toCreate.length;
 
@@ -3836,7 +3836,7 @@ window.addStageTemplateRow = function(tpl) {
     row.className = 'tpl-stage-row grid grid-cols-12 gap-2 items-center';
     row.dataset.tplId = tpl?.id || '';
     row.innerHTML = `
-        <input type="text" class="glass-input !py-1.5 col-span-4 tpl-title" placeholder="e.g. Build campaign structure" value="${escapeHTML(tpl?.title || '')}">
+        <input type="text" class="glass-input !py-1.5 col-span-4 tpl-title" placeholder="e.g. Build campaign structure" value="${escapeHTML(tpl?.task_title || '')}">
         <input type="text" class="glass-input !py-1.5 col-span-2 tpl-assignee" placeholder="Assignee" value="${escapeHTML(tpl?.assignee || '')}">
         <input type="text" class="glass-input !py-1.5 col-span-2 tpl-group" placeholder="Optional" value="${escapeHTML(tpl?.checklist_group || '')}">
         <input type="number" class="glass-input !py-1.5 col-span-1 !text-center tpl-days" placeholder="0" value="${tpl?.due_days ?? 0}">
@@ -3859,13 +3859,13 @@ window.saveStageTemplates = async function() {
     const entered = rows.map((r, i) => ({
         id: r.dataset.tplId || null,
         stage,
-        title: r.querySelector('.tpl-title').value.trim(),
+        task_title: r.querySelector('.tpl-title').value.trim(),
         assignee: r.querySelector('.tpl-assignee').value.trim() || null,
         checklist_group: r.querySelector('.tpl-group').value.trim() || null,
         due_days: parseInt(r.querySelector('.tpl-days').value) || 0,
         task_type: r.querySelector('.tpl-type').value,
         sort_order: i + 1
-    })).filter(t => t.title);
+    })).filter(t => t.task_title);
 
     const original = btn.innerHTML;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
@@ -3885,7 +3885,7 @@ window.saveStageTemplates = async function() {
             const payload = entered.map(t => {
                 const row = {
                     stage: t.stage,
-                    title: t.title,
+                    task_title: t.task_title,
                     assignee: t.assignee,
                     checklist_group: t.checklist_group,
                     due_days: t.due_days,
@@ -3936,7 +3936,7 @@ async function generateStageTasks(clientName, stage) {
         .from('tasks').select('title').eq('client', clientName).eq('stage', stage);
 
     const existing = new Set((existingRows || []).map(t => String(t.title || '').trim().toLowerCase()));
-    const toCreate = templates.filter(t => !existing.has(String(t.title || '').trim().toLowerCase()));
+    const toCreate = templates.filter(t => !existing.has(String(t.task_title || '').trim().toLowerCase()));
     if (!toCreate.length) return 0;
 
     const now = new Date().toISOString();
@@ -3946,22 +3946,25 @@ async function generateStageTasks(clientName, stage) {
         return d.toISOString().split('T')[0];
     };
 
-    const rows = toCreate.map(t => ({
-        client: clientName,
-        title: t.title,
-        type: t.task_type || 'Checklist',
-        stage,
-        status: 'Not Started',
-        assignee: t.assignee || null,
-        checklist_group: t.checklist_group || null,
-        p: t.p ?? 3,
-        u: t.u ?? 3,
-        e: t.e ?? 3,
-        score: Math.round((((t.p ?? 3) * 0.4) + ((t.u ?? 3) * 0.4) + ((6 - (t.e ?? 3)) * 0.2)) * 20),
-        due: dueFrom(t.due_days),
-        notes: t.notes || null,
-        updated_at: now
-    }));
+    // stage_templates uses its own column names (task_title / priority / urgency /
+    // effort / default_notes); the tasks table uses title / p / u / e / notes.
+    const rows = toCreate.map(t => {
+        const p = t.priority ?? 3, u = t.urgency ?? 3, e = t.effort ?? 3;
+        return {
+            client: clientName,
+            title: t.task_title,
+            type: t.task_type || 'Checklist',
+            stage,
+            status: 'Not Started',
+            assignee: t.assignee || null,
+            checklist_group: t.checklist_group || null,
+            p, u, e,
+            score: Math.round(((p * 0.4) + (u * 0.4) + ((6 - e) * 0.2)) * 20),
+            due: dueFrom(t.due_days),
+            notes: t.default_notes || null,
+            updated_at: now
+        };
+    });
 
     const { error } = await supabaseClient.from('tasks').insert(rows);
     if (error) throw error;
