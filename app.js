@@ -1974,8 +1974,9 @@ async function fetchHealthData() {
             if (revEl) revEl.innerText = reportedRevenue > 0 ? '$' + reportedRevenue.toLocaleString(undefined, {maximumFractionDigits:0}) : '--';
 
             renderClientCheckins();
+            renderClientOnboarding();
 
-            const s=dbClientHealth.current_score||0; 
+            const s=dbClientHealth.current_score||0;
             document.getElementById('health-gauge-number').innerText=s;
             
             let c='#4ade80'; let tc='text-green-400'; 
@@ -2122,6 +2123,58 @@ async function fetchHealthData() {
             row.classList.toggle('hidden', open);
             if (icon) icon.className = `fa-solid fa-chevron-${open ? 'right' : 'down'} text-[9px]`;
         };
+
+        // Admin view of where a client is in their onboarding, so a stall is visible
+        // without opening their portal. Distinguishes "hasn't started" from "started and
+        // stopped" — a half-watched video is a different conversation from an untouched one.
+        function renderClientOnboarding() {
+            const box = document.getElementById('c-onboarding-box');
+            const list = document.getElementById('c-onboarding-list');
+            if (!box || !list) return;
+
+            const steps = activeOnboardingSteps();
+            if (cSelectedAccount === "ALL" || !steps.length) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+
+            const done = steps.filter(s => onboardingProgressFor(cSelectedAccount, s.id)?.completed_at).length;
+            const summary = document.getElementById('c-onboarding-summary');
+            if (summary) summary.innerText = `${done} of ${steps.length} complete`;
+
+            // Oldest incomplete step with no activity at all — what they're stuck on
+            const stalled = steps.find(s => {
+                const p = onboardingProgressFor(cSelectedAccount, s.id);
+                return !p?.completed_at;
+            });
+
+            list.innerHTML = steps.map(s => {
+                const p = onboardingProgressFor(cSelectedAccount, s.id);
+                const complete = !!p?.completed_at;
+                const started = !!p && !complete;
+                const isBlocker = !complete && s.id === stalled?.id;
+
+                let state, tint;
+                if (complete) {
+                    const when = p.completed_at ? new Date(p.completed_at).toLocaleDateString() : '';
+                    state = `<span class="text-emerald-400"><i class="fa-solid fa-check mr-1"></i>${when}</span>`;
+                    tint = '';
+                } else if (started && p.watch_percent) {
+                    state = `<span class="text-amber-400">${p.watch_percent}% watched, stopped</span>`;
+                    tint = 'bg-amber-500/5';
+                } else {
+                    state = `<span class="text-gray-500">Not started</span>`;
+                    tint = isBlocker ? 'bg-blue-500/5' : '';
+                }
+
+                return `<div class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-white/5 ${tint}">
+                    <div class="flex items-center gap-2 min-w-0">
+                        ${isBlocker ? '<i class="fa-solid fa-arrow-right text-blue-400 text-[10px] shrink-0" title="Waiting on this"></i>' : '<span class="w-3 shrink-0"></span>'}
+                        <span class="text-sm truncate ${complete ? 'text-gray-500 line-through' : 'text-white'}">${escapeHTML(s.title)}</span>
+                        <span class="text-[9px] uppercase tracking-widest text-gray-600 shrink-0">${s.step_type}</span>
+                    </div>
+                    <div class="text-[11px] whitespace-nowrap">${state}</div>
+                </div>`;
+            }).join('');
+        }
 
         function openHealthDrawer() {
             document.getElementById('h-client-name').innerText = cSelectedAccount;
