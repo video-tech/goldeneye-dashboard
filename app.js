@@ -1535,6 +1535,10 @@ window.submitClientRequest = async function() {
             const statusByName = {};
             visible.forEach(c => { statusByName[c.name] = c.status || 'active'; });
 
+            // A client onboarding hasn't handed over their ad account yet, so no ads data
+            // will arrive for them. Worth surfacing so a blank one isn't forgotten.
+            const noAdAccount = new Set(visible.filter(c => !normalizeAccountId(c.ad_account_id)).map(c => c.name));
+
             const selAccName = accounts.find(a => normalize(a) === normalize(cSelectedAccount)) || cSelectedAccount;
             if(cSelectedAccount !== "ALL" && selAccName !== "ALL") { cSelectedAccount = selAccName; document.getElementById('c-account-label').innerText = cSelectedAccount; }
 
@@ -1549,6 +1553,9 @@ window.submitClientRequest = async function() {
                 } else if (st === 'archived') {
                     icon = 'fa-box-archive text-gray-500';
                     badge = ` <span class="text-[9px] uppercase tracking-widest text-gray-500 ml-auto pl-2">Archived</span>`;
+                } else if (noAdAccount.has(a)) {
+                    icon = 'fa-hourglass-half text-blue-400';
+                    badge = ` <span class="text-[9px] uppercase tracking-widest text-blue-400 ml-auto pl-2">Onboarding</span>`;
                 }
                 h+=`<div class="dropdown-item" onclick="cSelectAccount('${escapeHTML(a)}', '${escapeHTML(a)}')"><i class="fa-solid ${icon} w-4"></i> ${a}${badge}</div>`;
             });
@@ -4568,11 +4575,8 @@ window.saveClientEdits = async function(e) {
     const originalName = document.getElementById('edit-client-original-name').value;
     const newName = document.getElementById('edit-client-name').value.trim();
 
+    // Optional: the id usually arrives during onboarding, after the client grants access
     const adAccountId = normalizeAccountId(document.getElementById('edit-client-ad-account').value);
-    if (!adAccountId) {
-        alert("Meta Ad Account ID must contain digits (e.g. 371628055). Without it no ad data will be pulled.");
-        return;
-    }
     if (!newName) { alert("Business name can't be empty."); return; }
 
     const renaming = normalize(newName) !== normalize(originalName) || newName !== originalName;
@@ -4605,7 +4609,7 @@ window.saveClientEdits = async function(e) {
             contact_name: document.getElementById('edit-client-contact-name').value.trim() || null,
             industry: document.getElementById('edit-client-industry').value.trim() || null,
             client_email: document.getElementById('edit-client-email').value.trim() || null,
-            ad_account_id: adAccountId,
+            ad_account_id: adAccountId || null,
             business_id: document.getElementById('edit-client-business-id').value.trim() || null,
             contract_type: document.getElementById('edit-client-contract').value,
             monthly_retainer: document.getElementById('edit-client-retainer').value || null
@@ -4842,16 +4846,10 @@ window.saveNewClient = async function(e) {
     btn.disabled = true;
 
     // Store the bare digits: Ads Manager shows ids as "act_123" or "123" and the
-    // morning pull matches on the numeric form.
+    // morning pull matches on the numeric form. Optional at creation — you normally
+    // don't have it until the client grants access partway through onboarding.
     const adAccountId = normalizeAccountId(document.getElementById('new-client-ad-account').value);
     const businessId = document.getElementById('new-client-business-id').value.trim();
-
-    if (!adAccountId) {
-        alert("Meta Ad Account ID must contain digits (e.g. 371628055). Without it no ad data will be pulled for this client.");
-        btn.innerHTML = 'Create Client Profile';
-        btn.disabled = false;
-        return;
-    }
 
     // Check-in contacts live in client_contacts and are added via Edit after creation,
     // since a client can have several people reporting.
@@ -4860,7 +4858,7 @@ window.saveNewClient = async function(e) {
         contact_name: document.getElementById('new-client-contact-name').value.trim() || null,
         industry: document.getElementById('new-client-industry').value.trim() || null,
         client_email: document.getElementById('new-client-email').value.trim(),
-        ad_account_id: adAccountId,
+        ad_account_id: adAccountId || null,
         business_id: businessId || null,
         contract_type: document.getElementById('new-client-contract').value,
         monthly_retainer: document.getElementById('new-client-retainer').value,
