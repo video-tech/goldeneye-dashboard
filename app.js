@@ -932,6 +932,9 @@ window.submitClientRequest = async function() {
     // Who gets texted for each client — several people for clients with sales teams
     let contactsQ = supabaseClient.from('client_contacts').select('*');
 
+    // Per-stage checklists, used when a client moves into a stage
+    let stageTplQ = supabaseClient.from('stage_templates').select('*').order('sort_order');
+
     if (allowedClients && currentUserRole !== 'admin') {
         clientsQ = clientsQ.in('name', allowedClients); healthQ = healthQ.in('client_name', allowedClients); tasksQ = tasksQ.in('client', allowedClients); crQ = crQ.in('client_name', allowedClients); seoQ = seoQ.in('client_name', allowedClients);
         checkinsQ = checkinsQ.in('client_name', allowedClients);
@@ -939,7 +942,7 @@ window.submitClientRequest = async function() {
     }
 
     // 👇 2. ADD auditsQ TO THE END OF THIS ARRAY 👇
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ ]);
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ ]);
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
     
@@ -963,6 +966,7 @@ window.submitClientRequest = async function() {
     globalAuditsData = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
     globalCheckinsData = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
     globalContactsData = results[8].status === 'fulfilled' ? (results[8].value.data || []) : [];
+    globalStageTemplates = results[9].status === 'fulfilled' ? (results[9].value.data || []) : [];
 
     // ... the rest of the function continues as normal ...
 
@@ -2490,6 +2494,7 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
 
             // Show selected view and highlight active tab
             document.getElementById(`t-view-${view}`).classList.remove('hidden');
+            if (view === 'stage') initStageTemplateEditor();
             const activeBtn = document.getElementById(`tab-btn-tpl-${view}`);
             
             if(activeBtn) {
@@ -3763,19 +3768,152 @@ window.deleteMorningAudit = async function(id) {
 // ============================================================================
 const lifecycleStages = ['Onboarding', 'Campaign Building', 'Campaign Learning', 'Optimizing', 'Offboarding'];
 
-// Temporary mock mappings for task counts until the Template Editor is built
-const templateTaskCounts = {
-    'Campaign Building': 12,
-    'Campaign Learning': 5,
-    'Optimizing': 8,
-    'Offboarding': 6
-};
+// Checklist templates per stage, loaded from stage_templates. Previously a hardcoded
+// map of invented counts that promised tasks no code ever created.
+let globalStageTemplates = [];
+
+function templatesForStage(stage) {
+    return globalStageTemplates
+        .filter(t => t.stage === stage)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+}
 
 window.updateTransitionTaskCount = function() {
     const targetStage = document.getElementById('trans-target-stage').value;
-    const expectedTaskCount = templateTaskCounts[targetStage] || 0;
-    document.getElementById('trans-task-count').innerText = expectedTaskCount;
+    const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+
+    // Only count what would actually be created — tasks the client already has for
+    // this stage are skipped, so re-entering a stage doesn't duplicate the checklist.
+    const templates = templatesForStage(targetStage);
+    const existing = new Set(
+        globalTasksData
+            .filter(t => normalize(t.client || '') === normalize(clientObj?.name || '') && t.stage === targetStage)
+            .map(t => String(t.title || '').trim().toLowerCase())
+    );
+    const toCreate = templates.filter(t => !existing.has(String(t.title || '').trim().toLowerCase()));
+
+    document.getElementById('trans-task-count').innerText = toCreate.length;
+
+    const notice = document.getElementById('trans-auto-gen-notice');
+    if (notice && templates.length === 0) {
+        notice.classList.add('hidden');
+    }
 };
+
+// ---- Stage checklist editor (Templates → Stage Checklists) ----
+window.initStageTemplateEditor = function() {
+    const picker = document.getElementById('tpl-stage-picker');
+    if (!picker) return;
+    if (!picker.options.length) {
+        picker.innerHTML = lifecycleStages.map(s => `<option value="${s}">${s}</option>`).join('');
+    }
+    renderStageTemplates();
+};
+
+window.renderStageTemplates = function() {
+    const container = document.getElementById('tpl-stage-tasks-container');
+    const picker = document.getElementById('tpl-stage-picker');
+    if (!container || !picker) return;
+
+    const rows = templatesForStage(picker.value);
+    container.innerHTML = '';
+    rows.forEach(r => addStageTemplateRow(r));
+
+    const status = document.getElementById('tpl-stage-status');
+    if (status) {
+        status.innerText = rows.length
+            ? `${rows.length} task${rows.length === 1 ? '' : 's'} created when a client enters ${picker.value}.`
+            : `No checklist yet — moving a client into ${picker.value} won't create any tasks.`;
+    }
+};
+
+window.addStageTemplateRow = function(tpl) {
+    const container = document.getElementById('tpl-stage-tasks-container');
+    if (!container) return;
+
+    const types = ['Checklist', 'Milestone', 'One-off', 'Recurring'];
+    const row = document.createElement('div');
+    row.className = 'tpl-stage-row grid grid-cols-12 gap-2 items-center';
+    row.dataset.tplId = tpl?.id || '';
+    row.innerHTML = `
+        <input type="text" class="glass-input !py-1.5 col-span-4 tpl-title" placeholder="e.g. Build campaign structure" value="${escapeHTML(tpl?.title || '')}">
+        <input type="text" class="glass-input !py-1.5 col-span-2 tpl-assignee" placeholder="Assignee" value="${escapeHTML(tpl?.assignee || '')}">
+        <input type="text" class="glass-input !py-1.5 col-span-2 tpl-group" placeholder="Optional" value="${escapeHTML(tpl?.checklist_group || '')}">
+        <input type="number" class="glass-input !py-1.5 col-span-1 !text-center tpl-days" placeholder="0" value="${tpl?.due_days ?? 0}">
+        <select class="glass-input !py-1.5 col-span-2 tpl-type">
+            ${types.map(t => `<option value="${t}" ${tpl?.task_type === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+        <button type="button" onclick="this.closest('.tpl-stage-row').remove()" class="col-span-1 text-red-500/60 hover:text-red-400" title="Remove">
+            <i class="fa-solid fa-xmark"></i>
+        </button>`;
+    container.appendChild(row);
+};
+
+window.saveStageTemplates = async function() {
+    if (currentUserRole !== 'admin') return;
+    const picker = document.getElementById('tpl-stage-picker');
+    const btn = document.getElementById('btn-save-stage-tpl');
+    const stage = picker.value;
+
+    const rows = [...document.querySelectorAll('#tpl-stage-tasks-container .tpl-stage-row')];
+    const entered = rows.map((r, i) => ({
+        id: r.dataset.tplId || null,
+        stage,
+        title: r.querySelector('.tpl-title').value.trim(),
+        assignee: r.querySelector('.tpl-assignee').value.trim() || null,
+        checklist_group: r.querySelector('.tpl-group').value.trim() || null,
+        due_days: parseInt(r.querySelector('.tpl-days').value) || 0,
+        task_type: r.querySelector('.tpl-type').value,
+        sort_order: i + 1
+    })).filter(t => t.title);
+
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
+    btn.disabled = true;
+
+    try {
+        // Delete the rows the admin removed, then upsert the rest
+        const keptIds = new Set(entered.map(t => t.id).filter(Boolean));
+        const removed = templatesForStage(stage).filter(t => !keptIds.has(t.id));
+        if (removed.length) {
+            const { error } = await supabaseClient.from('stage_templates').delete().in('id', removed.map(t => t.id));
+            if (error) throw error;
+        }
+
+        if (entered.length) {
+            // Omit id entirely on new rows so Postgres generates one
+            const payload = entered.map(t => {
+                const row = {
+                    stage: t.stage,
+                    title: t.title,
+                    assignee: t.assignee,
+                    checklist_group: t.checklist_group,
+                    due_days: t.due_days,
+                    task_type: t.task_type,
+                    sort_order: t.sort_order
+                };
+                if (t.id) row.id = t.id;
+                return row;
+            });
+            const { error } = await supabaseClient.from('stage_templates').upsert(payload);
+            if (error) throw error;
+        }
+
+        await loadStageTemplates();
+        renderStageTemplates();
+    } catch (err) {
+        alert("Could not save the checklist: " + err.message);
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+};
+
+async function loadStageTemplates() {
+    const { data, error } = await supabaseClient.from('stage_templates').select('*').order('sort_order');
+    if (error) { console.error("Could not load stage templates:", error); return; }
+    globalStageTemplates = data || [];
+}
 
 window.toggleAutoGenerationNotice = function() {
     const isGenerating = document.getElementById('trans-generate-tasks').checked;
@@ -3786,6 +3924,49 @@ window.toggleAutoGenerationNotice = function() {
         noticeEl.classList.add('hidden');
     }
 };
+
+// Create a stage's checklist tasks for a client. Returns how many were created.
+// Skips any the client already has for that stage, so moving back into a stage
+// doesn't duplicate the list or reopen work that's already done.
+async function generateStageTasks(clientName, stage) {
+    const templates = templatesForStage(stage);
+    if (!templates.length) return 0;
+
+    const { data: existingRows } = await supabaseClient
+        .from('tasks').select('title').eq('client', clientName).eq('stage', stage);
+
+    const existing = new Set((existingRows || []).map(t => String(t.title || '').trim().toLowerCase()));
+    const toCreate = templates.filter(t => !existing.has(String(t.title || '').trim().toLowerCase()));
+    if (!toCreate.length) return 0;
+
+    const now = new Date().toISOString();
+    const dueFrom = days => {
+        const d = new Date();
+        d.setDate(d.getDate() + (parseInt(days) || 0));
+        return d.toISOString().split('T')[0];
+    };
+
+    const rows = toCreate.map(t => ({
+        client: clientName,
+        title: t.title,
+        type: t.task_type || 'Checklist',
+        stage,
+        status: 'Not Started',
+        assignee: t.assignee || null,
+        checklist_group: t.checklist_group || null,
+        p: t.p ?? 3,
+        u: t.u ?? 3,
+        e: t.e ?? 3,
+        score: Math.round((((t.p ?? 3) * 0.4) + ((t.u ?? 3) * 0.4) + ((6 - (t.e ?? 3)) * 0.2)) * 20),
+        due: dueFrom(t.due_days),
+        notes: t.notes || null,
+        updated_at: now
+    }));
+
+    const { error } = await supabaseClient.from('tasks').insert(rows);
+    if (error) throw error;
+    return rows.length;
+}
 
 window.openStageTransitionModal = function() {
     if (cSelectedAccount === "ALL") return;
@@ -4156,91 +4337,12 @@ window.executeStageTransition = async function() {
         const transitionBtn = document.getElementById('btn-stage-transition');
         if(transitionBtn) transitionBtn.innerHTML = `<i class="fa-solid fa-arrow-right-arrow-left mr-2"></i> ${targetStage}`;
         
-        // 4. Conditional Generation
+        // 4. Conditional Generation — from the stage's checklist template
         if (generateTasks) {
-            if (targetStage === 'Onboarding') {
-                const now = new Date().toISOString();
-                
-                // Base structure for the SOP link
-                const sopLink = "**Official SOP:** [View Document](https://docs.google.com/document/d/1lH56k6CQgNbwL9FP2uZKTXMkHkGO1cJVFmMC73SHePU/edit?pli=1&tab=t.0)\n\n";
-
-                // AI BRAIN: Standardized Relative Date-Math Engine
-                const getDueDate = (targetDays) => {
-                    const d = new Date(); // Stopwatch always resets to day zero upon stage entry
-                    d.setDate(d.getDate() + targetDays);
-                    return d.toISOString().split('T')[0];
-                };
-
-                const tasksToInsert = [
-                    {
-                        client: clientObj.name,
-                        title: "1. Kickoff & Tech Access",
-                        type: "Milestone",
-                        stage: "Onboarding",
-                        status: "Not Started",
-                        assignee: "Account Manager",
-                        p: 5, u: 5, e: 3, score: 92,
-                        due: getDueDate(2), // Benchmark: 2 Days
-                        notes: sopLink + 
-                            "**As Soon As Cash Is Collected:**\n" +
-                            "- [ ] Inform stakeholders inside Slack that Client has paid.\n" +
-                            "- [ ] Fill out kickoff form (midasmediafirm.com/kickoff-form-page) on the call.\n" +
-                            "- [ ] Collect Legal Business Name, EIN, & Location Address.\n" +
-                            "- [ ] Collect Business Email & Phone (No public domains).\n" +
-                            "- [ ] Collect top 3 area codes & ad city targets.\n" +
-                            "- [ ] Get GHL access list (Name, email, phone).\n" +
-                            "- [ ] Collect logo & offers/promos.\n" +
-                            "- [ ] SCHEDULE THE TECH ACCESS CALL.",
-                        updated_at: now
-                    },
-                    {
-                        client: clientObj.name,
-                        title: "2. GHL Infrastructure & Assets",
-                        type: "Milestone",
-                        stage: "Onboarding",
-                        status: "Not Started",
-                        assignee: "Account Manager",
-                        p: 5, u: 4, e: 4, score: 80,
-                        due: getDueDate(4), // Benchmark: 4 Days
-                        notes: sopLink + 
-                            "**Business Profile on GHL & Assets:**\n" +
-                            "- [ ] Set up GHL Business Profile (Rep, Phone, Name, Website, Email, EIN).\n" +
-                            "- [ ] Send questionnaire & confirm completion.\n" +
-                            "- [ ] Get access to all photos, videos, logos, and assets.\n" +
-                            "- [ ] Request & upload customer list (via email or Drive).",
-                        updated_at: now
-                    },
-                    {
-                        client: clientObj.name,
-                        title: "3. Ads Setup & Launch",
-                        type: "Milestone",
-                        stage: "Onboarding",
-                        status: "Not Started",
-                        assignee: "Media Buyer",
-                        p: 5, u: 5, e: 5, score: 84,
-                        due: getDueDate(7), // Benchmark: 7 Days
-                        notes: sopLink + 
-                            "**Meta/Ads Infrastructure:**\n" +
-                            "- [ ] Check for existing FB Business Page & Business Manager.\n" +
-                            "- [ ] If existing: Walk client through granting access or get credentials.\n" +
-                            "- [ ] If new: Create FB Page, Business Manager, verify business, create Ads Manager.\n" +
-                            "- [ ] Add Payment Method with client over the phone.\n" +
-                            "- [ ] Invite all Midas personnel to admin.\n" +
-                            "- [ ] Check/Create Meta Pixel and install on client website ASAP.\n" +
-                            "- [ ] Host Launch Call.",
-                        updated_at: now
-                    }
-                ];
-
-                const { error: insertError } = await supabaseClient.from('tasks').insert(tasksToInsert);
-                if (insertError) throw insertError;
-                
-                console.log(`[LIFECYCLE ENGINE] Successfully generated Onboarding Macro-Tasks for ${clientObj.name}`);
-            } else {
-                console.log(`[LIFECYCLE ENGINE] Client moved to ${targetStage}. Dynamic template pulling not yet configured for this stage.`);
-            }
+            const created = await generateStageTasks(clientObj.name, targetStage);
+            console.log(`[LIFECYCLE ENGINE] ${clientObj.name} → ${targetStage}: created ${created} task(s).`);
         } else {
-            console.log(`[LIFECYCLE ENGINE] Client moved to ${targetStage}. Skipping SOP task generation.`);
+            console.log(`[LIFECYCLE ENGINE] Client moved to ${targetStage}. Skipping checklist generation.`);
         }
 
         // Close modal
@@ -4315,81 +4417,11 @@ window.saveNewClient = async function(e) {
         // Auto-switch to the new client
         if(typeof cSelectAccount === 'function') cSelectAccount(payload.name, payload.name);
         
-        alert("Client created successfully. Injecting Onboarding SOP tasks...");
-        
-        // Auto-Generate Onboarding Tasks Immediately
-        const now = new Date().toISOString();
-        const sopLink = "**Official SOP:** [View Document](https://docs.google.com/document/d/1lH56k6CQgNbwL9FP2uZKTXMkHkGO1cJVFmMC73SHePU/edit?pli=1&tab=t.0)\n\n";
-        
-        const getDueDate = (targetDays) => {
-            const d = new Date();
-            d.setDate(d.getDate() + targetDays);
-            return d.toISOString().split('T')[0];
-        };
-
-        const initialSopTasks = [
-            {
-                client: payload.name,
-                title: "1. Kickoff & Tech Access",
-                type: "Milestone",
-                stage: "Onboarding",
-                status: "Not Started",
-                assignee: "Account Manager",
-                p: 5, u: 5, e: 3, score: 92,
-                due: getDueDate(2), // 2 Days Relative Deadline
-                notes: sopLink + 
-                    "**As Soon As Cash Is Collected:**\n" +
-                    "- [ ] Inform stakeholders inside Slack that Client has paid.\n" +
-                    "- [ ] Fill out kickoff form (midasmediafirm.com/kickoff-form-page) on the call.\n" +
-                    "- [ ] Collect Legal Business Name, EIN, & Location Address.\n" +
-                    "- [ ] Collect Business Email & Phone (No public domains).\n" +
-                    "- [ ] Collect top 3 area codes & ad city targets.\n" +
-                    "- [ ] Get GHL access list (Name, email, phone).\n" +
-                    "- [ ] Collect logo & offers/promos.\n" +
-                    "- [ ] SCHEDULE THE TECH ACCESS CALL.",
-                updated_at: now
-            },
-            {
-                client: payload.name,
-                title: "2. GHL Infrastructure & Assets",
-                type: "Milestone",
-                stage: "Onboarding",
-                status: "Not Started",
-                assignee: "Account Manager",
-                p: 5, u: 4, e: 4, score: 80,
-                due: getDueDate(4), // 4 Days Relative Deadline
-                notes: sopLink + 
-                    "**Business Profile on GHL & Assets:**\n" +
-                    "- [ ] Set up GHL Business Profile (Rep, Phone, Name, Website, Email, EIN).\n" +
-                    "- [ ] Send questionnaire & confirm completion.\n" +
-                    "- [ ] Get access to all photos, videos, logos, and assets.\n" +
-                    "- [ ] Request & upload customer list (via email or Drive).",
-                updated_at: now
-            },
-            {
-                client: payload.name,
-                title: "3. Ads Setup & Launch",
-                type: "Milestone",
-                stage: "Onboarding",
-                status: "Not Started",
-                assignee: "Media Buyer",
-                p: 5, u: 5, e: 5, score: 84,
-                due: getDueDate(7), // 7 Days Relative Deadline
-                notes: sopLink + 
-                    "**Meta/Ads Infrastructure:**\n" +
-                    "- [ ] Check for existing FB Business Page & Business Manager.\n" +
-                    "- [ ] If existing: Walk client through granting access or get credentials.\n" +
-                    "- [ ] If new: Create FB Page, Business Manager, verify business, create Ads Manager.\n" +
-                    "- [ ] Add Payment Method with client over the phone.\n" +
-                    "- [ ] Invite all Midas personnel to admin.\n" +
-                    "- [ ] Check/Create Meta Pixel and install on client website ASAP.\n" +
-                    "- [ ] Host Launch Call.",
-                updated_at: now
-            }
-        ];
-
-        const { error: insertError } = await supabaseClient.from('tasks').insert(initialSopTasks);
-        if (insertError) throw insertError;
+        // Generate the Onboarding checklist from its template
+        const created = await generateStageTasks(payload.name, 'Onboarding');
+        alert(created
+            ? `Client created. ${created} Onboarding task${created === 1 ? '' : 's'} added.`
+            : "Client created. No Onboarding checklist is configured yet — set one up under Templates → Stage Checklists.");
         
         // Force refresh internal dataset so the tasks render cleanly without reloading
         await fetchAllGlobalData(globalAllowedClients);
