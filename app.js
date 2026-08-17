@@ -604,11 +604,24 @@ window.renderGetStarted = function() {
             // Videos that can't report progress, forms, and plain actions all need a
             // manual confirm. A self-hosted video completes on its own.
             const needsButton = !(s.step_type === 'video' && isDirectVideo(s.embed_url));
+            inner += `<div class="flex flex-wrap items-center gap-3">`;
             if (needsButton) {
                 inner += `<button onclick="obCompleteStep('${s.id}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
                               <i class="fa-solid fa-check mr-2"></i>${s.step_type === 'form' ? "I've submitted this" : "Mark as done"}
                           </button>`;
             }
+
+            // Escape hatch. Deliberately quieter than the primary action — the aim is that
+            // most people do it themselves, not that everyone books a call.
+            if (s.offer_help) {
+                const asked = obHelpAlreadyRequested(s.id);
+                inner += asked
+                    ? `<span class="text-xs text-blue-400"><i class="fa-solid fa-circle-check mr-1"></i>We've got your request &mdash; we'll be in touch to book a time.</span>`
+                    : `<button onclick="obRequestHelp('${s.id}')" class="text-xs text-gray-400 hover:text-white underline underline-offset-2 transition">
+                           Rather we walked you through it? Book a call
+                       </button>`;
+            }
+            inner += `</div>`;
         }
 
         card.innerHTML = inner;
@@ -659,6 +672,49 @@ async function saveOnboardingProgress(stepId, fields) {
     else globalOnboardingProgress.push(row);
     return row;
 }
+
+// A help request is an open Client Request task naming this step. Tracking it that way
+// means it shows on the Golden Eye dashboard's inbound requests without extra plumbing,
+// and clears itself once the task is worked.
+function obHelpRequestTitle(stepId) {
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    return `Tech access call requested — ${step?.title || 'onboarding'}`;
+}
+
+function obHelpAlreadyRequested(stepId) {
+    const title = obHelpRequestTitle(stepId).trim().toLowerCase();
+    return globalTasksData.some(t =>
+        normalize(t.client || '') === normalize(currentActiveClient) &&
+        String(t.title || '').trim().toLowerCase() === title &&
+        t.status !== 'Complete');
+}
+
+window.obRequestHelp = async function(stepId) {
+    if (obHelpAlreadyRequested(stepId)) return;
+
+    const due = new Date();
+    due.setDate(due.getDate() + 1);   // someone stuck shouldn't wait
+
+    const row = {
+        client: currentActiveClient,
+        title: obHelpRequestTitle(stepId),
+        type: 'Client Request',
+        stage: 'Onboarding',
+        status: 'Not Started',
+        assignee: 'Account Manager',
+        p: 5, u: 5, e: 2, score: 96,
+        due: due.toISOString().split('T')[0],
+        notes: `${currentActiveClient} asked for help with this onboarding step via their portal.`,
+        updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabaseClient.from('tasks').insert([row]);
+    if (error) { alert("Couldn't send that request — please email us instead."); return; }
+
+    // Keep local state in step so the confirmation shows without a refetch
+    globalTasksData.push(row);
+    renderGetStarted();
+};
 
 window.obCompleteStep = async function(stepId) {
     const step = globalOnboardingSteps.find(s => s.id === stepId);
@@ -4263,7 +4319,11 @@ window.addOnboardingStepRow = function(step) {
             <input type="text" class="glass-input !py-1.5 flex-1 ob-embed" placeholder="Video URL or form embed URL" value="${escapeHTML(step?.embed_url || '')}">
             <input type="text" class="glass-input !py-1.5 !w-44 ob-assignee" placeholder="Assignee" value="${escapeHTML(step?.assignee || '')}">
             <input type="number" class="glass-input !py-1.5 !w-24 !text-center ob-days" placeholder="Days" value="${step?.due_days ?? 0}">
-        </div>`;
+        </div>
+        <label class="ob-help-wrap flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer">
+            <input type="checkbox" class="row-checkbox ob-help" ${step?.offer_help ? 'checked' : ''}>
+            Offer a "book a call with us" option on this step
+        </label>`;
     container.appendChild(row);
     toggleOnboardingOwnerFields(row.querySelector('.ob-owner'));
 };
@@ -4280,6 +4340,8 @@ window.toggleOnboardingOwnerFields = function(el) {
     type.style.display = isAgency ? 'none' : '';
     row.querySelector('.ob-assignee').style.display = isAgency ? '' : 'none';
     row.querySelector('.ob-days').style.display = isAgency ? '' : 'none';
+    // Only a client can ask us for help with their own step
+    row.querySelector('.ob-help-wrap').style.display = isAgency ? 'none' : '';
 
     const needsEmbed = !isAgency && type.value !== 'action';
     embed.style.display = needsEmbed ? '' : 'none';
@@ -4304,6 +4366,7 @@ window.saveOnboardingSteps = async function() {
             embed_url: isAgency ? null : (r.querySelector('.ob-embed').value.trim() || null),
             assignee: isAgency ? (r.querySelector('.ob-assignee').value.trim() || null) : null,
             due_days: isAgency ? (parseInt(r.querySelector('.ob-days').value) || 0) : 0,
+            offer_help: !isAgency && r.querySelector('.ob-help').checked,
             sort_order: i + 1,
             active: true
         };
@@ -4333,7 +4396,7 @@ window.saveOnboardingSteps = async function() {
                 const row = {
                     owner: s.owner, title: s.title, description: s.description,
                     step_type: s.step_type, embed_url: s.embed_url,
-                    assignee: s.assignee, due_days: s.due_days,
+                    assignee: s.assignee, due_days: s.due_days, offer_help: s.offer_help,
                     sort_order: s.sort_order, active: s.active
                 };
                 if (s.id) row.id = s.id;
