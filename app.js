@@ -645,15 +645,32 @@ updateAgencyPowerTicker();
                 return;
             }
 
+            const money = v => (v === null || v === undefined || v === '') ? '&mdash;' : '$' + Number(v).toLocaleString();
+            const num   = v => (v === null || v === undefined || v === '') ? '&mdash;' : v;
+
             weeks.forEach(w => {
+                const multi = w.contributors.length > 1;
+
+                // Week total
                 const row = document.createElement('tr');
-                const names = [...new Set(w.contributors.map(c => c.contact_name).filter(Boolean))];
-                const who = names.length > 1 ? `<span class="text-[10px] opacity-50 ml-2">${escapeHTML(names.join(', '))}</span>` : '';
-                row.innerHTML = `<td class="text-xs opacity-50">${w.week_start}${who}</td>`
+                row.className = 'border-t border-white/5';
+                row.innerHTML = `<td class="text-xs font-bold">${w.week_start}${multi ? `<span class="text-[10px] opacity-50 font-normal ml-2">${w.contributors.length} people</span>` : ''}</td>`
                     + `<td class="font-bold">${w.reportedEstimates ? w.estimates_count : '&mdash;'}</td>`
                     + `<td class="font-bold text-green-400">${w.reportedCloses ? w.closes_count : '&mdash;'}</td>`
                     + `<td class="text-right text-blue-400 font-bold">${w.reportedRevenue ? '$' + w.revenue_total.toLocaleString() : '&mdash;'}</td>`;
                 body.appendChild(row);
+
+                // Who reported what. Shown for a single reporter too — the client should be
+                // able to see their own name against the numbers, not just a bare week.
+                w.contributors.forEach(c => {
+                    const sub = document.createElement('tr');
+                    sub.className = 'text-[11px] opacity-60';
+                    sub.innerHTML = `<td class="pl-4 py-1">${escapeHTML(c.contact_name || c.contact_phone || 'Unknown')}</td>`
+                        + `<td class="py-1">${num(c.estimates_count)}</td>`
+                        + `<td class="py-1">${num(c.closes_count)}</td>`
+                        + `<td class="py-1 text-right">${money(c.revenue_total)}</td>`;
+                    body.appendChild(sub);
+                });
             });
         }
         function renderPortalTasks() {
