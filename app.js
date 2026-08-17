@@ -17,6 +17,8 @@
         let globalSeoData = [];
         let globalCheckinsData = [];
         let globalContactsData = [];
+        let globalOnboardingSteps = [];
+        let globalOnboardingProgress = [];
         let allRawSeo = [];
         
         // Dashboard States
@@ -935,6 +937,10 @@ window.submitClientRequest = async function() {
     // Per-stage checklists, used when a client moves into a stage
     let stageTplQ = supabaseClient.from('stage_templates').select('*').order('sort_order');
 
+    // Client-facing onboarding sequence and who has completed what
+    let obStepsQ = supabaseClient.from('onboarding_steps').select('*').order('sort_order');
+    let obProgQ  = supabaseClient.from('client_onboarding_progress').select('*');
+
     if (allowedClients && currentUserRole !== 'admin') {
         clientsQ = clientsQ.in('name', allowedClients); healthQ = healthQ.in('client_name', allowedClients); tasksQ = tasksQ.in('client', allowedClients); crQ = crQ.in('client_name', allowedClients); seoQ = seoQ.in('client_name', allowedClients);
         checkinsQ = checkinsQ.in('client_name', allowedClients);
@@ -942,7 +948,7 @@ window.submitClientRequest = async function() {
     }
 
     // 👇 2. ADD auditsQ TO THE END OF THIS ARRAY 👇
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ ]);
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ ]);
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
     
@@ -967,6 +973,8 @@ window.submitClientRequest = async function() {
     globalCheckinsData = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
     globalContactsData = results[8].status === 'fulfilled' ? (results[8].value.data || []) : [];
     globalStageTemplates = results[9].status === 'fulfilled' ? (results[9].value.data || []) : [];
+    globalOnboardingSteps = results[10].status === 'fulfilled' ? (results[10].value.data || []) : [];
+    globalOnboardingProgress = results[11].status === 'fulfilled' ? (results[11].value.data || []) : [];
 
     // ... the rest of the function continues as normal ...
 
@@ -2482,19 +2490,17 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
 
         window.switchTemplateView = function(view) {
             // Hide both views initially
-            document.getElementById('t-view-recurring').classList.add('hidden');
-            document.getElementById('t-view-stage').classList.add('hidden');
-            
-            // Reset tab button styles
-            const recurringBtn = document.getElementById('tab-btn-tpl-recurring');
-            const stageBtn = document.getElementById('tab-btn-tpl-stage');
-            
-            recurringBtn.className = 'whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
-            stageBtn.className = 'whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
+            ['recurring', 'stage', 'onboarding'].forEach(v => {
+                const el = document.getElementById(`t-view-${v}`);
+                const btn = document.getElementById(`tab-btn-tpl-${v}`);
+                if (el) el.classList.add('hidden');
+                if (btn) btn.className = 'whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
+            });
 
             // Show selected view and highlight active tab
             document.getElementById(`t-view-${view}`).classList.remove('hidden');
             if (view === 'stage') initStageTemplateEditor();
+            if (view === 'onboarding') renderOnboardingSteps();
             const activeBtn = document.getElementById(`tab-btn-tpl-${view}`);
             
             if(activeBtn) {
@@ -3908,6 +3914,135 @@ window.saveStageTemplates = async function() {
         btn.disabled = false;
     }
 };
+
+// ---- Client onboarding steps (Templates → Client Onboarding) ----
+// Configurable rather than hardcoded, for the same reason the stage checklists are:
+// the process belongs to the agency, not to app.js.
+window.renderOnboardingSteps = function() {
+    const container = document.getElementById('onboarding-steps-container');
+    if (!container) return;
+
+    const steps = [...globalOnboardingSteps].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    container.innerHTML = '';
+    steps.forEach(s => addOnboardingStepRow(s));
+
+    const status = document.getElementById('onboarding-steps-status');
+    if (status) {
+        status.innerText = steps.length
+            ? `${steps.length} step${steps.length === 1 ? '' : 's'} shown to clients under Get Started.`
+            : 'No steps yet — clients won\'t see a Get Started tab until you add some.';
+    }
+};
+
+window.addOnboardingStepRow = function(step) {
+    const container = document.getElementById('onboarding-steps-container');
+    if (!container) return;
+
+    const types = [
+        ['video',  'Video (Loom)'],
+        ['form',   'Form (embedded)'],
+        ['action', 'Action (no embed)']
+    ];
+
+    const row = document.createElement('div');
+    row.className = 'ob-step-row bg-black/20 border border-white/5 rounded-xl p-3 space-y-2';
+    row.dataset.stepId = step?.id || '';
+    row.innerHTML = `
+        <div class="flex gap-2 items-start">
+            <input type="text" class="glass-input !py-1.5 flex-1 ob-title" placeholder="Step title, e.g. Give us Facebook access" value="${escapeHTML(step?.title || '')}">
+            <select class="glass-input !py-1.5 !w-44 ob-type" onchange="toggleOnboardingEmbedField(this)">
+                ${types.map(([v, l]) => `<option value="${v}" ${step?.step_type === v ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+            <button type="button" onclick="this.closest('.ob-step-row').remove()" class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove step">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <input type="text" class="glass-input !py-1.5 ob-desc" placeholder="Short instruction shown under the title" value="${escapeHTML(step?.description || '')}">
+        <div class="flex gap-2">
+            <input type="text" class="glass-input !py-1.5 flex-1 ob-embed" placeholder="Loom share link or GHL form embed URL" value="${escapeHTML(step?.embed_url || '')}">
+            <input type="text" class="glass-input !py-1.5 flex-1 ob-linked" placeholder="Completes this task (optional)" value="${escapeHTML(step?.linked_task_title || '')}">
+        </div>`;
+    container.appendChild(row);
+    toggleOnboardingEmbedField(row.querySelector('.ob-type'));
+};
+
+// An 'action' step has nothing to embed, so hide the field rather than inviting a URL
+// that would never be used.
+window.toggleOnboardingEmbedField = function(selectEl) {
+    const row = selectEl.closest('.ob-step-row');
+    const embed = row.querySelector('.ob-embed');
+    const isAction = selectEl.value === 'action';
+    embed.style.display = isAction ? 'none' : '';
+    if (isAction) embed.value = '';
+};
+
+window.saveOnboardingSteps = async function() {
+    if (currentUserRole !== 'admin') return;
+    const btn = document.getElementById('btn-save-onboarding');
+    const rows = [...document.querySelectorAll('#onboarding-steps-container .ob-step-row')];
+
+    const entered = rows.map((r, i) => ({
+        id: r.dataset.stepId || null,
+        title: r.querySelector('.ob-title').value.trim(),
+        description: r.querySelector('.ob-desc').value.trim() || null,
+        step_type: r.querySelector('.ob-type').value,
+        embed_url: r.querySelector('.ob-embed').value.trim() || null,
+        linked_task_title: r.querySelector('.ob-linked').value.trim() || null,
+        sort_order: i + 1,
+        active: true
+    })).filter(s => s.title);
+
+    const missingEmbed = entered.find(s => s.step_type !== 'action' && !s.embed_url);
+    if (missingEmbed) {
+        alert(`"${missingEmbed.title}" is a ${missingEmbed.step_type} step but has no URL — clients would see an empty box.`);
+        return;
+    }
+
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
+    btn.disabled = true;
+
+    try {
+        const keptIds = new Set(entered.map(s => s.id).filter(Boolean));
+        const removed = globalOnboardingSteps.filter(s => !keptIds.has(s.id));
+        if (removed.length) {
+            // Progress rows cascade-delete with the step
+            const { error } = await supabaseClient.from('onboarding_steps').delete().in('id', removed.map(s => s.id));
+            if (error) throw error;
+        }
+
+        if (entered.length) {
+            const payload = entered.map(s => {
+                const row = {
+                    title: s.title, description: s.description, step_type: s.step_type,
+                    embed_url: s.embed_url, linked_task_title: s.linked_task_title,
+                    sort_order: s.sort_order, active: s.active
+                };
+                if (s.id) row.id = s.id;
+                return row;
+            });
+            const { error } = await supabaseClient.from('onboarding_steps').upsert(payload);
+            if (error) throw error;
+        }
+
+        await loadOnboardingData();
+        renderOnboardingSteps();
+    } catch (err) {
+        alert("Could not save the onboarding steps: " + err.message);
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+};
+
+async function loadOnboardingData() {
+    const [stepsRes, progRes] = await Promise.allSettled([
+        supabaseClient.from('onboarding_steps').select('*').order('sort_order'),
+        supabaseClient.from('client_onboarding_progress').select('*')
+    ]);
+    globalOnboardingSteps = stepsRes.status === 'fulfilled' ? (stepsRes.value.data || []) : [];
+    globalOnboardingProgress = progRes.status === 'fulfilled' ? (progRes.value.data || []) : [];
+}
 
 async function loadStageTemplates() {
     const { data, error } = await supabaseClient.from('stage_templates').select('*').order('sort_order');

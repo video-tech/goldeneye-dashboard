@@ -816,6 +816,7 @@
                     <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2 overflow-x-auto">
                         <button id="tab-btn-tpl-recurring" onclick="switchTemplateView('recurring')" class="whitespace-nowrap pb-3 text-sm font-bold text-blue-400 border-b-2 border-blue-400">Recurring Templates</button>
                         <button id="tab-btn-tpl-stage" onclick="switchTemplateView('stage')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Stage Checklists</button>
+                        <button id="tab-btn-tpl-onboarding" onclick="switchTemplateView('onboarding')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Client Onboarding</button>
                     </div>
 
                     <div id="t-view-recurring" class="space-y-6 block">
@@ -878,6 +879,29 @@
                                 <p id="tpl-stage-status" class="text-[11px] text-gray-500"></p>
                                 <button onclick="saveStageTemplates()" id="btn-save-stage-tpl" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg text-sm shadow-lg transition">
                                     Save Checklist
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="t-view-onboarding" class="space-y-6 hidden">
+                        <div class="glass p-6">
+                            <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
+                                <div>
+                                    <h3 class="text-lg font-bold text-white">Client Onboarding Steps</h3>
+                                    <p class="text-xs text-gray-400 mt-1">What clients see under <strong class="text-gray-300">Get Started</strong> in their portal. They work through these in order.</p>
+                                </div>
+                                <button onclick="addOnboardingStepRow()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-4 rounded-lg text-xs shadow-lg transition">
+                                    <i class="fa-solid fa-plus mr-1"></i> Add Step
+                                </button>
+                            </div>
+
+                            <div id="onboarding-steps-container" class="space-y-3"></div>
+
+                            <div class="flex justify-between items-center mt-6 pt-4 border-t border-white/10">
+                                <p id="onboarding-steps-status" class="text-[11px] text-gray-500"></p>
+                                <button onclick="saveOnboardingSteps()" id="btn-save-onboarding" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg text-sm shadow-lg transition">
+                                    Save Steps
                                 </button>
                             </div>
                         </div>
