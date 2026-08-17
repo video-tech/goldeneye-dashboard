@@ -528,7 +528,10 @@
                             <div id="c-onboarding-box" class="glass p-6 border-l-4 border-blue-500 flex flex-col hidden">
                                 <div class="flex justify-between items-center mb-4">
                                     <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-flag-checkered mr-2 text-blue-400"></i> Onboarding Progress</h3>
-                                    <span id="c-onboarding-summary" class="text-[10px] text-gray-500 uppercase tracking-widest"></span>
+                                    <div class="flex items-center gap-3">
+                                        <span id="c-onboarding-summary" class="text-[10px] text-gray-500 uppercase tracking-widest"></span>
+                                        <button onclick="addAdhocOnboardingTask()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-md transition">+ Task</button>
+                                    </div>
                                 </div>
                                 <div id="c-onboarding-list" class="space-y-2"></div>
                             </div>

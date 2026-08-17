@@ -511,10 +511,17 @@ function onboardingProgressFor(clientName, stepId) {
     return globalOnboardingProgress.find(p => normalize(p.client_name) === want && p.step_id === stepId) || null;
 }
 
-function activeOnboardingSteps() {
+// Every onboarding item, both sides, in order — for the admin's unified view.
+function allOnboardingItems() {
     return globalOnboardingSteps
         .filter(s => s.active !== false)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+}
+
+// Just the client's own steps — what the portal shows and what its progress measures.
+// Agency items are tasks and don't belong in the client's checklist.
+function activeOnboardingSteps() {
+    return allOnboardingItems().filter(s => s.owner !== 'agency');
 }
 
 function onboardingIsComplete(clientName) {
@@ -662,15 +669,6 @@ window.obCompleteStep = async function(stepId) {
         completed_at: new Date().toISOString(),
         watch_percent: step.step_type === 'video' ? 100 : null
     });
-
-    // Tick off the agency-side task this step represents, if one is named
-    if (step.linked_task_title) {
-        const { error } = await supabaseClient.from('tasks')
-            .update({ status: 'Complete', updated_at: new Date().toISOString() })
-            .eq('client', currentActiveClient)
-            .eq('title', step.linked_task_title);
-        if (error) console.error('Could not complete the linked task:', error);
-    }
 
     renderGetStarted();
     updateGetStartedTabVisibility();
@@ -2124,57 +2122,100 @@ async function fetchHealthData() {
             if (icon) icon.className = `fa-solid fa-chevron-${open ? 'right' : 'down'} text-[9px]`;
         };
 
-        // Admin view of where a client is in their onboarding, so a stall is visible
-        // without opening their portal. Distinguishes "hasn't started" from "started and
-        // stopped" — a half-watched video is a different conversation from an untouched one.
+        // The whole onboarding in one list — the client's steps and ours, in order, each
+        // showing its real state. Client steps read from onboarding progress; ours read
+        // from the tasks table, since an agency item *is* a task.
         function renderClientOnboarding() {
             const box = document.getElementById('c-onboarding-box');
             const list = document.getElementById('c-onboarding-list');
             if (!box || !list) return;
 
-            const steps = activeOnboardingSteps();
-            if (cSelectedAccount === "ALL" || !steps.length) { box.classList.add('hidden'); return; }
+            const items = allOnboardingItems();
+            if (cSelectedAccount === "ALL" || !items.length) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
 
-            const done = steps.filter(s => onboardingProgressFor(cSelectedAccount, s.id)?.completed_at).length;
+            const clientTasks = globalTasksData.filter(t =>
+                normalize(t.client || '') === normalize(cSelectedAccount) && t.stage === 'Onboarding');
+            const taskByTitle = new Map(clientTasks.map(t => [String(t.title || '').trim().toLowerCase(), t]));
+
+            const isDone = item => item.owner === 'agency'
+                ? taskByTitle.get(String(item.title || '').trim().toLowerCase())?.status === 'Complete'
+                : !!onboardingProgressFor(cSelectedAccount, item.id)?.completed_at;
+
+            const done = items.filter(isDone).length;
             const summary = document.getElementById('c-onboarding-summary');
-            if (summary) summary.innerText = `${done} of ${steps.length} complete`;
+            if (summary) summary.innerText = `${done} of ${items.length} complete`;
 
-            // Oldest incomplete step with no activity at all — what they're stuck on
-            const stalled = steps.find(s => {
-                const p = onboardingProgressFor(cSelectedAccount, s.id);
-                return !p?.completed_at;
-            });
+            // The first outstanding item — whoever it's waiting on
+            const blocker = items.find(i => !isDone(i));
 
-            list.innerHTML = steps.map(s => {
-                const p = onboardingProgressFor(cSelectedAccount, s.id);
-                const complete = !!p?.completed_at;
-                const started = !!p && !complete;
-                const isBlocker = !complete && s.id === stalled?.id;
+            list.innerHTML = items.map(item => {
+                const complete = isDone(item);
+                const isBlocker = !complete && item.id === blocker?.id;
+                const mine = item.owner === 'agency';
 
-                let state, tint;
-                if (complete) {
-                    const when = p.completed_at ? new Date(p.completed_at).toLocaleDateString() : '';
-                    state = `<span class="text-emerald-400"><i class="fa-solid fa-check mr-1"></i>${when}</span>`;
-                    tint = '';
-                } else if (started && p.watch_percent) {
-                    state = `<span class="text-amber-400">${p.watch_percent}% watched, stopped</span>`;
-                    tint = 'bg-amber-500/5';
+                let state = '', tint = '';
+                if (mine) {
+                    const task = taskByTitle.get(String(item.title || '').trim().toLowerCase());
+                    if (complete) state = `<span class="text-emerald-400"><i class="fa-solid fa-check mr-1"></i>Done</span>`;
+                    else if (!task) state = `<span class="text-gray-600">No task yet</span>`;
+                    else state = `<span class="text-gray-400">${escapeHTML(task.status || 'Not Started')}${task.due ? ` &middot; due ${task.due}` : ''}</span>`;
                 } else {
-                    state = `<span class="text-gray-500">Not started</span>`;
-                    tint = isBlocker ? 'bg-blue-500/5' : '';
+                    const p = onboardingProgressFor(cSelectedAccount, item.id);
+                    if (complete) {
+                        state = `<span class="text-emerald-400"><i class="fa-solid fa-check mr-1"></i>${new Date(p.completed_at).toLocaleDateString()}</span>`;
+                    } else if (p?.watch_percent) {
+                        state = `<span class="text-amber-400">${p.watch_percent}% watched, stopped</span>`;
+                        tint = 'bg-amber-500/5';
+                    } else {
+                        state = `<span class="text-gray-500">Not started</span>`;
+                    }
                 }
+                if (isBlocker && !tint) tint = mine ? 'bg-purple-500/5' : 'bg-blue-500/5';
+
+                const ownerBadge = mine
+                    ? '<span class="text-[9px] uppercase tracking-widest text-purple-400 shrink-0">Us</span>'
+                    : '<span class="text-[9px] uppercase tracking-widest text-blue-400 shrink-0">Client</span>';
 
                 return `<div class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-white/5 ${tint}">
                     <div class="flex items-center gap-2 min-w-0">
                         ${isBlocker ? '<i class="fa-solid fa-arrow-right text-blue-400 text-[10px] shrink-0" title="Waiting on this"></i>' : '<span class="w-3 shrink-0"></span>'}
-                        <span class="text-sm truncate ${complete ? 'text-gray-500 line-through' : 'text-white'}">${escapeHTML(s.title)}</span>
-                        <span class="text-[9px] uppercase tracking-widest text-gray-600 shrink-0">${s.step_type}</span>
+                        ${ownerBadge}
+                        <span class="text-sm truncate ${complete ? 'text-gray-500 line-through' : 'text-white'}">${escapeHTML(item.title)}</span>
                     </div>
                     <div class="text-[11px] whitespace-nowrap">${state}</div>
                 </div>`;
             }).join('');
         }
+
+        // A one-off task for this client only — something that came up for them and
+        // doesn't belong in the template every future client inherits.
+        window.addAdhocOnboardingTask = async function() {
+            if (currentUserRole !== 'admin' || cSelectedAccount === "ALL") return;
+
+            const title = prompt(`Add an onboarding task for ${cSelectedAccount}:`);
+            if (!title || !title.trim()) return;
+
+            const due = new Date();
+            due.setDate(due.getDate() + 7);
+
+            const { error } = await supabaseClient.from('tasks').insert([{
+                client: cSelectedAccount,
+                title: title.trim(),
+                type: 'Checklist',
+                stage: 'Onboarding',
+                status: 'Not Started',
+                p: 3, u: 3, e: 3, score: 60,
+                due: due.toISOString().split('T')[0],
+                updated_at: new Date().toISOString()
+            }]);
+
+            if (error) { alert("Could not add the task: " + error.message); return; }
+
+            await fetchAllGlobalData(globalAllowedClients);
+            renderClientOnboarding();
+            if (!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage();
+        };
 
         function openHealthDrawer() {
             document.getElementById('h-client-name').innerText = cSelectedAccount;
@@ -4054,7 +4095,11 @@ window.initStageTemplateEditor = function() {
     const picker = document.getElementById('tpl-stage-picker');
     if (!picker) return;
     if (!picker.options.length) {
-        picker.innerHTML = lifecycleStages.map(s => `<option value="${s}">${s}</option>`).join('');
+        // Onboarding lives in its own editor — it's the only stage the client takes part
+        // in, so its list mixes their steps with ours and can't be edited here.
+        picker.innerHTML = lifecycleStages
+            .filter(s => s !== 'Onboarding')
+            .map(s => `<option value="${s}">${s}</option>`).join('');
     }
     renderStageTemplates();
 };
@@ -4187,36 +4232,51 @@ window.addOnboardingStepRow = function(step) {
         ['action', 'Action (no embed)']
     ];
 
+    const owner = step?.owner === 'agency' ? 'agency' : 'client';
+
     const row = document.createElement('div');
     row.className = 'ob-step-row bg-black/20 border border-white/5 rounded-xl p-3 space-y-2';
     row.dataset.stepId = step?.id || '';
     row.innerHTML = `
         <div class="flex gap-2 items-start">
-            <input type="text" class="glass-input !py-1.5 flex-1 ob-title" placeholder="Step title, e.g. Give us Facebook access" value="${escapeHTML(step?.title || '')}">
-            <select class="glass-input !py-1.5 !w-44 ob-type" onchange="toggleOnboardingEmbedField(this)">
+            <select class="glass-input !py-1.5 !w-36 ob-owner" onchange="toggleOnboardingOwnerFields(this)">
+                <option value="client" ${owner === 'client' ? 'selected' : ''}>Client does</option>
+                <option value="agency" ${owner === 'agency' ? 'selected' : ''}>We do</option>
+            </select>
+            <input type="text" class="glass-input !py-1.5 flex-1 ob-title" placeholder="Step title" value="${escapeHTML(step?.title || '')}">
+            <select class="glass-input !py-1.5 !w-40 ob-type" onchange="toggleOnboardingOwnerFields(this)">
                 ${types.map(([v, l]) => `<option value="${v}" ${step?.step_type === v ? 'selected' : ''}>${l}</option>`).join('')}
             </select>
             <button type="button" onclick="this.closest('.ob-step-row').remove()" class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove step">
                 <i class="fa-solid fa-xmark"></i>
             </button>
         </div>
-        <input type="text" class="glass-input !py-1.5 ob-desc" placeholder="Short instruction shown under the title" value="${escapeHTML(step?.description || '')}">
+        <input type="text" class="glass-input !py-1.5 ob-desc" placeholder="Short instruction" value="${escapeHTML(step?.description || '')}">
         <div class="flex gap-2">
-            <input type="text" class="glass-input !py-1.5 flex-1 ob-embed" placeholder="Loom share link or GHL form embed URL" value="${escapeHTML(step?.embed_url || '')}">
-            <input type="text" class="glass-input !py-1.5 flex-1 ob-linked" placeholder="Completes this task (optional)" value="${escapeHTML(step?.linked_task_title || '')}">
+            <input type="text" class="glass-input !py-1.5 flex-1 ob-embed" placeholder="Video URL or form embed URL" value="${escapeHTML(step?.embed_url || '')}">
+            <input type="text" class="glass-input !py-1.5 !w-44 ob-assignee" placeholder="Assignee" value="${escapeHTML(step?.assignee || '')}">
+            <input type="number" class="glass-input !py-1.5 !w-24 !text-center ob-days" placeholder="Days" value="${step?.due_days ?? 0}">
         </div>`;
     container.appendChild(row);
-    toggleOnboardingEmbedField(row.querySelector('.ob-type'));
+    toggleOnboardingOwnerFields(row.querySelector('.ob-owner'));
 };
 
-// An 'action' step has nothing to embed, so hide the field rather than inviting a URL
-// that would never be used.
-window.toggleOnboardingEmbedField = function(selectEl) {
-    const row = selectEl.closest('.ob-step-row');
+// Show only the fields that mean something for this row. A client step has no assignee
+// or due date; an agency step has nothing to embed. Hiding them beats offering inputs
+// whose values would be silently ignored.
+window.toggleOnboardingOwnerFields = function(el) {
+    const row = el.closest('.ob-step-row');
+    const isAgency = row.querySelector('.ob-owner').value === 'agency';
+    const type = row.querySelector('.ob-type');
     const embed = row.querySelector('.ob-embed');
-    const isAction = selectEl.value === 'action';
-    embed.style.display = isAction ? 'none' : '';
-    if (isAction) embed.value = '';
+
+    type.style.display = isAgency ? 'none' : '';
+    row.querySelector('.ob-assignee').style.display = isAgency ? '' : 'none';
+    row.querySelector('.ob-days').style.display = isAgency ? '' : 'none';
+
+    const needsEmbed = !isAgency && type.value !== 'action';
+    embed.style.display = needsEmbed ? '' : 'none';
+    if (!needsEmbed) embed.value = '';
 };
 
 window.saveOnboardingSteps = async function() {
@@ -4224,18 +4284,25 @@ window.saveOnboardingSteps = async function() {
     const btn = document.getElementById('btn-save-onboarding');
     const rows = [...document.querySelectorAll('#onboarding-steps-container .ob-step-row')];
 
-    const entered = rows.map((r, i) => ({
-        id: r.dataset.stepId || null,
-        title: r.querySelector('.ob-title').value.trim(),
-        description: r.querySelector('.ob-desc').value.trim() || null,
-        step_type: r.querySelector('.ob-type').value,
-        embed_url: r.querySelector('.ob-embed').value.trim() || null,
-        linked_task_title: r.querySelector('.ob-linked').value.trim() || null,
-        sort_order: i + 1,
-        active: true
-    })).filter(s => s.title);
+    const entered = rows.map((r, i) => {
+        const owner = r.querySelector('.ob-owner').value;
+        const isAgency = owner === 'agency';
+        return {
+            id: r.dataset.stepId || null,
+            owner,
+            title: r.querySelector('.ob-title').value.trim(),
+            description: r.querySelector('.ob-desc').value.trim() || null,
+            // An agency item is a task, not something rendered to the client
+            step_type: isAgency ? 'action' : r.querySelector('.ob-type').value,
+            embed_url: isAgency ? null : (r.querySelector('.ob-embed').value.trim() || null),
+            assignee: isAgency ? (r.querySelector('.ob-assignee').value.trim() || null) : null,
+            due_days: isAgency ? (parseInt(r.querySelector('.ob-days').value) || 0) : 0,
+            sort_order: i + 1,
+            active: true
+        };
+    }).filter(s => s.title);
 
-    const missingEmbed = entered.find(s => s.step_type !== 'action' && !s.embed_url);
+    const missingEmbed = entered.find(s => s.owner === 'client' && s.step_type !== 'action' && !s.embed_url);
     if (missingEmbed) {
         alert(`"${missingEmbed.title}" is a ${missingEmbed.step_type} step but has no URL — clients would see an empty box.`);
         return;
@@ -4257,8 +4324,9 @@ window.saveOnboardingSteps = async function() {
         if (entered.length) {
             const payload = entered.map(s => {
                 const row = {
-                    title: s.title, description: s.description, step_type: s.step_type,
-                    embed_url: s.embed_url, linked_task_title: s.linked_task_title,
+                    owner: s.owner, title: s.title, description: s.description,
+                    step_type: s.step_type, embed_url: s.embed_url,
+                    assignee: s.assignee, due_days: s.due_days,
                     sort_order: s.sort_order, active: s.active
                 };
                 if (s.id) row.id = s.id;
@@ -4307,7 +4375,22 @@ window.toggleAutoGenerationNotice = function() {
 // Skips any the client already has for that stage, so moving back into a stage
 // doesn't duplicate the list or reopen work that's already done.
 async function generateStageTasks(clientName, stage) {
-    const templates = templatesForStage(stage);
+    // Onboarding is the one stage the client participates in, so its list lives in
+    // onboarding_steps alongside their steps. Only the agency-owned rows become tasks.
+    const templates = stage === 'Onboarding'
+        ? allOnboardingItems()
+            .filter(s => s.owner === 'agency')
+            .map(s => ({
+                task_title: s.title,
+                assignee: s.assignee,
+                due_days: s.due_days,
+                task_type: 'Checklist',
+                default_notes: s.notes,
+                checklist_group: null,
+                priority: 3, urgency: 3, effort: 3
+            }))
+        : templatesForStage(stage);
+
     if (!templates.length) return 0;
 
     const { data: existingRows } = await supabaseClient
