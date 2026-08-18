@@ -493,7 +493,8 @@
         activeBtn.classList.add('border-yellow-400');
     }
 
-    if(tabName === 'getstarted') renderGetStarted();
+    if(tabName === 'getstarted') { renderGetStarted(); startOnboardingPoll(); }
+    else stopOnboardingPoll();
     if(tabName === 'pipeline') renderCpPipeline();
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
@@ -734,6 +735,53 @@ window.obCompleteStep = async function(stepId) {
 
     renderGetStarted();
     updateGetStartedTabVisibility();
+};
+
+// A form step is completed by a webhook after GHL tells us it was submitted, so the
+// portal has no way to know it happened. Without this the client submits a form and
+// watches nothing change, which reads as broken. Polls only while a form step is
+// actually outstanding and the tab is open, then stops.
+let obPollTimer = null;
+
+function obHasPendingFormStep() {
+    return activeOnboardingSteps().some(s =>
+        s.step_type === 'form' && !onboardingProgressFor(currentActiveClient, s.id)?.completed_at);
+}
+
+window.startOnboardingPoll = function() {
+    stopOnboardingPoll();
+    if (!obHasPendingFormStep()) return;
+
+    obPollTimer = setInterval(async () => {
+        // Stop if the client navigated away or finished the forms
+        const onTab = !document.getElementById('cp-view-getstarted')?.classList.contains('hidden');
+        if (!onTab || !obHasPendingFormStep()) { stopOnboardingPoll(); return; }
+
+        const { data, error } = await supabaseClient
+            .from('client_onboarding_progress')
+            .select('*')
+            .eq('client_name', currentActiveClient);
+        if (error) return;
+
+        const before = globalOnboardingProgress.filter(p => normalize(p.client_name) === normalize(currentActiveClient))
+            .filter(p => p.completed_at).length;
+
+        // Replace this client's rows with what the server has
+        globalOnboardingProgress = globalOnboardingProgress
+            .filter(p => normalize(p.client_name) !== normalize(currentActiveClient))
+            .concat(data || []);
+
+        const after = (data || []).filter(p => p.completed_at).length;
+        if (after > before) {
+            renderGetStarted();
+            updateGetStartedTabVisibility();
+            if (!obHasPendingFormStep()) stopOnboardingPoll();
+        }
+    }, 5000);
+};
+
+window.stopOnboardingPoll = function() {
+    if (obPollTimer) { clearInterval(obPollTimer); obPollTimer = null; }
 };
 
 // The tab only exists while there's something left to do
@@ -4755,6 +4803,8 @@ window.previewAsClient = async function() {
 };
 
 window.exitClientPreview = async function() {
+    // Leaving the portal doesn't go through switchCpTab, so stop the poll explicitly
+    if (typeof stopOnboardingPoll === 'function') stopOnboardingPoll();
     document.getElementById('client-preview-banner').style.display = 'none';
     document.getElementById('client-portal-container').classList.add('hidden');
     document.getElementById('client-portal-container').style.paddingTop = '';
