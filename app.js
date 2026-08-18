@@ -1407,9 +1407,16 @@ window.submitClientRequest = async function() {
             
             globalAdsData = fAds.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
 
-            populateTaskClientDropdown(); 
-            if(typeof populateTemplateClientDropdown === 'function') populateTemplateClientDropdown(); 
-            if(typeof populateCreativeClientDropdown === 'function') populateCreativeClientDropdown(); 
+            populateTaskClientDropdown();
+            if(typeof populateTemplateClientDropdown === 'function') populateTemplateClientDropdown();
+            if(typeof populateCreativeClientDropdown === 'function') populateCreativeClientDropdown();
+
+            // A client finishing their checklist is the cue to move them on, but that
+            // write can't happen in their browser: the portal never loads the clients
+            // table, and granting the client role write access to it would expose the
+            // retainer and contract columns. Caught up here on load instead, the same
+            // way the payment police above reconciles a missed deadline.
+            if (currentUserRole === 'admin') autoAdvanceCompletedOnboarding();
         }
 
         function populateCreativeClientDropdown() {
@@ -4698,6 +4705,39 @@ async function generateStageTasks(clientName, stage) {
     const { error } = await supabaseClient.from('tasks').insert(rows);
     if (error) throw error;
     return rows.length;
+}
+
+// Moves clients out of Onboarding once they've finished every step in their portal.
+// With no steps configured onboardingIsComplete() is vacuously true, so the guard below
+// matters: without it an empty checklist would sweep every client out of Onboarding.
+// Paused and archived accounts sit still — advancing them would generate work for a
+// client nobody is servicing.
+async function autoAdvanceCompletedOnboarding() {
+    if (!activeOnboardingSteps().length) return;
+
+    const nextStage = lifecycleStages[lifecycleStages.indexOf('Onboarding') + 1];
+    if (!nextStage) return;
+
+    const ready = globalClientsData.filter(c =>
+        (c.current_stage || 'Onboarding') === 'Onboarding' &&
+        (c.status || 'active') === 'active' &&
+        onboardingIsComplete(c.name));
+
+    for (const c of ready) {
+        const { error } = await supabaseClient
+            .from('clients').update({ current_stage: nextStage }).eq('id', c.id);
+        if (error) { console.error(`[LIFECYCLE ENGINE] Could not advance ${c.name}:`, error); continue; }
+
+        c.current_stage = nextStage;
+
+        // The stage moved regardless; a checklist that fails shouldn't strand the rest
+        try {
+            const created = await generateStageTasks(c.name, nextStage);
+            console.log(`[LIFECYCLE ENGINE] ${c.name} finished onboarding → ${nextStage}: created ${created} task(s).`);
+        } catch (err) {
+            console.error(`[LIFECYCLE ENGINE] ${c.name} advanced but ${nextStage} tasks failed:`, err);
+        }
+    }
 }
 
 window.openStageTransitionModal = function() {
