@@ -14,6 +14,9 @@
         // fetchAllGlobalData. Deliberately not the full clients row — the portal has no
         // business holding retainer or contract columns.
         let portalClientRows = [];
+        // Reports the client can read. Never the admin table's dataset — nothing here
+        // offers editing, drafting, deleting or generating.
+        let portalReports = [];
         let globalHealthData = {};
         let globalTasksData = [];
         let globalAdsData = [];
@@ -471,7 +474,8 @@
                 supabaseClient.from('client_contacts').select('*').in('client_name', allowedClients),
                 supabaseClient.from('onboarding_steps').select('*').order('sort_order'),
                 supabaseClient.from('client_onboarding_progress').select('*').in('client_name', allowedClients),
-                supabaseClient.from('clients').select('name, client_email').in('name', allowedClients)
+                supabaseClient.from('clients').select('name, client_email').in('name', allowedClients),
+                supabaseClient.from('weekly_reports').select('*').order('created_at', { ascending: false })
             ]);
 
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
@@ -489,6 +493,13 @@
             // If RLS won't let a client read their own row this stays empty and the email
             // prefill falls back to the address they signed in with, as it did before.
             portalClientRows = results[9].status === 'fulfilled' ? (results[9].value.data || []) : [];
+
+            // client_name is matched here rather than in the query: the column holds
+            // free text and reports are saved with whatever name was selected, so an
+            // exact .in() would quietly miss rows an admin filed under a variant.
+            const allReports = results[10].status === 'fulfilled' ? (results[10].value.data || []) : [];
+            const allowedKeys = new Set((allowedClients || []).map(a => normalize(a)));
+            portalReports = allReports.filter(r => allowedKeys.has(normalize(r.client_name || '')));
 
             const switcher = document.getElementById('admin-switcher');
             const select = document.getElementById('admin-client-list');
@@ -519,7 +530,7 @@
         }
 
         function switchCpTab(tabName) {
-    ['getstarted', 'knowledge', 'dashboard', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
+    ['getstarted', 'knowledge', 'dashboard', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
         if(el) el.classList.add('hidden');
@@ -538,6 +549,7 @@
     if(tabName === 'getstarted') { renderGetStarted(); startOnboardingPoll(); }
     else stopOnboardingPoll();
     if(tabName === 'checkin') renderWeeklyCheckin();
+    if(tabName === 'reports') renderCpReports();
     if(tabName === 'pipeline') renderCpPipeline();
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
@@ -1076,6 +1088,74 @@ function weeklyCheckinFormHtml(suffix) {
         </div>`;
 }
 
+// Read-only by construction: the client's list is built from its own markup with no
+// draft, edit, delete or generate action anywhere in it.
+//
+// Reports stay locked until the week's numbers are in. That's the trade being offered —
+// tell us how the week went and the report is yours — so the lock has to bite on the
+// whole list, not just the newest one, or there's nothing in it for them.
+window.renderCpReports = function() {
+    const locked = document.getElementById('cp-reports-locked');
+    const list = document.getElementById('cp-reports-list');
+    if (!locked || !list) return;
+
+    const outstanding = weeklyCheckinOutstanding();
+    locked.classList.toggle('hidden', !outstanding);
+    list.classList.toggle('hidden', outstanding);
+
+    const msg = document.getElementById('cp-reports-locked-msg');
+    if (msg) msg.innerText = `Send us your numbers for ${weekRangeLabel(reportingWeekStart())} and your reports unlock straight away.`;
+
+    if (outstanding) return;
+
+    const mine = portalReports
+        .filter(r => normalize(r.client_name || '') === normalize(currentActiveClient || ''))
+        .filter(r => r.html_body || r.report_body);
+
+    if (!mine.length) {
+        list.innerHTML = '<p class="text-sm text-gray-500 italic px-2">No reports yet — your first one will appear here.</p>';
+        return;
+    }
+
+    list.innerHTML = mine.map(r => {
+        const date = r.created_at
+            ? new Date(r.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            : '';
+        const snippet = String(r.report_body || '').replace(/\s+/g, ' ').slice(0, 130);
+
+        return `<div class="glass px-5 py-4 flex items-center justify-between gap-4">
+            <div class="min-w-0">
+                <p class="text-sm font-bold text-white">${escapeAttr(date)}</p>
+                ${snippet ? `<p class="text-xs text-gray-400 mt-1 truncate">${escapeAttr(stripSlashEscapes(snippet))}</p>` : ''}
+            </div>
+            <button onclick="openCpReport('${escapeAttr(r.id)}')" class="shrink-0 text-sm bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 font-bold py-2 px-4 rounded-lg transition">
+                <i class="fa-solid fa-eye mr-1"></i> View
+            </button>
+        </div>`;
+    }).join('');
+};
+
+window.openCpReport = function(id) {
+    const r = portalReports.find(x => String(x.id) === String(id));
+    if (!r) return;
+
+    const frame = document.getElementById('cp-report-viewer-frame');
+    const title = document.getElementById('cp-report-viewer-title');
+    const modal = document.getElementById('cp-report-viewer');
+    if (!frame || !modal) return;
+
+    if (title) {
+        title.innerText = r.created_at
+            ? `Report — ${new Date(r.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+            : 'Report';
+    }
+
+    // The iframe is sandboxed with no allow- flags, so the report renders but can't run
+    // scripts or navigate the portal
+    frame.srcdoc = r.html_body || `<pre style="font-family:system-ui;padding:2rem;white-space:pre-wrap">${escapeAttr(r.report_body || '')}</pre>`;
+    modal.style.display = 'flex';
+};
+
 window.renderWeeklyCheckin = function() {
     const week = reportingWeekStart();
     const existing = portalCheckinFor(currentActiveClient, week);
@@ -1208,6 +1288,8 @@ window.submitWeeklyCheckin = async function(suffix) {
 
         closeWeeklyCheckinModal();
         renderWeeklyCheckin();
+        // Submitting is what unlocks the reports, so repaint them straight away
+        renderCpReports();
     } catch (e) {
         show("Couldn't save that — please try again, or text us the numbers.");
         console.error('Weekly check-in save failed:', e);
