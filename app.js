@@ -1613,7 +1613,7 @@ window.submitClientRequest = async function() {
             document.querySelectorAll('#page-tasks .kanban-col').forEach(c => {
                 sortableInstances.push(new Sortable(c, { group:'kanban', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
                     const id = e.item.getAttribute('data-id'); const nS = e.to.getAttribute('data-status'); const t = globalTasksData.find(x=>x.id==id);
-                    if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); }
+                    if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); await autoAdvanceCompletedOnboarding(); }
                 }}));
             });
         }
@@ -4707,21 +4707,28 @@ async function generateStageTasks(clientName, stage) {
     return rows.length;
 }
 
-// Moves clients out of Onboarding once they've finished every step in their portal.
-// With no steps configured onboardingIsComplete() is vacuously true, so the guard below
-// matters: without it an empty checklist would sweep every client out of Onboarding.
-// Paused and archived accounts sit still — advancing them would generate work for a
-// client nobody is servicing.
+// Moves clients out of Onboarding once the agency's own onboarding work is done. The
+// client's portal steps feed those tasks but don't decide the stage themselves — the
+// team can still owe work after the client has finished everything on their side.
+// A client with no Onboarding tasks at all hasn't finished, they haven't started, so
+// an empty list advances nobody. Paused and archived accounts sit still: advancing them
+// would generate work for a client nobody is servicing.
 async function autoAdvanceCompletedOnboarding() {
-    if (!activeOnboardingSteps().length) return;
+    // Only admins can write the clients table; anyone else would just log an RLS failure
+    if (currentUserRole !== 'admin') return;
 
     const nextStage = lifecycleStages[lifecycleStages.indexOf('Onboarding') + 1];
     if (!nextStage) return;
 
-    const ready = globalClientsData.filter(c =>
-        (c.current_stage || 'Onboarding') === 'Onboarding' &&
-        (c.status || 'active') === 'active' &&
-        onboardingIsComplete(c.name));
+    const ready = globalClientsData.filter(c => {
+        if ((c.current_stage || 'Onboarding') !== 'Onboarding') return false;
+        if ((c.status || 'active') !== 'active') return false;
+
+        const obTasks = globalTasksData.filter(t =>
+            normalize(t.client || '') === normalize(c.name) && t.stage === 'Onboarding');
+
+        return obTasks.length > 0 && obTasks.every(t => t.status === 'Complete');
+    });
 
     for (const c of ready) {
         const { error } = await supabaseClient
