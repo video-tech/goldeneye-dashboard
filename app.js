@@ -622,7 +622,7 @@ window.renderGetStarted = function() {
                           </div>
                           <p class="text-[11px] text-gray-500 mb-3">
                               <i class="fa-solid fa-circle-notch fa-spin mr-1 text-blue-400"></i>
-                              Submit the form above and this moves on by itself &mdash; no need to do anything else.
+                              After you hit submit, give this a few seconds &mdash; it ticks itself off and opens the next step. Please don&rsquo;t close this tab.
                           </p>`;
             }
 
@@ -817,7 +817,7 @@ window.startOnboardingPoll = function() {
             updateGetStartedTabVisibility();
             if (!obHasPendingFormStep()) stopOnboardingPoll();
         }
-    }, 5000);
+    }, 2000);
 };
 
 window.stopOnboardingPoll = function() {
