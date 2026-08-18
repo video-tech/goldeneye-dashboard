@@ -507,12 +507,19 @@
                 // per client, so a returning client on a new device saw it again and
                 // someone who never finished never saw it twice.
                 updateGetStartedTabVisibility();
-                switchCpTab(onboardingIsComplete(currentActiveClient) ? 'dashboard' : 'getstarted');
+                const done = onboardingIsComplete(currentActiveClient);
+                switchCpTab(done ? 'dashboard' : 'getstarted');
+
+                // Paint the tab's dot even when they land elsewhere, then ask. Onboarding
+                // comes first — a client still working through it doesn't need a second
+                // thing shouting at them.
+                renderWeeklyCheckin();
+                if (done) maybeShowWeeklyCheckin();
             }, 50);
         }
 
         function switchCpTab(tabName) {
-    ['getstarted', 'knowledge', 'dashboard', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
+    ['getstarted', 'knowledge', 'dashboard', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
         if(el) el.classList.add('hidden');
@@ -530,6 +537,7 @@
 
     if(tabName === 'getstarted') { renderGetStarted(); startOnboardingPoll(); }
     else stopOnboardingPoll();
+    if(tabName === 'checkin') renderWeeklyCheckin();
     if(tabName === 'pipeline') renderCpPipeline();
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
@@ -974,6 +982,214 @@ window.renderKnowledgeBase = function() {
             ${s.description ? `<p class="text-xs text-gray-400 mt-auto">${escapeAttr(stripSlashEscapes(s.description))}</p>` : ''}
         </div>`;
     }).join('');
+};
+
+// ---- Weekly check-in (client portal) ----
+// Replaces the SMS reply system as the client's way in. Those rows are parsed out of a
+// text and can be ambiguous, which is what parse_confidence and raw_reply exist for;
+// anything typed here is exact, so it never lands in the review queue.
+
+// Monday of the week containing `d`, matching the week_start the existing rows use.
+function weekStartMonday(d = new Date()) {
+    const x = new Date(d);
+    // getDay() is 0 for Sunday, which belongs to the week that began six days earlier
+    const shift = (x.getDay() + 6) % 7;
+    x.setDate(x.getDate() - shift);
+    return getLocalYYYYMMDD(x);
+}
+
+// The client's own entry for a week. Their SMS-era rows and any colleague's stay
+// separate, and the weekly totals go on summing all of them.
+function portalCheckinFor(client, week) {
+    return globalCheckinsData.find(c =>
+        normalize(c.client_name || '') === normalize(client || '') &&
+        c.week_start === week &&
+        c.source === 'portal') || null;
+}
+
+function weeklyCheckinOutstanding() {
+    // An admin viewing a client's portal must not file numbers as them
+    if (currentUserRole === 'admin') return false;
+    return !portalCheckinFor(currentActiveClient, weekStartMonday());
+}
+
+const money0 = n => '$' + Math.round(Number(n) || 0).toLocaleString();
+
+function weeklyCheckinFormHtml(suffix) {
+    const existing = portalCheckinFor(currentActiveClient, weekStartMonday());
+    const v = f => existing?.[f] ?? '';
+
+    return `
+        <div class="space-y-4">
+            <div>
+                <label class="modal-label">Estimates given</label>
+                <input type="number" min="0" step="1" id="wc-estimates-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('estimates_count'))}">
+            </div>
+            <div>
+                <label class="modal-label">Jobs closed</label>
+                <input type="number" min="0" step="1" id="wc-closes-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('closes_count'))}">
+            </div>
+            <div>
+                <label class="modal-label">Revenue closed</label>
+                <input type="number" min="0" step="0.01" id="wc-revenue-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('revenue_total'))}">
+            </div>
+            <div>
+                <label class="modal-label">Leads that found you through the ads but came in another way</label>
+                <p class="text-[11px] text-gray-500 mb-2 -mt-1">Someone who called, walked in or used your website, but told you they'd seen the ads. We can't track these automatically, so this is the only way they get counted.</p>
+                <input type="number" min="0" step="1" id="wc-indirect-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('indirect_leads'))}">
+            </div>
+            <p id="wc-error-${suffix}" class="text-sm text-red-400 hidden"></p>
+            <button id="wc-submit-${suffix}" onclick="submitWeeklyCheckin('${suffix}')" class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold py-3 rounded-lg transition">
+                ${existing ? 'Update this week' : 'Submit'}
+            </button>
+        </div>`;
+}
+
+window.renderWeeklyCheckin = function() {
+    const week = weekStartMonday();
+    const existing = portalCheckinFor(currentActiveClient, week);
+
+    const mount = document.getElementById('cp-checkin-form-mount');
+    if (mount) mount.innerHTML = weeklyCheckinFormHtml('tab');
+
+    const sub = document.getElementById('cp-checkin-subhead');
+    if (sub) {
+        sub.innerText = existing
+            ? "You've already sent this week's numbers — change them below if anything's moved."
+            : 'Takes about a minute. These build your revenue reporting and the network leaderboard.';
+    }
+
+    // A dot on the tab so a dismissed popup doesn't mean the week gets forgotten
+    const dot = document.getElementById('cp-checkin-dot');
+    if (dot) dot.classList.toggle('hidden', !weeklyCheckinOutstanding());
+
+    const history = document.getElementById('cp-checkin-history');
+    if (!history) return;
+
+    const weeks = checkinsByWeek(currentActiveClient);
+    if (!weeks.length) {
+        history.innerHTML = '<p class="text-sm text-gray-500 italic px-2">Nothing yet — this week will be the first.</p>';
+        return;
+    }
+
+    history.innerHTML = weeks.map(w => {
+        const label = new Date(w.week_start + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const cell = (reported, value) => reported
+            ? `<span class="font-bold text-white">${value}</span>`
+            : '<span class="text-gray-600">&mdash;</span>';
+        const indirect = w.contributors.reduce((n, c) => n + (parseInt(c.indirect_leads) || 0), 0);
+        const anyIndirect = w.contributors.some(c => c.indirect_leads !== null && c.indirect_leads !== undefined);
+
+        return `<div class="glass px-4 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm">
+            <span class="text-gray-400 whitespace-nowrap">Week of ${label}</span>
+            <div class="flex flex-wrap gap-x-6 gap-y-1">
+                <span class="text-gray-500">Estimates ${cell(w.reportedEstimates, w.estimates_count)}</span>
+                <span class="text-gray-500">Closed ${cell(w.reportedCloses, w.closes_count)}</span>
+                <span class="text-gray-500">Revenue ${cell(w.reportedRevenue, money0(w.revenue_total))}</span>
+                <span class="text-gray-500">Ad-attributed ${cell(anyIndirect, indirect)}</span>
+            </div>
+        </div>`;
+    }).join('');
+};
+
+window.submitWeeklyCheckin = async function(suffix) {
+    const btn = document.getElementById(`wc-submit-${suffix}`);
+    const err = document.getElementById(`wc-error-${suffix}`);
+    const num = id => {
+        const raw = document.getElementById(`wc-${id}-${suffix}`).value.trim();
+        return raw === '' ? null : Number(raw);
+    };
+
+    const row = {
+        estimates_count: num('estimates'),
+        closes_count: num('closes'),
+        revenue_total: num('revenue'),
+        indirect_leads: num('indirect')
+    };
+
+    const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
+    if (err) err.classList.add('hidden');
+
+    if (Object.values(row).every(v => v === null)) {
+        show('Put a number in at least one box — a zero week is fine, just enter 0.');
+        return;
+    }
+    if (Object.values(row).some(v => v !== null && (!isFinite(v) || v < 0))) {
+        show('Those need to be positive numbers.');
+        return;
+    }
+
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
+    btn.disabled = true;
+
+    try {
+        const week = weekStartMonday();
+        const existing = portalCheckinFor(currentActiveClient, week);
+
+        if (existing) {
+            // Matched on the three columns that identify it rather than an id, so this
+            // doesn't care whether the table has one
+            const { error } = await supabaseClient.from('weekly_checkins').update(row)
+                .eq('client_name', existing.client_name)
+                .eq('week_start', week)
+                .eq('source', 'portal');
+            if (error) throw error;
+            Object.assign(existing, row);
+        } else {
+            const payload = {
+                ...row,
+                client_name: currentActiveClient,
+                week_start: week,
+                source: 'portal',
+                contact_name: clientEmail || null,
+                // Typed by the client rather than parsed out of a text, so it's exact
+                parse_confidence: 'high'
+            };
+            const { data, error } = await supabaseClient.from('weekly_checkins').insert([payload]).select();
+            if (error) throw error;
+            if (data?.length) globalCheckinsData.push(...data);
+        }
+
+        closeWeeklyCheckinModal();
+        renderWeeklyCheckin();
+    } catch (e) {
+        show("Couldn't save that — please try again, or text us the numbers.");
+        console.error('Weekly check-in save failed:', e);
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+};
+
+function closeWeeklyCheckinModal() {
+    const m = document.getElementById('weekly-checkin-modal');
+    if (m) m.style.display = 'none';
+}
+
+// Dismissal is remembered per client and per week, so closing it doesn't mean being
+// asked again on the next page load — the tab keeps its dot either way.
+window.dismissWeeklyCheckin = function() {
+    try {
+        localStorage.setItem(`midas_wc_dismissed_${normalize(currentActiveClient)}`, weekStartMonday());
+    } catch (e) { /* private mode, no great loss */ }
+    closeWeeklyCheckinModal();
+};
+
+window.maybeShowWeeklyCheckin = function() {
+    if (!weeklyCheckinOutstanding()) return;
+
+    let dismissed = null;
+    try {
+        dismissed = localStorage.getItem(`midas_wc_dismissed_${normalize(currentActiveClient)}`);
+    } catch (e) { /* ignore */ }
+    if (dismissed === weekStartMonday()) return;
+
+    const mount = document.getElementById('cp-checkin-modal-mount');
+    if (mount) mount.innerHTML = weeklyCheckinFormHtml('modal');
+
+    const m = document.getElementById('weekly-checkin-modal');
+    if (m) m.style.display = 'flex';
 };
 
         function portalSwitchClient(accountName) {
