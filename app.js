@@ -535,6 +535,22 @@ function onboardingIsComplete(clientName) {
 // Kept tolerant of either: anything that isn't a direct video file renders as an iframe.
 const isDirectVideo = url => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url || '');
 
+// Pre-fill the client's email into an embedded form. Three separate forms means three
+// chances to type a different address — and GHL keys contacts on email, so a mismatch
+// silently splits their answers across two contact records. It also keeps the webhook's
+// client lookup reliable, since the address always matches the one on file.
+function prefillFormUrl(url) {
+    if (!url) return url;
+
+    const client = globalClientsData.find(c => normalize(c.name) === normalize(currentActiveClient));
+    // client_email can hold several comma-separated addresses; the first is the primary
+    const email = String(client?.client_email || clientEmail || '').split(/[,;\s]+/)[0].trim();
+    if (!email) return url;
+
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}email=${encodeURIComponent(email)}`;
+}
+
 window.renderGetStarted = function() {
     const list = document.getElementById('ob-steps-list');
     if (!list) return;
@@ -600,7 +616,7 @@ window.renderGetStarted = function() {
 
             if (s.step_type === 'form' && s.embed_url) {
                 inner += `<div class="w-full rounded-lg overflow-hidden border border-white/10 mb-4 bg-white" style="height:70vh">
-                              <iframe src="${escapeHTML(s.embed_url)}" class="w-full h-full" frameborder="0"></iframe>
+                              <iframe src="${escapeHTML(prefillFormUrl(s.embed_url))}" class="w-full h-full" frameborder="0"></iframe>
                           </div>
                           <p class="text-[11px] text-gray-500 mb-3">This ticks off automatically once you submit the form.</p>`;
             }
