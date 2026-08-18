@@ -70,7 +70,31 @@
 
     return clean;
 };
+        // Escapes for a JS string literal, for values interpolated inside an inline
+        // handler such as onclick="fn('...')". Only correct in that position.
         const escapeHTML = (str) => str ? String(str).replace(/'/g, "\\'").replace(/"/g, "&quot;") : "";
+
+        // Escapes for HTML — attribute values and text alike. Use this anywhere that
+        // isn't inside a JS string: escapeHTML turns an apostrophe into \' , which is a
+        // literal backslash once the browser parses it. In value="..." that backslash is
+        // read straight back by .value and saved, so every save added another one.
+        const escapeAttr = (str) => String(str ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+        // Repairs values already corrupted by the above, so opening an editor shows the
+        // real text and saving writes it back clean.
+        const stripSlashEscapes = (str) => String(str ?? '').replace(/\\+(?=['"])/g, '');
+
+        const checkTaskClientBox = (name) => {
+            const want = normalize(name || '');
+            document.querySelectorAll('.t-client-cb').forEach(cb => {
+                if (normalize(cb.value) === want) cb.checked = true;
+            });
+        };
 
         // ================= CLIENT <-> ADS JOIN =================
         // daily_reports rows are joined to clients by Meta ad account id. Meta controls
@@ -603,8 +627,8 @@ window.renderGetStarted = function() {
                         ${complete ? '<i class="fa-solid fa-check"></i>' : i + 1}
                     </div>
                     <div>
-                        <h4 class="font-bold ${complete ? 'text-gray-400 line-through' : 'text-white'}">${escapeHTML(s.title)}</h4>
-                        ${s.description && !complete ? `<p class="text-sm text-gray-400 mt-1">${escapeHTML(s.description)}</p>` : ''}
+                        <h4 class="font-bold ${complete ? 'text-gray-400 line-through' : 'text-white'}">${escapeAttr(stripSlashEscapes(s.title))}</h4>
+                        ${s.description && !complete ? `<p class="text-sm text-gray-400 mt-1">${escapeAttr(stripSlashEscapes(s.description))}</p>` : ''}
                     </div>
                 </div>
                 ${complete ? '<span class="text-[10px] uppercase tracking-widest text-emerald-400 whitespace-nowrap">Done</span>' : ''}
@@ -621,18 +645,18 @@ window.renderGetStarted = function() {
                                   onloadedmetadata="obVideoReady('${s.id}')"
                                   ontimeupdate="obVideoProgress('${s.id}')"
                                   ${autoComplete ? `onended="obCompleteStep('${s.id}')"` : ''}>
-                               <source src="${escapeHTML(s.embed_url)}">
+                               <source src="${escapeAttr(stripSlashEscapes(s.embed_url))}">
                            </video>
                        </div>
                        <p class="text-[11px] text-gray-500 mb-3"><span id="ob-watched-${s.id}">0</span>% watched${autoComplete ? ' &mdash; this marks itself complete when you reach the end.' : ''}</p>`
                     : `<div class="w-full aspect-video bg-black/40 rounded-lg overflow-hidden border border-white/10 mb-4">
-                           <iframe src="${escapeHTML(s.embed_url)}" class="w-full h-full" frameborder="0" allowfullscreen></iframe>
+                           <iframe src="${escapeAttr(stripSlashEscapes(s.embed_url))}" class="w-full h-full" frameborder="0" allowfullscreen></iframe>
                        </div>`;
             }
 
             if (s.step_type === 'form' && s.embed_url) {
                 inner += `<div class="w-full rounded-lg overflow-hidden border border-white/10 mb-4 bg-white" style="height:70vh">
-                              <iframe src="${escapeHTML(prefillFormUrl(s.embed_url))}" class="w-full h-full" frameborder="0"></iframe>
+                              <iframe src="${escapeAttr(prefillFormUrl(stripSlashEscapes(s.embed_url)))}" class="w-full h-full" frameborder="0"></iframe>
                           </div>`;
 
                 // Only promise the automatic tick where a webhook is actually wired up.
@@ -657,7 +681,7 @@ window.renderGetStarted = function() {
             if (!selfCompleting) {
                 const label = s.confirm_label || "Mark as done";
                 inner += `<button onclick="obCompleteStep('${s.id}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
-                              <i class="fa-solid fa-check mr-2"></i>${escapeHTML(label)}
+                              <i class="fa-solid fa-check mr-2"></i>${escapeAttr(stripSlashEscapes(label))}
                           </button>`;
             }
 
@@ -936,18 +960,18 @@ window.renderKnowledgeBase = function() {
 
     grid.innerHTML = videos.map(s => {
         const player = isDirectVideo(s.embed_url)
-            ? `<video controls playsinline class="w-full h-full outline-none"><source src="${escapeHTML(s.embed_url)}"></video>`
-            : `<iframe src="${escapeHTML(s.embed_url)}" class="w-full h-full" frameborder="0" allowfullscreen></iframe>`;
+            ? `<video controls playsinline class="w-full h-full outline-none"><source src="${escapeAttr(stripSlashEscapes(s.embed_url))}"></video>`
+            : `<iframe src="${escapeAttr(stripSlashEscapes(s.embed_url))}" class="w-full h-full" frameborder="0" allowfullscreen></iframe>`;
 
         const done = !!onboardingProgressFor(currentActiveClient, s.id)?.completed_at;
 
         return `<div class="glass p-6 flex flex-col">
             <div class="flex items-start justify-between gap-3 mb-4">
-                <h4 class="font-bold text-white">${escapeHTML(s.title)}</h4>
+                <h4 class="font-bold text-white">${escapeAttr(stripSlashEscapes(s.title))}</h4>
                 ${done ? '<span class="text-[10px] uppercase tracking-widest text-emerald-400 whitespace-nowrap"><i class="fa-solid fa-check mr-1"></i>Watched</span>' : ''}
             </div>
             <div class="w-full aspect-video bg-black/40 rounded-lg mb-3 border border-white/10 overflow-hidden">${player}</div>
-            ${s.description ? `<p class="text-xs text-gray-400 mt-auto">${escapeHTML(s.description)}</p>` : ''}
+            ${s.description ? `<p class="text-xs text-gray-400 mt-auto">${escapeAttr(stripSlashEscapes(s.description))}</p>` : ''}
         </div>`;
     }).join('');
 };
@@ -1176,7 +1200,7 @@ updateAgencyPowerTicker();
 
         function openCpLeadDrawer(id) {
             const f = document.getElementById('cp-lead-drawer'); f.reset(); const stageDropdown = document.getElementById('cp-ld-stage');
-            const finalStages = [...clientPipelineStages.filter(s => s!=='Won'&&s!=='Lost'), 'Won', 'Lost']; stageDropdown.innerHTML = finalStages.map(s => `<option value="${escapeHTML(s)}">${s}</option>`).join('');
+            const finalStages = [...clientPipelineStages.filter(s => s!=='Won'&&s!=='Lost'), 'Won', 'Lost']; stageDropdown.innerHTML = finalStages.map(s => `<option value="${escapeAttr(s)}">${escapeAttr(s)}</option>`).join('');
             if (id === 'new') { activeCpLeadId = null; document.getElementById('cp-ld-stage').value = finalStages[0]; document.getElementById('cp-ld-delete-btn').classList.add('hidden'); } 
             else { const ld = clientLeadsData.find(x => x.id == id); if(!ld) return; activeCpLeadId = ld.id; document.getElementById('cp-ld-name').value = ld.name; document.getElementById('cp-ld-stage').value = ld.stage; document.getElementById('cp-ld-email').value = ld.email || ''; document.getElementById('cp-ld-phone').value = ld.phone || ''; document.getElementById('cp-ld-delete-btn').classList.remove('hidden'); }
             document.getElementById('drawer-overlay').classList.add('show'); f.classList.add('open');
@@ -1462,7 +1486,7 @@ window.submitClientRequest = async function() {
             const select = document.getElementById('creative-client');
             if (!select) return;
             let html = '<option value="" disabled selected>Select a client...</option>';
-            globalClientsData.forEach(c => { html += `<option value="${escapeHTML(c.name)}">${c.name}</option>`; });
+            globalClientsData.forEach(c => { html += `<option value="${escapeAttr(c.name)}">${escapeAttr(c.name)}</option>`; });
             select.innerHTML = html;
         }
 
@@ -1507,7 +1531,7 @@ window.submitClientRequest = async function() {
             const select = document.getElementById('template-client'); 
             if (!select) return; 
             let html = '<option value="" disabled selected>Select a client...</option>';
-            globalClientsData.forEach(c => { html += `<option value="${escapeHTML(c.name)}">${c.name}</option>`; });
+            globalClientsData.forEach(c => { html += `<option value="${escapeAttr(c.name)}">${escapeAttr(c.name)}</option>`; });
             select.innerHTML = html;
         }
         
@@ -1708,7 +1732,7 @@ window.submitClientRequest = async function() {
 
         function populateTaskClientDropdown() {
             const container = document.getElementById('t-client-list-container'); if(!container) return;
-            container.innerHTML = globalClientsData.map(c => `<label class="flex items-center gap-3 p-2 hover:bg-white/5 rounded cursor-pointer transition"><input type="checkbox" class="row-checkbox t-client-cb" value="${escapeHTML(c.name)}" onchange="updateTaskClientDisplay()"> <span class="text-sm font-medium text-gray-300">${c.name}</span></label>`).join('');
+            container.innerHTML = globalClientsData.map(c => `<label class="flex items-center gap-3 p-2 hover:bg-white/5 rounded cursor-pointer transition"><input type="checkbox" class="row-checkbox t-client-cb" value="${escapeAttr(c.name)}" onchange="updateTaskClientDisplay()"> <span class="text-sm font-medium text-gray-300">${c.name}</span></label>`).join('');
         }
 
         function toggleAllTaskClients(masterCb) { document.querySelectorAll('.t-client-cb').forEach(cb => cb.checked = masterCb.checked); updateTaskClientDisplay(); }
@@ -1737,16 +1761,18 @@ window.submitClientRequest = async function() {
     document.querySelectorAll('.t-client-cb').forEach(cb => cb.checked = false);
     const allCb = document.getElementById('t-client-all'); if(allCb) allCb.checked = false;
 
+    // Matched by comparing values rather than building an attribute selector: a name
+    // carrying a quote used to need escaping to survive the selector, and normalize()
+    // also shrugs off the stray backslashes older rows picked up.
+
     if(id==='new'){ 
         activeEditId=null;
         document.getElementById('t-drawer-headline').innerText="New Task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
-        if (clientToSet) { const cb = document.querySelector(`.t-client-cb[value="${escapeHTML(clientToSet)}"]`); if(cb) cb.checked = true;
-        }
+        if (clientToSet) checkTaskClientBox(clientToSet);
     } else { 
         const t=globalTasksData.find(x=>x.id===id);
         if(!t) return; activeEditId=t.id; document.getElementById('t-drawer-headline').innerText="Edit Task"; document.getElementById('t-title').value=t.title; 
-        if(t.client) { const cb = document.querySelector(`.t-client-cb[value="${escapeHTML(t.client)}"]`); if(cb) cb.checked = true;
-        }
+        if(t.client) checkTaskClientBox(t.client);
         document.getElementById('t-stage').value=t.stage||'Onboarding'; document.getElementById('t-assignee').value=t.assignee||''; document.getElementById('t-type').value=t.type||'One-off'; document.getElementById('t-due').value=t.due||'';
         document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden'); 
     }
@@ -3380,7 +3406,7 @@ window.renderClientPayments = function() {
             const names = globalClientsData.filter(c => isSelectableClient(c) && c.name).map(c => c.name).sort();
             list.innerHTML = names.map(n =>
                 `<label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/5 cursor-pointer">
-                    <input type="checkbox" value="${escapeHTML(n)}" onchange="updateInviteClientLabel()" class="row-checkbox">
+                    <input type="checkbox" value="${escapeAttr(n)}" onchange="updateInviteClientLabel()" class="row-checkbox">
                     <span class="text-xs text-gray-300">${escapeHTML(n)}</span>
                 </label>`).join('') || '<p class="text-xs text-gray-500 italic px-2">No clients yet.</p>';
         };
@@ -4388,9 +4414,9 @@ window.addStageTemplateRow = function(tpl) {
     row.className = 'tpl-stage-row grid grid-cols-12 gap-2 items-center';
     row.dataset.tplId = tpl?.id || '';
     row.innerHTML = `
-        <input type="text" class="glass-input !py-1.5 col-span-4 tpl-title" placeholder="e.g. Build campaign structure" value="${escapeHTML(tpl?.task_title || '')}">
-        <input type="text" class="glass-input !py-1.5 col-span-2 tpl-assignee" placeholder="Assignee" value="${escapeHTML(tpl?.assignee || '')}">
-        <input type="text" class="glass-input !py-1.5 col-span-2 tpl-group" placeholder="Optional" value="${escapeHTML(tpl?.checklist_group || '')}">
+        <input type="text" class="glass-input !py-1.5 col-span-4 tpl-title" placeholder="e.g. Build campaign structure" value="${escapeAttr(stripSlashEscapes(tpl?.task_title))}">
+        <input type="text" class="glass-input !py-1.5 col-span-2 tpl-assignee" placeholder="Assignee" value="${escapeAttr(stripSlashEscapes(tpl?.assignee))}">
+        <input type="text" class="glass-input !py-1.5 col-span-2 tpl-group" placeholder="Optional" value="${escapeAttr(stripSlashEscapes(tpl?.checklist_group))}">
         <input type="number" class="glass-input !py-1.5 col-span-1 !text-center tpl-days" placeholder="0" value="${tpl?.due_days ?? 0}">
         <select class="glass-input !py-1.5 col-span-2 tpl-type">
             ${types.map(t => `<option value="${t}" ${tpl?.task_type === t ? 'selected' : ''}>${t}</option>`).join('')}
@@ -4547,7 +4573,7 @@ window.addOnboardingStepRow = function(step) {
                 <option value="client" ${owner === 'client' ? 'selected' : ''}>Client does</option>
                 <option value="agency" ${owner === 'agency' ? 'selected' : ''}>We do</option>
             </select>
-            <input type="text" class="glass-input !py-1.5 flex-1 ob-title" placeholder="Step title" value="${escapeHTML(step?.title || '')}">
+            <input type="text" class="glass-input !py-1.5 flex-1 ob-title" placeholder="Step title" value="${escapeAttr(stripSlashEscapes(step?.title))}">
             <select class="glass-input !py-1.5 !w-40 ob-type" onchange="toggleOnboardingOwnerFields(this)">
                 ${types.map(([v, l]) => `<option value="${v}" ${step?.step_type === v ? 'selected' : ''}>${l}</option>`).join('')}
             </select>
@@ -4555,10 +4581,10 @@ window.addOnboardingStepRow = function(step) {
                 <i class="fa-solid fa-xmark"></i>
             </button>
         </div>
-        <input type="text" class="glass-input !py-1.5 ob-desc" placeholder="Short instruction" value="${escapeHTML(step?.description || '')}">
+        <input type="text" class="glass-input !py-1.5 ob-desc" placeholder="Short instruction" value="${escapeAttr(stripSlashEscapes(step?.description))}">
         <div class="flex gap-2">
-            <input type="text" class="glass-input !py-1.5 flex-1 ob-embed" placeholder="Video URL or form embed URL" value="${escapeHTML(step?.embed_url || '')}">
-            <input type="text" class="glass-input !py-1.5 !w-44 ob-assignee" placeholder="Assignee" value="${escapeHTML(step?.assignee || '')}">
+            <input type="text" class="glass-input !py-1.5 flex-1 ob-embed" placeholder="Video URL or form embed URL" value="${escapeAttr(stripSlashEscapes(step?.embed_url))}">
+            <input type="text" class="glass-input !py-1.5 !w-44 ob-assignee" placeholder="Assignee" value="${escapeAttr(stripSlashEscapes(step?.assignee))}">
             <input type="number" class="glass-input !py-1.5 !w-24 !text-center ob-days" placeholder="Days" value="${step?.due_days ?? 0}">
         </div>
         <div class="ob-client-opts space-y-2">
@@ -4567,7 +4593,7 @@ window.addOnboardingStepRow = function(step) {
                     <input type="checkbox" class="row-checkbox ob-confirm" ${step?.requires_confirm ? 'checked' : ''} onchange="toggleOnboardingOwnerFields(this)">
                     Needs them to confirm they did it
                 </label>
-                <input type="text" class="glass-input !py-1.5 flex-1 ob-confirm-label" placeholder="Button wording, e.g. I've given you access" value="${escapeHTML(step?.confirm_label || '')}">
+                <input type="text" class="glass-input !py-1.5 flex-1 ob-confirm-label" placeholder="Button wording, e.g. I've given you access" value="${escapeAttr(stripSlashEscapes(step?.confirm_label))}">
             </div>
             <label class="flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer">
                 <input type="checkbox" class="row-checkbox ob-help" ${step?.offer_help ? 'checked' : ''}>
@@ -4923,9 +4949,9 @@ window.addContactRow = function(contact) {
     row.className = 'contact-row flex gap-2 items-start';
     row.dataset.contactId = contact?.id || '';
     row.innerHTML = `
-        <input type="text" class="glass-input !py-1.5 contact-name" placeholder="Name" value="${escapeHTML(contact?.contact_name || '')}">
-        <input type="text" class="glass-input !py-1.5 contact-phone" placeholder="(555) 010-9999" value="${escapeHTML(contact?.phone || '')}">
-        <input type="text" class="glass-input !py-1.5 !w-28 contact-title" placeholder="Role" value="${escapeHTML(contact?.title || '')}">
+        <input type="text" class="glass-input !py-1.5 contact-name" placeholder="Name" value="${escapeAttr(stripSlashEscapes(contact?.contact_name))}">
+        <input type="text" class="glass-input !py-1.5 contact-phone" placeholder="(555) 010-9999" value="${escapeAttr(stripSlashEscapes(contact?.phone))}">
+        <input type="text" class="glass-input !py-1.5 !w-28 contact-title" placeholder="Role" value="${escapeAttr(stripSlashEscapes(contact?.title))}">
         <button type="button" onclick="this.closest('.contact-row').remove()" class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
             <i class="fa-solid fa-xmark"></i>
         </button>`;
