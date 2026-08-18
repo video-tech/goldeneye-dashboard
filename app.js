@@ -775,7 +775,61 @@ window.obCompleteStep = async function(stepId) {
 
     renderGetStarted();
     updateGetStartedTabVisibility();
+    await obNotifyOnboardingComplete();
 };
+
+// Finishing the last step is the agency's cue to take over, but nothing on this side
+// watches for it — the portal just hides the tab. Raising it as a Client Request puts
+// it in the same inbound queue as help requests, so it lands where the team already
+// looks rather than needing its own notification path.
+const OB_COMPLETE_TASK_TITLE = 'Onboarding complete — ready for campaign build';
+
+// Keyed by client, since an admin can switch accounts without reloading
+const obCompletionRaised = new Set();
+
+async function obNotifyOnboardingComplete() {
+    const client = currentActiveClient;
+    const key = normalize(client || '');
+    if (!key || obCompletionRaised.has(key)) return;
+
+    const steps = activeOnboardingSteps();
+    if (!steps.length || !onboardingIsComplete(client)) return;
+
+    // Worked or not, an existing copy means this already announced itself
+    const title = OB_COMPLETE_TASK_TITLE.trim().toLowerCase();
+    const already = globalTasksData.some(t =>
+        normalize(t.client || '') === key &&
+        String(t.title || '').trim().toLowerCase() === title);
+    if (already) { obCompletionRaised.add(key); return; }
+
+    // Claimed before the await so the 2s form poll can't file a second one behind this
+    obCompletionRaised.add(key);
+
+    const due = new Date();
+    due.setDate(due.getDate() + 1);
+
+    const row = {
+        client,
+        title: OB_COMPLETE_TASK_TITLE,
+        type: 'Client Request',
+        stage: 'Onboarding',
+        status: 'Not Started',
+        assignee: 'Account Manager',
+        p: 5, u: 4, e: 1, score: 92,
+        due: due.toISOString().split('T')[0],
+        notes: `${client} finished every onboarding step in their portal.`,
+        updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabaseClient.from('tasks').insert([row]);
+    if (error) {
+        // Let a later completion retry rather than losing the handoff silently
+        obCompletionRaised.delete(key);
+        console.error('Could not raise the onboarding-complete task:', error);
+        return;
+    }
+    globalTasksData.push(row);
+}
 
 // A form step is completed by a webhook after GHL tells us it was submitted, so the
 // portal has no way to know it happened. Without this the client submits a form and
@@ -815,6 +869,7 @@ window.startOnboardingPoll = function() {
         if (after > before) {
             renderGetStarted();
             updateGetStartedTabVisibility();
+            await obNotifyOnboardingComplete();
             if (!obHasPendingFormStep()) stopOnboardingPoll();
         }
     }, 2000);
@@ -4598,7 +4653,7 @@ async function generateStageTasks(clientName, stage) {
                 assignee: s.assignee,
                 due_days: s.due_days,
                 task_type: 'Checklist',
-                default_notes: s.notes,
+                default_notes: s.description,
                 checklist_group: null,
                 priority: 3, urgency: 3, effort: 3
             }))
