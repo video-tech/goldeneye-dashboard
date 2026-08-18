@@ -19,6 +19,8 @@
         let globalContactsData = [];
         let globalOnboardingSteps = [];
         let globalOnboardingProgress = [];
+        // Delays the manual "mark it done" fallback on form steps until the webhook has had a chance
+        let obManualRevealTimer = null;
         let allRawSeo = [];
         
         // Dashboard States
@@ -618,19 +620,34 @@ window.renderGetStarted = function() {
                 inner += `<div class="w-full rounded-lg overflow-hidden border border-white/10 mb-4 bg-white" style="height:70vh">
                               <iframe src="${escapeHTML(prefillFormUrl(s.embed_url))}" class="w-full h-full" frameborder="0"></iframe>
                           </div>
-                          <p class="text-[11px] text-gray-500 mb-3">This ticks off automatically once you submit the form.</p>`;
+                          <p class="text-[11px] text-gray-500 mb-3">
+                              <i class="fa-solid fa-circle-notch fa-spin mr-1 text-blue-400"></i>
+                              Submit the form above and this moves on by itself &mdash; no need to do anything else.
+                          </p>`;
             }
 
             // Videos that can't report progress, forms, and plain actions all need a
             // manual confirm. A self-hosted video completes on its own.
-            // Only a self-hosted video that completes itself needs no button
-            const selfCompleting = s.step_type === 'video' && isDirectVideo(s.embed_url) && !s.requires_confirm;
+            // A self-hosted video ends on its own; a form is completed by GHL's webhook.
+            // Neither needs a button as the primary path.
+            const selfCompleting = (s.step_type === 'video' && isDirectVideo(s.embed_url) && !s.requires_confirm)
+                                || s.step_type === 'form';
+
             inner += `<div class="flex flex-wrap items-center gap-3">`;
             if (!selfCompleting) {
-                const label = s.confirm_label
-                    || (s.step_type === 'form' ? "I've submitted this" : "Mark as done");
+                const label = s.confirm_label || "Mark as done";
                 inner += `<button onclick="obCompleteStep('${s.id}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
                               <i class="fa-solid fa-check mr-2"></i>${escapeHTML(label)}
+                          </button>`;
+            }
+
+            // Fallback for a form, revealed only after the automatic path has had time to
+            // work. Present from the start it just invites a click, which is what the
+            // webhook exists to avoid — but a client whose submission didn't register
+            // still needs a way forward.
+            if (s.step_type === 'form') {
+                inner += `<button id="ob-manual-${s.id}" onclick="obCompleteStep('${s.id}')" class="hidden text-xs text-gray-400 hover:text-white underline underline-offset-2 transition">
+                              Submitted it but nothing happened? Mark it done
                           </button>`;
             }
 
@@ -650,6 +667,13 @@ window.renderGetStarted = function() {
         card.innerHTML = inner;
         list.appendChild(card);
     });
+
+    // Give the webhook a fair run before offering the manual way out. 25 seconds covers
+    // GHL firing, Make running and a poll cycle landing.
+    clearTimeout(obManualRevealTimer);
+    obManualRevealTimer = setTimeout(() => {
+        document.querySelectorAll('[id^="ob-manual-"]').forEach(b => b.classList.remove('hidden'));
+    }, 25000);
 };
 
 // Restore playback position so a client returning mid-video isn't sent back to zero
