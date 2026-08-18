@@ -998,25 +998,48 @@ function weekStartMonday(d = new Date()) {
     return getLocalYYYYMMDD(x);
 }
 
-// The client's own entry for a week. Their SMS-era rows and any colleague's stay
-// separate, and the weekly totals go on summing all of them.
-function portalCheckinFor(client, week) {
+// The week being reported is the one that has finished, not the one underway — Monday
+// morning you're asked how last week went. Filing it under the current Monday would
+// label a completed week with dates that hadn't happened yet.
+function reportingWeekStart() {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return weekStartMonday(d);
+}
+
+// "6 Jan – 12 Jan 2026". Shown wherever the client is asked for numbers, so there's no
+// guessing which seven days they're totting up.
+function weekRangeLabel(weekStart) {
+    if (!weekStart) return '';
+    const s = new Date(weekStart + 'T12:00:00');
+    const e = new Date(s);
+    e.setDate(e.getDate() + 6);
+    const day = d => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    return `${day(s)} – ${day(e)} ${e.getFullYear()}`;
+}
+
+// One entry per person per week, keyed on who submitted it. A client with three sales
+// people gets three rows, exactly as the SMS replies did, and the weekly totals sum
+// them — matching on client and week alone would have each person overwrite the last.
+function portalCheckinFor(client, week, who = clientEmail) {
+    const key = String(who || '').trim().toLowerCase();
     return globalCheckinsData.find(c =>
         normalize(c.client_name || '') === normalize(client || '') &&
         c.week_start === week &&
-        c.source === 'portal') || null;
+        c.source === 'portal' &&
+        String(c.contact_name || '').trim().toLowerCase() === key) || null;
 }
 
 function weeklyCheckinOutstanding() {
     // An admin viewing a client's portal must not file numbers as them
     if (currentUserRole === 'admin') return false;
-    return !portalCheckinFor(currentActiveClient, weekStartMonday());
+    return !portalCheckinFor(currentActiveClient, reportingWeekStart());
 }
 
 const money0 = n => '$' + Math.round(Number(n) || 0).toLocaleString();
 
 function weeklyCheckinFormHtml(suffix) {
-    const existing = portalCheckinFor(currentActiveClient, weekStartMonday());
+    const existing = portalCheckinFor(currentActiveClient, reportingWeekStart());
     const v = f => existing?.[f] ?? '';
 
     return `
@@ -1046,17 +1069,20 @@ function weeklyCheckinFormHtml(suffix) {
 }
 
 window.renderWeeklyCheckin = function() {
-    const week = weekStartMonday();
+    const week = reportingWeekStart();
     const existing = portalCheckinFor(currentActiveClient, week);
 
     const mount = document.getElementById('cp-checkin-form-mount');
     if (mount) mount.innerHTML = weeklyCheckinFormHtml('tab');
 
+    const head = document.getElementById('cp-checkin-heading');
+    if (head) head.innerText = `Numbers for ${weekRangeLabel(week)}`;
+
     const sub = document.getElementById('cp-checkin-subhead');
     if (sub) {
         sub.innerText = existing
-            ? "You've already sent this week's numbers — change them below if anything's moved."
-            : 'Takes about a minute. These build your revenue reporting and the network leaderboard.';
+            ? "You've already sent your numbers for this week — change them below if anything's moved."
+            : 'Takes about a minute, and only covers your own numbers. These build your revenue reporting and the network leaderboard.';
     }
 
     // A dot on the tab so a dismissed popup doesn't mean the week gets forgotten
@@ -1072,22 +1098,41 @@ window.renderWeeklyCheckin = function() {
         return;
     }
 
+    const cell = (reported, value) => reported
+        ? `<span class="font-bold text-white">${value}</span>`
+        : '<span class="text-gray-600">&mdash;</span>';
+
+    const num = v => v !== null && v !== undefined;
+
     history.innerHTML = weeks.map(w => {
-        const label = new Date(w.week_start + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-        const cell = (reported, value) => reported
-            ? `<span class="font-bold text-white">${value}</span>`
-            : '<span class="text-gray-600">&mdash;</span>';
         const indirect = w.contributors.reduce((n, c) => n + (parseInt(c.indirect_leads) || 0), 0);
-        const anyIndirect = w.contributors.some(c => c.indirect_leads !== null && c.indirect_leads !== undefined);
+        const anyIndirect = w.contributors.some(c => num(c.indirect_leads));
+
+        // Who reported what, so a week that came in low is obviously one person short
+        // rather than a bad week. Only worth showing once more than one person replied.
+        const breakdown = w.contributors.length < 2 ? '' : `
+            <div class="w-full border-t border-white/5 mt-2 pt-2 space-y-1">
+                ${w.contributors.map(c => `
+                    <div class="flex flex-wrap justify-between gap-x-4 text-[11px] text-gray-500">
+                        <span>${escapeAttr(stripSlashEscapes(c.contact_name || c.contact_phone || 'Unknown'))}${c.source === 'portal' ? '' : ' <span class="opacity-60">(text)</span>'}</span>
+                        <span>
+                            ${num(c.estimates_count) ? c.estimates_count + ' est' : ''}
+                            ${num(c.closes_count) ? ' &middot; ' + c.closes_count + ' closed' : ''}
+                            ${num(c.revenue_total) ? ' &middot; ' + money0(c.revenue_total) : ''}
+                            ${num(c.indirect_leads) ? ' &middot; ' + c.indirect_leads + ' ad-attributed' : ''}
+                        </span>
+                    </div>`).join('')}
+            </div>`;
 
         return `<div class="glass px-4 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm">
-            <span class="text-gray-400 whitespace-nowrap">Week of ${label}</span>
+            <span class="text-gray-400 whitespace-nowrap">${weekRangeLabel(w.week_start)}</span>
             <div class="flex flex-wrap gap-x-6 gap-y-1">
                 <span class="text-gray-500">Estimates ${cell(w.reportedEstimates, w.estimates_count)}</span>
                 <span class="text-gray-500">Closed ${cell(w.reportedCloses, w.closes_count)}</span>
                 <span class="text-gray-500">Revenue ${cell(w.reportedRevenue, money0(w.revenue_total))}</span>
                 <span class="text-gray-500">Ad-attributed ${cell(anyIndirect, indirect)}</span>
             </div>
+            ${breakdown}
         </div>`;
     }).join('');
 };
@@ -1124,16 +1169,18 @@ window.submitWeeklyCheckin = async function(suffix) {
     btn.disabled = true;
 
     try {
-        const week = weekStartMonday();
+        const week = reportingWeekStart();
         const existing = portalCheckinFor(currentActiveClient, week);
 
         if (existing) {
-            // Matched on the three columns that identify it rather than an id, so this
-            // doesn't care whether the table has one
+            // Matched on the columns that identify it rather than an id, so this doesn't
+            // care whether the table has one. contact_name is part of that identity now:
+            // without it, one person's edit would overwrite a colleague's entry.
             const { error } = await supabaseClient.from('weekly_checkins').update(row)
                 .eq('client_name', existing.client_name)
                 .eq('week_start', week)
-                .eq('source', 'portal');
+                .eq('source', 'portal')
+                .eq('contact_name', existing.contact_name);
             if (error) throw error;
             Object.assign(existing, row);
         } else {
@@ -1171,7 +1218,7 @@ function closeWeeklyCheckinModal() {
 // asked again on the next page load — the tab keeps its dot either way.
 window.dismissWeeklyCheckin = function() {
     try {
-        localStorage.setItem(`midas_wc_dismissed_${normalize(currentActiveClient)}`, weekStartMonday());
+        localStorage.setItem(`midas_wc_dismissed_${normalize(currentActiveClient)}`, reportingWeekStart());
     } catch (e) { /* private mode, no great loss */ }
     closeWeeklyCheckinModal();
 };
@@ -1183,7 +1230,10 @@ window.maybeShowWeeklyCheckin = function() {
     try {
         dismissed = localStorage.getItem(`midas_wc_dismissed_${normalize(currentActiveClient)}`);
     } catch (e) { /* ignore */ }
-    if (dismissed === weekStartMonday()) return;
+    if (dismissed === reportingWeekStart()) return;
+
+    const range = document.getElementById('cp-checkin-modal-range');
+    if (range) range.innerText = weekRangeLabel(reportingWeekStart());
 
     const mount = document.getElementById('cp-checkin-modal-mount');
     if (mount) mount.innerHTML = weeklyCheckinFormHtml('modal');
