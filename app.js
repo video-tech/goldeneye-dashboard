@@ -951,6 +951,14 @@ window.updateGetStartedTabVisibility = function() {
     const steps = activeOnboardingSteps();
     const show = steps.length > 0 && !onboardingIsComplete(currentActiveClient);
     tab.classList.toggle('hidden', !show);
+
+    // Hiding the button while its content is still on screen left the client stranded on
+    // a view they could no longer navigate back to. They keep the finished panel — with
+    // its own way out — and only get moved on once they've reloaded or moved off it.
+    const view = document.getElementById('cp-view-getstarted');
+    if (!show && view && !view.classList.contains('hidden') && !steps.length) {
+        switchCpTab('dashboard');
+    }
 };
 
 // The Knowledge Base is the same videos as the onboarding sequence, but as a permanent
