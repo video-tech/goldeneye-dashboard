@@ -4300,6 +4300,24 @@ window.addStageTemplateRow = function(tpl) {
     container.appendChild(row);
 };
 
+// Given an array whose rows have differing keys, PostgREST builds a single INSERT from
+// the union of those keys and writes null for whichever a row is missing — so a brand
+// new row sent alongside saved ones arrives with an explicit null id and never reaches
+// the column's gen_random_uuid() default. Splitting by whether the id is present keeps
+// each request's key set uniform.
+async function saveRowsByIdPresence(table, rows, upsertOpts) {
+    const existing = rows.filter(r => r.id);
+    const fresh = rows.filter(r => !r.id);
+    if (existing.length) {
+        const { error } = await supabaseClient.from(table).upsert(existing, upsertOpts);
+        if (error) throw error;
+    }
+    if (fresh.length) {
+        const { error } = await supabaseClient.from(table).insert(fresh);
+        if (error) throw error;
+    }
+}
+
 window.saveStageTemplates = async function() {
     if (currentUserRole !== 'admin') return;
     const picker = document.getElementById('tpl-stage-picker');
@@ -4346,8 +4364,7 @@ window.saveStageTemplates = async function() {
                 if (t.id) row.id = t.id;
                 return row;
             });
-            const { error } = await supabaseClient.from('stage_templates').upsert(payload);
-            if (error) throw error;
+            await saveRowsByIdPresence('stage_templates', payload);
         }
 
         await loadStageTemplates();
@@ -4528,8 +4545,8 @@ window.saveOnboardingSteps = async function() {
                 if (s.id) row.id = s.id;
                 return row;
             });
-            const { error } = await supabaseClient.from('onboarding_steps').upsert(payload);
-            if (error) throw error;
+
+            await saveRowsByIdPresence('onboarding_steps', payload);
         }
 
         await loadOnboardingData();
