@@ -2625,6 +2625,47 @@ async function fetchHealthData() {
         // The whole onboarding in one list — the client's steps and ours, in order, each
         // showing its real state. Client steps read from onboarding progress; ours read
         // from the tasks table, since an agency item *is* a task.
+// For clients who onboarded before the portal existed. Without progress rows every step
+// reads as outstanding, so their Get Started tab never goes away.
+//
+// completed_by is set to 'backfilled' deliberately: the database trigger that raises the
+// handoff task skips those rows, so this can't text a long-standing client to tell them
+// their onboarding is finished.
+window.markOnboardingComplete = async function() {
+    if (currentUserRole !== 'admin' || cSelectedAccount === 'ALL') return;
+
+    const steps = activeOnboardingSteps();
+    const missing = steps.filter(s => !onboardingProgressFor(cSelectedAccount, s.id)?.completed_at);
+    if (!missing.length) return;
+
+    if (!confirm(`Tick off ${missing.length} client step${missing.length === 1 ? '' : 's'} for ${cSelectedAccount}?\n\nUse this for a client who onboarded before the portal existed. It hides their Get Started tab and won't notify them.`)) return;
+
+    const btn = document.getElementById('c-onboarding-backfill');
+    const original = btn ? btn.innerHTML : '';
+    if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true; }
+
+    try {
+        const now = new Date().toISOString();
+        const rows = missing.map(s => ({
+            client_name: cSelectedAccount,
+            step_id: s.id,
+            completed_at: now,
+            completed_by: 'backfilled'
+        }));
+
+        const { data, error } = await supabaseClient.from('client_onboarding_progress')
+            .upsert(rows, { onConflict: 'client_name,step_id' }).select();
+        if (error) throw error;
+
+        if (data?.length) globalOnboardingProgress.push(...data);
+        renderClientOnboarding();
+    } catch (err) {
+        alert("Could not mark those steps complete: " + err.message);
+    } finally {
+        if (btn) { btn.innerHTML = original; btn.disabled = false; }
+    }
+};
+
         function renderClientOnboarding() {
             const box = document.getElementById('c-onboarding-box');
             const list = document.getElementById('c-onboarding-list');
@@ -2645,6 +2686,16 @@ async function fetchHealthData() {
             const done = items.filter(isDone).length;
             const summary = document.getElementById('c-onboarding-summary');
             if (summary) summary.innerText = `${done} of ${items.length} complete`;
+
+            // Offered only where it's the right tool: a client who joined before the
+            // portal existed has no progress rows at all, so every step reads outstanding
+            // and their Get Started tab won't go away on its own.
+            const backfill = document.getElementById('c-onboarding-backfill');
+            if (backfill) {
+                const clientSteps = items.filter(i => i.owner !== 'agency');
+                const outstanding = clientSteps.filter(i => !isDone(i)).length;
+                backfill.classList.toggle('hidden', !(currentUserRole === 'admin' && outstanding > 0));
+            }
 
             // The first outstanding item — whoever it's waiting on
             const blocker = items.find(i => !isDone(i));
