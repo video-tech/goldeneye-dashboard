@@ -4370,6 +4370,7 @@ window.renderOnboardingSteps = function() {
     const steps = [...globalOnboardingSteps].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
     container.innerHTML = '';
     steps.forEach(s => addOnboardingStepRow(s));
+    initOnboardingSortable();
 
     const status = document.getElementById('onboarding-steps-status');
     if (status) {
@@ -4379,6 +4380,20 @@ window.renderOnboardingSteps = function() {
     }
 };
 
+
+// Order is stored as sort_order but derived from row position on save, so reordering
+// has to be possible in the editor. Handle-only, so dragging never starts from an input.
+let onboardingSortable = null;
+function initOnboardingSortable() {
+    const container = document.getElementById('onboarding-steps-container');
+    if (!container || typeof Sortable === 'undefined') return;
+    if (onboardingSortable) onboardingSortable.destroy();
+    onboardingSortable = new Sortable(container, {
+        handle: '.ob-drag-handle',
+        animation: 150,
+        ghostClass: 'sortable-ghost'
+    });
+}
 window.addOnboardingStepRow = function(step) {
     const container = document.getElementById('onboarding-steps-container');
     if (!container) return;
@@ -4396,6 +4411,9 @@ window.addOnboardingStepRow = function(step) {
     row.dataset.stepId = step?.id || '';
     row.innerHTML = `
         <div class="flex gap-2 items-start">
+            <span class="ob-drag-handle cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-300 px-1 pt-2" title="Drag to reorder">
+                <i class="fa-solid fa-grip-vertical"></i>
+            </span>
             <select class="glass-input !py-1.5 !w-36 ob-owner" onchange="toggleOnboardingOwnerFields(this)">
                 <option value="client" ${owner === 'client' ? 'selected' : ''}>Client does</option>
                 <option value="agency" ${owner === 'agency' ? 'selected' : ''}>We do</option>
