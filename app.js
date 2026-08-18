@@ -9,7 +9,11 @@
 	let globalAuditsData = []; // Add this near line 656 with your other global variables
         
         // Core Data
-        let globalClientsData = []; 
+        let globalClientsData = [];
+        // Name/email pairs the client portal loads for itself, since it never calls
+        // fetchAllGlobalData. Deliberately not the full clients row — the portal has no
+        // business holding retainer or contract columns.
+        let portalClientRows = [];
         let globalHealthData = {};
         let globalTasksData = [];
         let globalAdsData = [];
@@ -442,7 +446,8 @@
                 supabaseClient.from('weekly_checkins').select('*').in('client_name', allowedClients),
                 supabaseClient.from('client_contacts').select('*').in('client_name', allowedClients),
                 supabaseClient.from('onboarding_steps').select('*').order('sort_order'),
-                supabaseClient.from('client_onboarding_progress').select('*').in('client_name', allowedClients)
+                supabaseClient.from('client_onboarding_progress').select('*').in('client_name', allowedClients),
+                supabaseClient.from('clients').select('name, client_email').in('name', allowedClients)
             ]);
 
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
@@ -456,6 +461,10 @@
             globalContactsData = results[6].status === 'fulfilled' ? (results[6].value.data || []) : [];
             globalOnboardingSteps = results[7].status === 'fulfilled' ? (results[7].value.data || []) : [];
             globalOnboardingProgress = results[8].status === 'fulfilled' ? (results[8].value.data || []) : [];
+
+            // If RLS won't let a client read their own row this stays empty and the email
+            // prefill falls back to the address they signed in with, as it did before.
+            portalClientRows = results[9].status === 'fulfilled' ? (results[9].value.data || []) : [];
 
             const switcher = document.getElementById('admin-switcher');
             const select = document.getElementById('admin-client-list');
@@ -544,7 +553,12 @@ const isDirectVideo = url => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url || '');
 function prefillFormUrl(url) {
     if (!url) return url;
 
-    const client = globalClientsData.find(c => normalize(c.name) === normalize(currentActiveClient));
+    // globalClientsData is only filled by fetchAllGlobalData, which the client role never
+    // runs — the portal loads its own name/email pairs instead. Check both so the lookup
+    // works whichever side is rendering.
+    const want = normalize(currentActiveClient);
+    const client = globalClientsData.find(c => normalize(c.name) === want)
+                || portalClientRows.find(c => normalize(c.name) === want);
     // client_email can hold several comma-separated addresses; the first is the primary
     const email = String(client?.client_email || clientEmail || '').split(/[,;\s]+/)[0].trim();
     if (!email) return url;
@@ -619,11 +633,17 @@ window.renderGetStarted = function() {
             if (s.step_type === 'form' && s.embed_url) {
                 inner += `<div class="w-full rounded-lg overflow-hidden border border-white/10 mb-4 bg-white" style="height:70vh">
                               <iframe src="${escapeHTML(prefillFormUrl(s.embed_url))}" class="w-full h-full" frameborder="0"></iframe>
-                          </div>
-                          <p class="text-[11px] text-gray-500 mb-3">
-                              <i class="fa-solid fa-circle-notch fa-spin mr-1 text-blue-400"></i>
-                              After you hit submit, give this a few seconds &mdash; it ticks itself off and opens the next step. Please don&rsquo;t close this tab.
-                          </p>`;
+                          </div>`;
+
+                // Only promise the automatic tick where a webhook is actually wired up.
+                // An embed with no automation behind it — a booking calendar, say — asks
+                // for a confirmation instead, and saying it ticks itself off would be a lie.
+                if (!s.requires_confirm) {
+                    inner += `<p class="text-[11px] text-gray-500 mb-3">
+                                  <i class="fa-solid fa-circle-notch fa-spin mr-1 text-blue-400"></i>
+                                  After you hit submit, give this a few seconds &mdash; it ticks itself off and opens the next step. Please don&rsquo;t close this tab.
+                              </p>`;
+                }
             }
 
             // Videos that can't report progress, forms, and plain actions all need a
@@ -631,7 +651,7 @@ window.renderGetStarted = function() {
             // A self-hosted video ends on its own; a form is completed by GHL's webhook.
             // Neither needs a button as the primary path.
             const selfCompleting = (s.step_type === 'video' && isDirectVideo(s.embed_url) && !s.requires_confirm)
-                                || s.step_type === 'form';
+                                || (s.step_type === 'form' && !s.requires_confirm);
 
             inner += `<div class="flex flex-wrap items-center gap-3">`;
             if (!selfCompleting) {
@@ -645,7 +665,7 @@ window.renderGetStarted = function() {
             // work. Present from the start it just invites a click, which is what the
             // webhook exists to avoid — but a client whose submission didn't register
             // still needs a way forward.
-            if (s.step_type === 'form') {
+            if (s.step_type === 'form' && !s.requires_confirm) {
                 inner += `<button id="ob-manual-${s.id}" onclick="obCompleteStep('${s.id}')" class="hidden text-xs text-gray-400 hover:text-white underline underline-offset-2 transition">
                               Submitted it but nothing happened? Mark it done
                           </button>`;
@@ -787,6 +807,34 @@ const OB_COMPLETE_TASK_TITLE = 'Onboarding complete — ready for campaign build
 // Keyed by client, since an admin can switch accounts without reloading
 const obCompletionRaised = new Set();
 
+// Built in one place because two sides raise it: the portal at the moment the client
+// finishes, and the dashboard catching up on anyone the portal missed.
+function buildOnboardingHandoffTask(clientName) {
+    const due = new Date();
+    due.setDate(due.getDate() + 1);
+
+    return {
+        client: clientName,
+        title: OB_COMPLETE_TASK_TITLE,
+        type: 'Client Request',
+        stage: 'Onboarding',
+        status: 'Not Started',
+        assignee: 'Account Manager',
+        p: 5, u: 4, e: 1, score: 92,
+        due: due.toISOString().split('T')[0],
+        notes: `${clientName} finished every onboarding step in their portal.`,
+        updated_at: new Date().toISOString()
+    };
+}
+
+function onboardingHandoffRaised(clientName) {
+    const key = normalize(clientName || '');
+    const title = OB_COMPLETE_TASK_TITLE.trim().toLowerCase();
+    return globalTasksData.some(t =>
+        normalize(t.client || '') === key &&
+        String(t.title || '').trim().toLowerCase() === title);
+}
+
 async function obNotifyOnboardingComplete() {
     const client = currentActiveClient;
     const key = normalize(client || '');
@@ -796,30 +844,12 @@ async function obNotifyOnboardingComplete() {
     if (!steps.length || !onboardingIsComplete(client)) return;
 
     // Worked or not, an existing copy means this already announced itself
-    const title = OB_COMPLETE_TASK_TITLE.trim().toLowerCase();
-    const already = globalTasksData.some(t =>
-        normalize(t.client || '') === key &&
-        String(t.title || '').trim().toLowerCase() === title);
-    if (already) { obCompletionRaised.add(key); return; }
+    if (onboardingHandoffRaised(client)) { obCompletionRaised.add(key); return; }
 
     // Claimed before the await so the 2s form poll can't file a second one behind this
     obCompletionRaised.add(key);
 
-    const due = new Date();
-    due.setDate(due.getDate() + 1);
-
-    const row = {
-        client,
-        title: OB_COMPLETE_TASK_TITLE,
-        type: 'Client Request',
-        stage: 'Onboarding',
-        status: 'Not Started',
-        assignee: 'Account Manager',
-        p: 5, u: 4, e: 1, score: 92,
-        due: due.toISOString().split('T')[0],
-        notes: `${client} finished every onboarding step in their portal.`,
-        updated_at: new Date().toISOString()
-    };
+    const row = buildOnboardingHandoffTask(client);
 
     const { error } = await supabaseClient.from('tasks').insert([row]);
     if (error) {
@@ -838,8 +868,11 @@ async function obNotifyOnboardingComplete() {
 let obPollTimer = null;
 
 function obHasPendingFormStep() {
+    // A form step that asks for a confirmation has no webhook behind it, so polling for
+    // one would never stop on its own
     return activeOnboardingSteps().some(s =>
-        s.step_type === 'form' && !onboardingProgressFor(currentActiveClient, s.id)?.completed_at);
+        s.step_type === 'form' && !s.requires_confirm &&
+        !onboardingProgressFor(currentActiveClient, s.id)?.completed_at);
 }
 
 window.startOnboardingPoll = function() {
@@ -1416,7 +1449,13 @@ window.submitClientRequest = async function() {
             // table, and granting the client role write access to it would expose the
             // retainer and contract columns. Caught up here on load instead, the same
             // way the payment police above reconciles a missed deadline.
-            if (currentUserRole === 'admin') autoAdvanceCompletedOnboarding();
+            // Awaited so callers rendering straight after this see the moved stage and the
+            // tasks it generated. Handoff first: it's an Onboarding task itself, so raising
+            // it after the advance would leave it filed against a stage they've left.
+            if (currentUserRole === 'admin') {
+                await reconcileOnboardingHandoffTasks();
+                await autoAdvanceCompletedOnboarding();
+            }
         }
 
         function populateCreativeClientDropdown() {
@@ -1613,7 +1652,7 @@ window.submitClientRequest = async function() {
             document.querySelectorAll('#page-tasks .kanban-col').forEach(c => {
                 sortableInstances.push(new Sortable(c, { group:'kanban', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
                     const id = e.item.getAttribute('data-id'); const nS = e.to.getAttribute('data-status'); const t = globalTasksData.find(x=>x.id==id);
-                    if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); await autoAdvanceCompletedOnboarding(); }
+                    if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); if(await autoAdvanceCompletedOnboarding()) renderKanban(); }
                 }}));
             });
         }
@@ -4453,8 +4492,12 @@ window.renderOnboardingSteps = function() {
 
     const status = document.getElementById('onboarding-steps-status');
     if (status) {
+        // The editor lists every row, but only active client-owned ones reach the portal
+        const shown = steps.filter(s => s.active !== false && s.owner !== 'agency').length;
+        const agency = steps.filter(s => s.owner === 'agency').length;
+        const agencyNote = agency ? ` ${agency} agency step${agency === 1 ? '' : 's'} become tasks instead.` : '';
         status.innerText = steps.length
-            ? `${steps.length} step${steps.length === 1 ? '' : 's'} shown to clients under Get Started.`
+            ? `${shown} step${shown === 1 ? '' : 's'} shown to clients under Get Started.${agencyNote}`
             : 'No steps yet — clients won\'t see a Get Started tab until you add some.';
     }
 };
@@ -4488,7 +4531,14 @@ window.addOnboardingStepRow = function(step) {
     const row = document.createElement('div');
     row.className = 'ob-step-row bg-black/20 border border-white/5 rounded-xl p-3 space-y-2';
     row.dataset.stepId = step?.id || '';
+
+    // Retired steps stay editable but are hidden from clients, and nothing on the row
+    // said so — an admin could reasonably think they were live.
+    const retired = step?.active === false;
+    row.dataset.stepActive = retired ? 'false' : 'true';
+
     row.innerHTML = `
+        ${retired ? `<p class="text-[10px] uppercase tracking-widest text-amber-400/80"><i class="fa-solid fa-eye-slash mr-1"></i>Hidden from clients</p>` : ''}
         <div class="flex gap-2 items-start">
             <span class="ob-drag-handle cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-300 px-1 pt-2" title="Drag to reorder">
                 <i class="fa-solid fa-grip-vertical"></i>
@@ -4545,9 +4595,10 @@ window.toggleOnboardingOwnerFields = function(el) {
     // The label field is pointless unless a confirmation is being asked for
     row.querySelector('.ob-confirm-label').style.display = row.querySelector('.ob-confirm').checked ? '' : 'none';
 
+    // Hidden, not cleared — toggling owner or type to compare options and back used to
+    // wipe a pasted URL. The save decides what actually gets stored.
     const needsEmbed = !isAgency && type.value !== 'action';
     embed.style.display = needsEmbed ? '' : 'none';
-    if (!needsEmbed) embed.value = '';
 };
 
 window.saveOnboardingSteps = async function() {
@@ -4558,21 +4609,27 @@ window.saveOnboardingSteps = async function() {
     const entered = rows.map((r, i) => {
         const owner = r.querySelector('.ob-owner').value;
         const isAgency = owner === 'agency';
+        // An agency item is a task, not something rendered to the client
+        const stepType = isAgency ? 'action' : r.querySelector('.ob-type').value;
+        // The field is only hidden when it doesn't apply, so ignore whatever it still holds
+        const keepsEmbed = !isAgency && stepType !== 'action';
+
         return {
             id: r.dataset.stepId || null,
             owner,
             title: r.querySelector('.ob-title').value.trim(),
             description: r.querySelector('.ob-desc').value.trim() || null,
-            // An agency item is a task, not something rendered to the client
-            step_type: isAgency ? 'action' : r.querySelector('.ob-type').value,
-            embed_url: isAgency ? null : (r.querySelector('.ob-embed').value.trim() || null),
+            step_type: stepType,
+            embed_url: keepsEmbed ? (r.querySelector('.ob-embed').value.trim() || null) : null,
             assignee: isAgency ? (r.querySelector('.ob-assignee').value.trim() || null) : null,
             due_days: isAgency ? (parseInt(r.querySelector('.ob-days').value) || 0) : 0,
             offer_help: !isAgency && r.querySelector('.ob-help').checked,
             requires_confirm: !isAgency && r.querySelector('.ob-confirm').checked,
             confirm_label: !isAgency ? (r.querySelector('.ob-confirm-label').value.trim() || null) : null,
             sort_order: i + 1,
-            active: true
+            // Carried from the row rather than forced true, so saving the editor can't
+            // silently republish a step that was retired
+            active: r.dataset.stepActive !== 'false'
         };
     }).filter(s => s.title);
 
@@ -4668,10 +4725,16 @@ async function generateStageTasks(clientName, stage) {
 
     if (!templates.length) return 0;
 
+    // Matched on the normalized name rather than an exact one: everything else in the
+    // app compares clients that way, and a rename would otherwise slip the dedupe and
+    // regenerate the whole checklist.
     const { data: existingRows } = await supabaseClient
-        .from('tasks').select('title').eq('client', clientName).eq('stage', stage);
+        .from('tasks').select('title, client').eq('stage', stage);
 
-    const existing = new Set((existingRows || []).map(t => String(t.title || '').trim().toLowerCase()));
+    const want = normalize(clientName);
+    const existing = new Set((existingRows || [])
+        .filter(t => normalize(t.client || '') === want)
+        .map(t => String(t.title || '').trim().toLowerCase()));
     const toCreate = templates.filter(t => !existing.has(String(t.task_title || '').trim().toLowerCase()));
     if (!toCreate.length) return 0;
 
@@ -4702,9 +4765,37 @@ async function generateStageTasks(clientName, stage) {
         };
     });
 
-    const { error } = await supabaseClient.from('tasks').insert(rows);
+    const { data: created, error } = await supabaseClient.from('tasks').insert(rows).select();
     if (error) throw error;
-    return rows.length;
+
+    // Callers that don't refetch still need these on screen, and the dedupe above reads
+    // the database, so a stale local copy can't cause duplicates either way.
+    if (created?.length) globalTasksData.push(...created);
+    return created?.length ?? rows.length;
+}
+
+// The portal raises the handoff task the moment the client finishes, but only while the
+// Get Started tab is open — the form poll stops the instant they navigate away. A client
+// who submits and closes the tab has their progress written by the webhook with nobody
+// there to notice, and once onboarding reads as complete the tab never comes back to try
+// again. Caught up here, where the dashboard can see every client's progress.
+async function reconcileOnboardingHandoffTasks() {
+    if (currentUserRole !== 'admin') return;
+    if (!activeOnboardingSteps().length) return;
+
+    for (const c of globalClientsData) {
+        if ((c.current_stage || 'Onboarding') !== 'Onboarding') continue;
+        if ((c.status || 'active') !== 'active') continue;
+        if (!onboardingIsComplete(c.name)) continue;
+        if (onboardingHandoffRaised(c.name)) continue;
+
+        const { data, error } = await supabaseClient
+            .from('tasks').insert([buildOnboardingHandoffTask(c.name)]).select();
+        if (error) { console.error(`[LIFECYCLE ENGINE] No handoff task for ${c.name}:`, error); continue; }
+
+        if (data?.length) globalTasksData.push(...data);
+        console.log(`[LIFECYCLE ENGINE] ${c.name} finished onboarding — handoff task raised.`);
+    }
 }
 
 // Moves clients out of Onboarding once the agency's own onboarding work is done. The
@@ -4713,12 +4804,14 @@ async function generateStageTasks(clientName, stage) {
 // A client with no Onboarding tasks at all hasn't finished, they haven't started, so
 // an empty list advances nobody. Paused and archived accounts sit still: advancing them
 // would generate work for a client nobody is servicing.
+// Returns how many clients moved, so a caller that has already painted the screen knows
+// whether it needs to paint it again.
 async function autoAdvanceCompletedOnboarding() {
     // Only admins can write the clients table; anyone else would just log an RLS failure
-    if (currentUserRole !== 'admin') return;
+    if (currentUserRole !== 'admin') return 0;
 
     const nextStage = lifecycleStages[lifecycleStages.indexOf('Onboarding') + 1];
-    if (!nextStage) return;
+    if (!nextStage) return 0;
 
     const ready = globalClientsData.filter(c => {
         if ((c.current_stage || 'Onboarding') !== 'Onboarding') return false;
@@ -4730,12 +4823,15 @@ async function autoAdvanceCompletedOnboarding() {
         return obTasks.length > 0 && obTasks.every(t => t.status === 'Complete');
     });
 
+    let advanced = 0;
+
     for (const c of ready) {
         const { error } = await supabaseClient
             .from('clients').update({ current_stage: nextStage }).eq('id', c.id);
         if (error) { console.error(`[LIFECYCLE ENGINE] Could not advance ${c.name}:`, error); continue; }
 
         c.current_stage = nextStage;
+        advanced++;
 
         // The stage moved regardless; a checklist that fails shouldn't strand the rest
         try {
@@ -4745,6 +4841,8 @@ async function autoAdvanceCompletedOnboarding() {
             console.error(`[LIFECYCLE ENGINE] ${c.name} advanced but ${nextStage} tasks failed:`, err);
         }
     }
+
+    return advanced;
 }
 
 window.openStageTransitionModal = function() {
