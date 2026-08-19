@@ -657,10 +657,20 @@ function prefillFormUrl(url) {
                 || portalClientRows.find(c => normalize(c.name) === want);
     // client_email can hold several comma-separated addresses; the first is the primary
     const email = String(client?.client_email || clientEmail || '').split(/[,;\s]+/)[0].trim();
-    if (!email) return url;
+
+    const params = [];
+    if (email) params.push(`email=${encodeURIComponent(email)}`);
+
+    // The client name travels too, because the email can't be trusted as identity: browser
+    // autofill will happily replace a prefilled address with whatever the person usually
+    // types, and the webhook then resolves them to the wrong client or to nobody at all.
+    // Nothing autofills a field called client_name.
+    if (currentActiveClient) params.push(`client_name=${encodeURIComponent(currentActiveClient)}`);
+
+    if (!params.length) return url;
 
     const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}email=${encodeURIComponent(email)}`;
+    return `${url}${sep}${params.join('&')}`;
 }
 
 // Which cards the client has opened or closed by hand. Without this the list only
