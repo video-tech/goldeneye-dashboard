@@ -1176,6 +1176,7 @@
             <div class="flex items-center gap-6 border-b border-white/10 mb-6 mt-4 px-2 overflow-x-auto">
                 <button id="cp-tab-getstarted" onclick="switchCpTab('getstarted')" class="hidden whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-flag-checkered mr-2 text-emerald-400"></i> Get Started</button>
                 <button id="cp-tab-dashboard" onclick="switchCpTab('dashboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-chart-pie mr-2"></i> Dashboard</button>
+                <button id="cp-tab-tasks" onclick="switchCpTab('tasks')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-list-check mr-2"></i> Tasks <span id="cp-tasks-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full bg-amber-400 align-middle"></span></button>
                 <button id="cp-tab-support" onclick="switchCpTab('support')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-comments mr-2"></i> Get in Touch</button>
                 <button id="cp-tab-reports" onclick="switchCpTab('reports')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-file-lines mr-2"></i> Reports</button>
                 <button id="cp-tab-checkin" onclick="switchCpTab('checkin')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-clipboard-check mr-2"></i> Weekly Check-in <span id="cp-checkin-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full bg-amber-400 align-middle"></span></button>
@@ -1263,6 +1264,29 @@
                     <button onclick="openClientRequestModal()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 px-6 py-3 rounded-full transition shadow-lg">
                         <i class="fa-solid fa-paper-plane mr-2"></i> Submit Request
                     </button>
+                </div>
+            </div>
+
+            <div id="cp-view-tasks" class="space-y-8 hidden">
+                <div class="max-w-4xl">
+                    <div class="flex items-baseline justify-between mb-3 px-2">
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest"><i class="fa-solid fa-user-check mr-2 text-amber-400"></i> Over to you</h3>
+                        <span id="cp-tasks-mine-count" class="text-[10px] text-gray-600 uppercase tracking-widest"></span>
+                    </div>
+                    <div id="cp-tasks-mine" class="space-y-2"></div>
+                </div>
+
+                <div class="max-w-4xl">
+                    <div class="flex items-baseline justify-between mb-3 px-2">
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest"><i class="fa-solid fa-people-group mr-2 text-blue-400"></i> What we're working on</h3>
+                        <span id="cp-tasks-ours-count" class="text-[10px] text-gray-600 uppercase tracking-widest"></span>
+                    </div>
+                    <div id="cp-tasks-ours" class="space-y-2"></div>
+                </div>
+
+                <div class="max-w-4xl">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-2"><i class="fa-solid fa-check-double mr-2 text-emerald-400"></i> Recently finished</h3>
+                    <div id="cp-tasks-done" class="space-y-2"></div>
                 </div>
             </div>
 

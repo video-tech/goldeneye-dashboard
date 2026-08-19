@@ -543,7 +543,7 @@
         }
 
         function switchCpTab(tabName) {
-    ['getstarted', 'knowledge', 'dashboard', 'support', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
+    ['getstarted', 'knowledge', 'dashboard', 'tasks', 'support', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
         if(el) el.classList.add('hidden');
@@ -564,6 +564,7 @@
     if(tabName === 'checkin') renderWeeklyCheckin();
     if(tabName === 'reports') renderCpReports();
     if(tabName === 'support') renderCpSupport();
+    if(tabName === 'tasks') renderCpTasks();
     if(tabName === 'pipeline') renderCpPipeline();
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
@@ -634,6 +635,93 @@ const obManualOpen = {};
 window.obToggleStep = function(stepId, defaultExpand) {
     obManualOpen[stepId] = !(stepId in obManualOpen ? obManualOpen[stepId] : defaultExpand);
     renderGetStarted();
+};
+
+// ---- Client tasks ----
+// A task belongs to the client when its assignee says so, which means you can hand
+// something over from the normal task drawer without a new field. Their own requests
+// live under Get in Touch, so they're left out here rather than listed twice.
+
+const cpTaskIsClients = t => normalize(t.assignee || '') === 'client';
+
+function cpTasksForClient() {
+    return globalTasksData.filter(t =>
+        normalize(t.client || '') === normalize(currentActiveClient || '') &&
+        t.type !== 'Client Request');
+}
+
+function cpTaskRowHtml(t, actionable) {
+    const overdue = t.due && t.status !== 'Complete' && t.due < new Date().toISOString().split('T')[0];
+    const due = t.due
+        ? `<span class="${overdue ? 'text-red-400' : 'text-gray-500'} text-xs whitespace-nowrap">${overdue ? 'Overdue &middot; ' : 'Due '}${t.due}</span>`
+        : '';
+
+    // Notes are where the internal detail lives, so only the title crosses over
+    return `<div class="glass px-5 py-4 flex items-center justify-between gap-4">
+        <div class="min-w-0">
+            <p class="text-sm font-bold ${t.status === 'Complete' ? 'text-gray-500 line-through' : 'text-white'} truncate">${escapeAttr(stripSlashEscapes(t.title))}</p>
+            <div class="flex items-center gap-3 mt-1">
+                <span class="text-[10px] uppercase tracking-widest ${t.status === 'In Progress' ? 'text-blue-400' : t.status === 'Blocked' ? 'text-amber-400' : 'text-gray-500'}">${escapeAttr(t.status || 'Not Started')}</span>
+                ${due}
+            </div>
+        </div>
+        ${actionable ? `<button onclick="cpCompleteTask('${escapeAttr(t.id)}')" class="shrink-0 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg transition">
+            <i class="fa-solid fa-check mr-1"></i> Done
+        </button>` : ''}
+    </div>`;
+}
+
+window.renderCpTasks = function() {
+    const all = cpTasksForClient();
+    const open = all.filter(t => t.status !== 'Complete');
+
+    const mine = open.filter(cpTaskIsClients);
+    const ours = open.filter(t => !cpTaskIsClients(t));
+
+    const done = all.filter(t => t.status === 'Complete')
+        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
+        .slice(0, 5);
+
+    const paint = (id, rows, empty, actionable) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.innerHTML = rows.length
+            ? rows.map(t => cpTaskRowHtml(t, actionable)).join('')
+            : `<p class="text-sm text-gray-500 italic px-2">${empty}</p>`;
+    };
+
+    paint('cp-tasks-mine', mine, "Nothing needs you right now.", true);
+    paint('cp-tasks-ours', ours, "Nothing open at the moment.", false);
+    paint('cp-tasks-done', done, "Nothing finished yet.", false);
+
+    const mineCount = document.getElementById('cp-tasks-mine-count');
+    if (mineCount) mineCount.innerText = mine.length ? `${mine.length} waiting on you` : '';
+    const oursCount = document.getElementById('cp-tasks-ours-count');
+    if (oursCount) oursCount.innerText = ours.length ? `${ours.length} in progress` : '';
+
+    // Only their own outstanding items earn the dot — ours aren't theirs to chase
+    const dot = document.getElementById('cp-tasks-dot');
+    if (dot) dot.classList.toggle('hidden', !mine.length);
+};
+
+window.cpCompleteTask = async function(id) {
+    const t = globalTasksData.find(x => String(x.id) === String(id));
+    if (!t || !cpTaskIsClients(t)) return;
+
+    const previous = t.status;
+    t.status = 'Complete';
+    renderCpTasks();
+
+    const { error } = await supabaseClient.from('tasks')
+        .update({ status: 'Complete', updated_at: new Date().toISOString() }).eq('id', t.id);
+
+    if (error) {
+        // Put it back rather than leaving them believing it was saved
+        t.status = previous;
+        renderCpTasks();
+        alert("Couldn't save that just now — please try again.");
+        console.error('Client task completion failed:', error);
+    }
 };
 
 // ---- Get in Touch ----
