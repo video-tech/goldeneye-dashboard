@@ -2155,6 +2155,40 @@ window.submitClientRequest = async function() {
         
         function openInviteModal() { document.getElementById('invite-modal').style.display = 'flex'; }
         function closeInviteModal() { document.getElementById('invite-modal').style.display = 'none'; }
+        // Everything needed for one address to reach one client's portal. Three tables,
+        // because each answers a different question: pre_approved_users is read when the
+        // account is first created, user_client_access is what the portal reads every
+        // load, and user_profiles carries the role. Missing any one of them lands them on
+        // the pending screen with nothing explaining why.
+        window.grantPortalAccess = async function(email, clientName) {
+            const addr = String(email || '').trim().toLowerCase();
+            if (!addr || !clientName) return;
+
+            const { error: preErr } = await supabaseClient.from('pre_approved_users')
+                .upsert({ email: addr, role: 'client', client_access: [clientName] }, { onConflict: 'email' });
+            if (preErr) throw preErr;
+
+            await supabaseClient.from('user_client_access')
+                .delete().eq('user_email', addr).eq('client_name', clientName);
+            const { error: accErr } = await supabaseClient.from('user_client_access')
+                .insert([{ user_email: addr, client_name: clientName }]);
+            if (accErr) throw accErr;
+
+            // Only promotes someone still waiting, so an admin or member given client
+            // access isn't demoted by it
+            const { error: roleErr } = await supabaseClient.from('user_profiles')
+                .update({ role: 'client' }).eq('email', addr).eq('role', 'pending');
+            if (roleErr) throw roleErr;
+        };
+
+        // client_email can hold several comma-separated addresses, and every one of them
+        // is someone who should be able to sign in
+        window.grantPortalAccessToAll = async function(emails, clientName) {
+            const list = String(emails || '').split(/[,;]+/).map(e => e.trim()).filter(Boolean);
+            for (const addr of list) await grantPortalAccess(addr, clientName);
+            return list;
+        };
+
         async function submitClientInvite() {
             const btn = document.getElementById('submit-invite-btn');
             const email = document.getElementById('input-invite-email').value.trim().toLowerCase();
@@ -2171,27 +2205,7 @@ window.submitClientRequest = async function() {
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
             try {
-                // pre_approved_users is only consulted when the account is first created,
-                // so on its own this worked for someone yet to sign up and did nothing at
-                // all for anyone who already had.
-                const { error } = await supabaseClient.from('pre_approved_users')
-                    .upsert({ email: email, role: 'client', client_access: [inviteTarget] }, { onConflict: 'email' });
-                if (error) throw error;
-
-                // What the portal actually reads when deciding what they can see. Without
-                // it an invited client only got in through the zero-touch match against
-                // daily_reports, which a new client with no ad data yet never satisfies.
-                await supabaseClient.from('user_client_access')
-                    .delete().eq('user_email', email).eq('client_name', inviteTarget);
-                const { error: accErr } = await supabaseClient.from('user_client_access')
-                    .insert([{ user_email: email, client_name: inviteTarget }]);
-                if (accErr) throw accErr;
-
-                // Catches someone who signed in before being invited and is sitting on the
-                // pending screen. Scoped to pending so it can't demote a member or admin.
-                await supabaseClient.from('user_profiles')
-                    .update({ role: 'client' }).eq('email', email).eq('role', 'pending');
-
+                await grantPortalAccess(email, inviteTarget);
                 alert(`${email} can now sign in and see ${inviteTarget}.`);
                 closeInviteModal();
                 document.getElementById('input-invite-email').value = '';
@@ -6313,7 +6327,19 @@ window.saveNewClient = async function(e) {
         // the client has finished theirs, so it's raised on completion instead — see
         // raiseOnboardingAgencyTasks. Creating it now would fill the board with tasks
         // nobody can action for a client who may not log in for a week.
-        alert("Client created. Your onboarding tasks will appear once they've finished their steps.");
+        // Granted here rather than left to the Invite button. A client you've just created
+        // and whose email you've just typed always needs portal access — making that a
+        // separate step only creates a way to forget it.
+        let invited = [];
+        try {
+            invited = await grantPortalAccessToAll(payload.client_email, payload.name);
+        } catch (err) {
+            console.error('Could not grant portal access:', err);
+        }
+
+        alert(invited.length
+            ? `Client created. ${invited.join(', ')} can sign in now — your onboarding tasks appear once they've finished their steps.`
+            : "Client created, but portal access couldn't be granted — use Invite to Portal on their page.");
         
         // Force refresh internal dataset so the tasks render cleanly without reloading
         await fetchAllGlobalData(globalAllowedClients);
