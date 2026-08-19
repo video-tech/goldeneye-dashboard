@@ -338,6 +338,19 @@
                 console.error("Critical error in initApp lifecycle initialization: ", e);
             }
         }
+        // The drawers sit inside client-portal-container in the markup, so on the admin
+        // dashboard — where that container is hidden — they inherited display:none and
+        // could never open, however correct the JS was. The modals already work around
+        // this by re-parenting themselves on open; doing it once here fixes every drawer
+        // rather than leaving each to remember.
+        (function liftDrawersOutOfPortal() {
+            const wrapper = document.getElementById('theme-wrapper');
+            if (!wrapper) return;
+            document.querySelectorAll('.side-drawer').forEach(el => {
+                if (el.parentElement !== wrapper) wrapper.appendChild(el);
+            });
+        })();
+
         initApp();
 
         // ================= EMAIL CODE SIGN-IN =================
