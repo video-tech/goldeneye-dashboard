@@ -893,6 +893,18 @@ function buildOnboardingHandoffTask(clientName) {
     };
 }
 
+// The agency's own onboarding work, raised when the client finishes rather than when
+// they're created. generateStageTasks dedupes on title against the database, so both
+// the portal and the dashboard can call this and only one set is ever created.
+async function raiseOnboardingAgencyTasks(clientName) {
+    try {
+        const made = await generateStageTasks(clientName, 'Onboarding');
+        if (made) console.log(`[LIFECYCLE ENGINE] ${clientName}: ${made} onboarding task(s) raised.`);
+    } catch (err) {
+        console.error(`[LIFECYCLE ENGINE] Could not raise onboarding tasks for ${clientName}:`, err);
+    }
+}
+
 function onboardingHandoffRaised(clientName) {
     const key = normalize(clientName || '');
     const title = OB_COMPLETE_TASK_TITLE.trim().toLowerCase();
@@ -925,6 +937,9 @@ async function obNotifyOnboardingComplete() {
         return;
     }
     globalTasksData.push(row);
+
+    // Their side is done, so ours begins
+    await raiseOnboardingAgencyTasks(client);
 }
 
 // A form step is completed by a webhook after GHL tells us it was submitted, so the
@@ -5254,6 +5269,10 @@ async function reconcileOnboardingHandoffTasks() {
 
         if (data?.length) globalTasksData.push(...data);
         console.log(`[LIFECYCLE ENGINE] ${c.name} finished onboarding — handoff task raised.`);
+
+        // Catches anyone whose completion happened with the portal closed, so their
+        // tasks aren't waiting on a client who has already finished and moved on
+        await raiseOnboardingAgencyTasks(c.name);
     }
 }
 
@@ -5746,11 +5765,11 @@ window.saveNewClient = async function(e) {
         // Auto-switch to the new client
         if(typeof cSelectAccount === 'function') cSelectAccount(payload.name, payload.name);
         
-        // Generate the Onboarding checklist from its template
-        const created = await generateStageTasks(payload.name, 'Onboarding');
-        alert(created
-            ? `Client created. ${created} Onboarding task${created === 1 ? '' : 's'} added.`
-            : "Client created. No Onboarding checklist is configured yet — set one up under Templates → Stage Checklists.");
+        // The agency checklist is deliberately not generated here. Our work starts when
+        // the client has finished theirs, so it's raised on completion instead — see
+        // raiseOnboardingAgencyTasks. Creating it now would fill the board with tasks
+        // nobody can action for a client who may not log in for a week.
+        alert("Client created. Your onboarding tasks will appear once they've finished their steps.");
         
         // Force refresh internal dataset so the tasks render cleanly without reloading
         await fetchAllGlobalData(globalAllowedClients);
