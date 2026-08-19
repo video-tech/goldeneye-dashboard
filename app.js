@@ -799,7 +799,7 @@ window.cpCompleteTask = async function(id) {
 
 // Paste the GHL calendar link here to turn the booking card on. Left empty the card
 // explains how to reach us instead, rather than showing an empty box.
-const CP_SUPPORT_CALENDAR_URL = '';
+const CP_SUPPORT_CALENDAR_URL = 'https://link.midasmediafirm.com/widget/bookings/client-request-meeting';
 
 window.renderCpSupport = function() {
     const cal = document.getElementById('cp-support-calendar');
