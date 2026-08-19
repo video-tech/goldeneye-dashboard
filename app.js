@@ -1347,8 +1347,14 @@ async function obNotifyOnboardingComplete() {
     const steps = activeOnboardingSteps();
     if (!steps.length || !onboardingIsComplete(client)) return;
 
-    // Worked or not, an existing copy means this already announced itself
-    if (onboardingHandoffRaised(client)) { obCompletionRaised.add(key); return; }
+    // Worked or not, an existing copy means this already announced itself — but our own
+    // checklist still has to be raised, or a handoff task the trigger got to first means
+    // it never is
+    if (onboardingHandoffRaised(client)) {
+        obCompletionRaised.add(key);
+        await raiseOnboardingAgencyTasks(client);
+        return;
+    }
 
     // Claimed before the await so the 2s form poll can't file a second one behind this
     obCompletionRaised.add(key);
@@ -5859,17 +5865,24 @@ async function reconcileOnboardingHandoffTasks() {
         if ((c.current_stage || 'Onboarding') !== 'Onboarding') continue;
         if ((c.status || 'active') !== 'active') continue;
         if (!onboardingIsComplete(c.name)) continue;
-        if (onboardingHandoffRaised(c.name)) continue;
 
-        const { data, error } = await supabaseClient
-            .from('tasks').insert([buildOnboardingHandoffTask(c.name)]).select();
-        if (error) { console.error(`[LIFECYCLE ENGINE] No handoff task for ${c.name}:`, error); continue; }
+        // Only a backstop now: the database trigger raises this the instant the last step
+        // lands, so usually it already exists by the time anyone opens the dashboard.
+        if (!onboardingHandoffRaised(c.name)) {
+            const { data, error } = await supabaseClient
+                .from('tasks').insert([buildOnboardingHandoffTask(c.name)]).select();
+            if (error) {
+                console.error(`[LIFECYCLE ENGINE] No handoff task for ${c.name}:`, error);
+            } else {
+                if (data?.length) globalTasksData.push(...data);
+                console.log(`[LIFECYCLE ENGINE] ${c.name} finished onboarding — handoff task raised.`);
+            }
+        }
 
-        if (data?.length) globalTasksData.push(...data);
-        console.log(`[LIFECYCLE ENGINE] ${c.name} finished onboarding — handoff task raised.`);
-
-        // Catches anyone whose completion happened with the portal closed, so their
-        // tasks aren't waiting on a client who has already finished and moved on
+        // Deliberately outside that check. This used to sit behind it, so when the trigger
+        // won the race — which it always does — the agency checklist was never raised at
+        // all and the only task to show for a finished onboarding was the handoff.
+        // generateStageTasks dedupes against the database, so running every load is safe.
         await raiseOnboardingAgencyTasks(c.name);
     }
 }
