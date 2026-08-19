@@ -635,6 +635,123 @@ window.obToggleStep = function(stepId, defaultExpand) {
     renderGetStarted();
 };
 
+// ---- Sales team step ----
+// Writes straight into client_contacts, which is the table the weekly reminder reads —
+// so adding a rep here is what puts them on the check-in texts. Collected as real
+// name/phone fields rather than a free-text answer, because "Mike 801-555-0100 and
+// Sarah" is exactly the sort of thing that can't be parsed reliably.
+
+function obTeamRowHtml(stepId, contact) {
+    return `<div class="ob-team-row flex flex-wrap gap-2 items-center">
+        <input type="text" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-name" placeholder="Name"
+               value="${escapeAttr(stripSlashEscapes(contact?.contact_name))}">
+        <input type="tel" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-phone" placeholder="Mobile number"
+               value="${escapeAttr(stripSlashEscapes(contact?.phone))}">
+        <button type="button" onclick="this.closest('.ob-team-row').remove()"
+                class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>`;
+}
+
+function obTeamStepHtml(s, complete) {
+    const mine = globalContactsData.filter(c =>
+        normalize(c.client_name || '') === normalize(currentActiveClient || '') && c.active !== false);
+
+    if (complete) {
+        const names = mine.map(c => escapeAttr(stripSlashEscapes(c.contact_name || c.phone))).join(', ');
+        return `<p class="text-sm text-gray-400 mb-4">${names ? `On the weekly check-in: ${names}.` : 'No sales team recorded.'}
+                   Need to change this? Just let us know.</p>`;
+    }
+
+    const rows = mine.length ? mine.map(c => obTeamRowHtml(s.id, c)).join('') : obTeamRowHtml(s.id, null);
+
+    return `
+        <div class="space-y-3 mb-4">
+            <div id="ob-team-rows-${s.id}" class="space-y-2">${rows}</div>
+            <button type="button" onclick="obAddTeamRow('${s.id}')" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
+                <i class="fa-solid fa-plus mr-1"></i> Add another person
+            </button>
+            <p id="ob-team-error-${s.id}" class="text-sm text-red-400 hidden"></p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+            <button onclick="obSaveTeam('${s.id}', false)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
+                <i class="fa-solid fa-check mr-2"></i>Save my team
+            </button>
+            <button onclick="obSaveTeam('${s.id}', true)" class="text-xs text-gray-400 hover:text-white underline underline-offset-2 transition">
+                No sales team &mdash; it's just me
+            </button>
+        </div>`;
+}
+
+window.obAddTeamRow = function(stepId) {
+    const list = document.getElementById(`ob-team-rows-${stepId}`);
+    if (!list) return;
+    list.insertAdjacentHTML('beforeend', obTeamRowHtml(stepId, null));
+};
+
+window.obSaveTeam = async function(stepId, justMe) {
+    const err = document.getElementById(`ob-team-error-${stepId}`);
+    const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
+    if (err) err.classList.add('hidden');
+
+    let people;
+
+    if (justMe) {
+        // The address they signed in with is the one we already reach them on
+        people = [{ contact_name: currentUserName || clientEmail || 'Owner', phone: null }];
+    } else {
+        people = [...document.querySelectorAll(`#ob-team-rows-${stepId} .ob-team-row`)]
+            .map(r => ({
+                contact_name: r.querySelector('.ob-team-name').value.trim(),
+                phone: r.querySelector('.ob-team-phone').value.trim()
+            }))
+            .filter(p => p.contact_name || p.phone);
+
+        if (!people.length) {
+            show("Add at least one person, or choose “it's just me” below.");
+            return;
+        }
+        const incomplete = people.find(p => !p.contact_name || !p.phone);
+        if (incomplete) {
+            show('Every person needs both a name and a mobile number.');
+            return;
+        }
+        // Ten digits is what a US mobile reduces to; anything shorter is a typo
+        const badPhone = people.find(p => String(p.phone).replace(/\D/g, '').length < 10);
+        if (badPhone) {
+            show(`That number for ${badPhone.contact_name} doesn't look complete.`);
+            return;
+        }
+    }
+
+    try {
+        const rows = people.filter(p => p.phone).map(p => ({
+            client_name: currentActiveClient,
+            contact_name: p.contact_name,
+            phone: p.phone,
+            active: true
+        }));
+
+        if (rows.length) {
+            // Matches the admin editor's conflict target, so re-saving updates a person
+            // rather than adding them twice
+            const { data, error } = await supabaseClient.from('client_contacts')
+                .upsert(rows, { onConflict: 'phone' }).select();
+            if (error) throw error;
+            if (data?.length) {
+                const fresh = new Set(data.map(d => String(d.phone)));
+                globalContactsData = globalContactsData.filter(c => !fresh.has(String(c.phone))).concat(data);
+            }
+        }
+
+        await obCompleteStep(stepId);
+    } catch (e) {
+        show("Couldn't save that — please try again.");
+        console.error('Sales team save failed:', e);
+    }
+};
+
 window.renderGetStarted = function() {
     const list = document.getElementById('ob-steps-list');
     if (!list) return;
@@ -705,6 +822,10 @@ window.renderGetStarted = function() {
                        </div>`;
             }
 
+            if (s.step_type === 'team') {
+                inner += obTeamStepHtml(s, complete);
+            }
+
             if (s.step_type === 'form' && s.embed_url) {
                 inner += `<div class="w-full rounded-lg overflow-hidden border border-white/10 mb-4 bg-white" style="height:70vh">
                               <iframe src="${escapeAttr(prefillFormUrl(stripSlashEscapes(s.embed_url)))}" class="w-full h-full" frameborder="0"></iframe>
@@ -726,7 +847,9 @@ window.renderGetStarted = function() {
             // A self-hosted video ends on its own; a form is completed by GHL's webhook.
             // Neither needs a button as the primary path.
             const selfCompleting = (s.step_type === 'video' && isDirectVideo(s.embed_url) && !s.requires_confirm)
-                                || (s.step_type === 'form' && !s.requires_confirm);
+                                || (s.step_type === 'form' && !s.requires_confirm)
+                                // A team step carries its own Save and "just me" buttons
+                                || s.step_type === 'team';
 
             inner += complete
                 ? `<p class="text-[11px] text-emerald-400/80"><i class="fa-solid fa-circle-check mr-1"></i>Completed ${prog.completed_at ? new Date(prog.completed_at).toLocaleDateString() : ''} &mdash; here for reference.</p>`
@@ -5010,6 +5133,7 @@ window.addOnboardingStepRow = function(step) {
     const types = [
         ['video',  'Video (Loom)'],
         ['form',   'Form (embedded)'],
+        ['team',   'Sales team (names & numbers)'],
         ['action', 'Action (no embed)']
     ];
 
@@ -5084,7 +5208,7 @@ window.toggleOnboardingOwnerFields = function(el) {
 
     // Hidden, not cleared — toggling owner or type to compare options and back used to
     // wipe a pasted URL. The save decides what actually gets stored.
-    const needsEmbed = !isAgency && type.value !== 'action';
+    const needsEmbed = !isAgency && type.value !== 'action' && type.value !== 'team';
     embed.style.display = needsEmbed ? '' : 'none';
 };
 
@@ -5099,7 +5223,7 @@ window.saveOnboardingSteps = async function() {
         // An agency item is a task, not something rendered to the client
         const stepType = isAgency ? 'action' : r.querySelector('.ob-type').value;
         // The field is only hidden when it doesn't apply, so ignore whatever it still holds
-        const keepsEmbed = !isAgency && stepType !== 'action';
+        const keepsEmbed = !isAgency && stepType !== 'action' && stepType !== 'team';
 
         return {
             id: r.dataset.stepId || null,
@@ -5120,7 +5244,9 @@ window.saveOnboardingSteps = async function() {
         };
     }).filter(s => s.title);
 
-    const missingEmbed = entered.find(s => s.owner === 'client' && s.step_type !== 'action' && !s.embed_url);
+    // action and team steps render their own UI, so neither needs a URL
+    const missingEmbed = entered.find(s => s.owner === 'client'
+        && s.step_type !== 'action' && s.step_type !== 'team' && !s.embed_url);
     if (missingEmbed) {
         alert(`"${missingEmbed.title}" is a ${missingEmbed.step_type} step but has no URL — clients would see an empty box.`);
         return;
