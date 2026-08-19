@@ -1176,6 +1176,7 @@
             <div class="flex items-center gap-6 border-b border-white/10 mb-6 mt-4 px-2 overflow-x-auto">
                 <button id="cp-tab-getstarted" onclick="switchCpTab('getstarted')" class="hidden whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-flag-checkered mr-2 text-emerald-400"></i> Get Started</button>
                 <button id="cp-tab-dashboard" onclick="switchCpTab('dashboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-chart-pie mr-2"></i> Dashboard</button>
+                <button id="cp-tab-support" onclick="switchCpTab('support')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-comments mr-2"></i> Get in Touch</button>
                 <button id="cp-tab-reports" onclick="switchCpTab('reports')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-file-lines mr-2"></i> Reports</button>
                 <button id="cp-tab-checkin" onclick="switchCpTab('checkin')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-clipboard-check mr-2"></i> Weekly Check-in <span id="cp-checkin-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full bg-amber-400 align-middle"></span></button>
                 <button id="cp-tab-pipeline" onclick="switchCpTab('pipeline')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-bars-progress mr-2"></i> Pipeline</button>
@@ -1262,6 +1263,46 @@
                     <button onclick="openClientRequestModal()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 px-6 py-3 rounded-full transition shadow-lg">
                         <i class="fa-solid fa-paper-plane mr-2"></i> Submit Request
                     </button>
+                </div>
+            </div>
+
+            <div id="cp-view-support" class="space-y-6 hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                    <div class="glass p-6">
+                        <h3 class="text-lg font-bold mb-1"><i class="fa-solid fa-calendar-check mr-2 text-yellow-400"></i> Book a call</h3>
+                        <p class="text-gray-400 text-sm mb-5">Pick a time that suits you — strategy, performance questions, or anything you'd rather talk through than type.</p>
+                        <div id="cp-support-calendar"></div>
+                    </div>
+
+                    <div class="glass p-6">
+                        <h3 class="text-lg font-bold mb-1"><i class="fa-solid fa-paper-plane mr-2 text-blue-400"></i> Send us a request</h3>
+                        <p class="text-gray-400 text-sm mb-5">Anything you need doing — a new campaign, a change to your ads, or a question. It lands straight in our queue.</p>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="modal-label">What's this about?</label>
+                                <select id="cp-req-type" class="glass-input">
+                                    <option value="Task">Something I need done</option>
+                                    <option value="Meeting">A meeting or call</option>
+                                    <option value="Support">A question or problem</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="modal-label">Subject</label>
+                                <input type="text" id="cp-req-subject" class="glass-input" placeholder="e.g. Update our holiday ad copy">
+                            </div>
+                            <div>
+                                <label class="modal-label">Details</label>
+                                <textarea id="cp-req-details" class="glass-input min-h-[110px]" placeholder="Anything that helps us get it right first time."></textarea>
+                            </div>
+                            <p id="cp-req-error" class="text-sm text-red-400 hidden"></p>
+                            <button id="cp-req-submit" onclick="submitPortalRequest()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition">Send request</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="max-w-4xl">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-2">Your Open Requests</h3>
+                    <div id="cp-support-open" class="space-y-2"></div>
                 </div>
             </div>
 

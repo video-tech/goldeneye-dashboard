@@ -543,7 +543,7 @@
         }
 
         function switchCpTab(tabName) {
-    ['getstarted', 'knowledge', 'dashboard', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
+    ['getstarted', 'knowledge', 'dashboard', 'support', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
         if(el) el.classList.add('hidden');
@@ -563,6 +563,7 @@
     else stopOnboardingPoll();
     if(tabName === 'checkin') renderWeeklyCheckin();
     if(tabName === 'reports') renderCpReports();
+    if(tabName === 'support') renderCpSupport();
     if(tabName === 'pipeline') renderCpPipeline();
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
@@ -633,6 +634,92 @@ const obManualOpen = {};
 window.obToggleStep = function(stepId, defaultExpand) {
     obManualOpen[stepId] = !(stepId in obManualOpen ? obManualOpen[stepId] : defaultExpand);
     renderGetStarted();
+};
+
+// ---- Get in Touch ----
+// Requests are filed as Client Request tasks, the same shape the onboarding help link
+// uses, so they surface in the dashboard's inbound queue without extra plumbing.
+
+// Paste the GHL calendar link here to turn the booking card on. Left empty the card
+// explains how to reach us instead, rather than showing an empty box.
+const CP_SUPPORT_CALENDAR_URL = '';
+
+window.renderCpSupport = function() {
+    const cal = document.getElementById('cp-support-calendar');
+    if (cal) {
+        cal.innerHTML = CP_SUPPORT_CALENDAR_URL
+            ? `<div class="w-full rounded-lg overflow-hidden border border-white/10 bg-white" style="height:60vh">
+                   <iframe src="${escapeAttr(prefillFormUrl(CP_SUPPORT_CALENDAR_URL))}" class="w-full h-full" frameborder="0"></iframe>
+               </div>`
+            : `<p class="text-sm text-gray-500 italic">Booking isn't set up yet — send a request instead and we'll come back to you with times.</p>`;
+    }
+
+    const list = document.getElementById('cp-support-open');
+    if (!list) return;
+
+    const open = globalTasksData.filter(t =>
+        normalize(t.client || '') === normalize(currentActiveClient || '') &&
+        t.type === 'Client Request' &&
+        t.status !== 'Complete');
+
+    if (!open.length) {
+        list.innerHTML = '<p class="text-sm text-gray-500 italic px-2">Nothing open. Anything you send will show here until it\'s done.</p>';
+        return;
+    }
+
+    list.innerHTML = open.map(t => `
+        <div class="glass px-5 py-4 flex items-center justify-between gap-4">
+            <div class="min-w-0">
+                <p class="text-sm font-bold text-white truncate">${escapeAttr(stripSlashEscapes(t.title))}</p>
+                <p class="text-xs text-gray-500 mt-1">Sent ${t.updated_at ? new Date(t.updated_at).toLocaleDateString() : 'recently'}</p>
+            </div>
+            <span class="shrink-0 text-[10px] uppercase tracking-widest ${t.status === 'In Progress' ? 'text-blue-400' : 'text-gray-500'}">${escapeAttr(t.status || 'Not Started')}</span>
+        </div>`).join('');
+};
+
+window.submitPortalRequest = async function() {
+    const btn = document.getElementById('cp-req-submit');
+    const err = document.getElementById('cp-req-error');
+    const type = document.getElementById('cp-req-type').value;
+    const subject = document.getElementById('cp-req-subject').value.trim();
+    const details = document.getElementById('cp-req-details').value.trim();
+
+    const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
+    if (err) err.classList.add('hidden');
+
+    if (!subject) { show('Give it a subject so we know what it\'s about.'); return; }
+
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Sending...';
+    btn.disabled = true;
+
+    try {
+        const row = {
+            title: `[${type}] ${subject}`,
+            client: currentActiveClient,
+            type: 'Client Request',
+            stage: null,
+            status: 'Not Started',
+            assignee: 'Unassigned',
+            p: 5, u: 5, e: 3, score: 100,
+            notes: details ? `Client Request Details:\n${details}` : null,
+            updated_at: new Date().toISOString()
+        };
+
+        const { data, error } = await supabaseClient.from('tasks').insert([row]).select();
+        if (error) throw error;
+        if (data?.length) globalTasksData.push(...data);
+
+        document.getElementById('cp-req-subject').value = '';
+        document.getElementById('cp-req-details').value = '';
+        renderCpSupport();
+    } catch (e) {
+        show("Couldn't send that — please try again, or email us.");
+        console.error('Portal request failed:', e);
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
 };
 
 // ---- Sales team step ----
