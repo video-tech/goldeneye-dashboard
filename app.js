@@ -611,6 +611,17 @@ function prefillFormUrl(url) {
     return `${url}${sep}email=${encodeURIComponent(email)}`;
 }
 
+// Which cards the client has opened or closed by hand. Without this the list only
+// ever shows the next outstanding step, so a finished one can't be re-read — and the
+// videos are reference material people come back to. Keyed by step id and kept across
+// re-renders, since the form poll re-renders underneath them.
+const obManualOpen = {};
+
+window.obToggleStep = function(stepId, defaultExpand) {
+    obManualOpen[stepId] = !(stepId in obManualOpen ? obManualOpen[stepId] : defaultExpand);
+    renderGetStarted();
+};
+
 window.renderGetStarted = function() {
     const list = document.getElementById('ob-steps-list');
     if (!list) return;
@@ -633,25 +644,32 @@ window.renderGetStarted = function() {
     steps.forEach((s, i) => {
         const prog = onboardingProgressFor(client, s.id);
         const complete = !!prog?.completed_at;
-        // Expand the first thing they still have to do; collapse the rest
-        const expand = !complete && firstOpen;
-        if (expand) firstOpen = false;
+        // Expand the first thing they still have to do; collapse the rest. A click on
+        // the header overrides that either way, so anything can be reopened later.
+        const defaultExpand = !complete && firstOpen;
+        if (defaultExpand) firstOpen = false;
+        const expand = (s.id in obManualOpen) ? obManualOpen[s.id] : defaultExpand;
 
         const card = document.createElement('div');
         card.className = `glass p-6 border-l-4 ${complete ? 'border-emerald-500' : expand ? 'border-blue-500' : 'border-white/10'}`;
 
         let inner = `
-            <div class="flex items-start justify-between gap-4 ${expand ? 'mb-4' : ''}">
+            <div class="flex items-start justify-between gap-4 cursor-pointer select-none ${expand ? 'mb-4' : ''}"
+                 onclick="obToggleStep('${s.id}', ${defaultExpand})"
+                 title="${expand ? 'Hide this step' : 'Open this step'}">
                 <div class="flex items-start gap-3">
                     <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${complete ? 'bg-emerald-500 text-white' : 'bg-white/10 text-gray-400'}">
                         ${complete ? '<i class="fa-solid fa-check"></i>' : i + 1}
                     </div>
                     <div>
                         <h4 class="font-bold ${complete ? 'text-gray-400 line-through' : 'text-white'}">${escapeAttr(stripSlashEscapes(s.title))}</h4>
-                        ${s.description && !complete ? `<p class="text-sm text-gray-400 mt-1">${escapeAttr(stripSlashEscapes(s.description))}</p>` : ''}
+                        ${s.description && (!complete || expand) ? `<p class="text-sm text-gray-400 mt-1">${escapeAttr(stripSlashEscapes(s.description))}</p>` : ''}
                     </div>
                 </div>
-                ${complete ? '<span class="text-[10px] uppercase tracking-widest text-emerald-400 whitespace-nowrap">Done</span>' : ''}
+                <div class="flex items-center gap-3 shrink-0">
+                    ${complete ? '<span class="text-[10px] uppercase tracking-widest text-emerald-400 whitespace-nowrap">Done</span>' : ''}
+                    <i class="fa-solid fa-chevron-down text-xs text-gray-500 transition-transform ${expand ? 'rotate-180' : ''}"></i>
+                </div>
             </div>`;
 
         if (expand) {
@@ -664,7 +682,7 @@ window.renderGetStarted = function() {
                            <video id="ob-vid-${s.id}" controls playsinline class="w-full h-full outline-none"
                                   onloadedmetadata="obVideoReady('${s.id}')"
                                   ontimeupdate="obVideoProgress('${s.id}')"
-                                  ${autoComplete ? `onended="obCompleteStep('${s.id}')"` : ''}>
+                                  ${autoComplete && !complete ? `onended="obCompleteStep('${s.id}')"` : ''}>
                                <source src="${escapeAttr(stripSlashEscapes(s.embed_url))}">
                            </video>
                        </div>
@@ -697,7 +715,11 @@ window.renderGetStarted = function() {
             const selfCompleting = (s.step_type === 'video' && isDirectVideo(s.embed_url) && !s.requires_confirm)
                                 || (s.step_type === 'form' && !s.requires_confirm);
 
-            inner += `<div class="flex flex-wrap items-center gap-3">`;
+            inner += complete
+                ? `<p class="text-[11px] text-emerald-400/80"><i class="fa-solid fa-circle-check mr-1"></i>Completed ${prog.completed_at ? new Date(prog.completed_at).toLocaleDateString() : ''} &mdash; here for reference.</p>`
+                : '';
+
+            inner += `<div class="flex flex-wrap items-center gap-3 ${complete ? 'hidden' : ''}">`;
             if (!selfCompleting) {
                 const label = s.confirm_label || "Mark as done";
                 inner += `<button onclick="obCompleteStep('${s.id}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
@@ -961,7 +983,11 @@ window.updateGetStartedTabVisibility = function() {
     const tab = document.getElementById('cp-tab-getstarted');
     if (!tab) return;
     const steps = activeOnboardingSteps();
-    const show = steps.length > 0 && !onboardingIsComplete(currentActiveClient);
+    // Stays reachable after completion. The videos explain things people forget — how
+    // Meta bills, what they agreed to on the forms — and hiding the tab meant the only
+    // way back was asking us. First login still lands them here; a finished client just
+    // isn't sent here, and sees the done panel if they come looking.
+    const show = steps.length > 0;
     tab.classList.toggle('hidden', !show);
 
     // Hiding the button while its content is still on screen left the client stranded on
