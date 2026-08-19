@@ -318,7 +318,14 @@
                         document.getElementById('sidebar-name').innerText = currentUserName;
                         document.getElementById('sidebar-role').innerText = currentUserRole;
                         document.getElementById('sidebar-avatar').innerText = currentUserName.substring(0,2).toUpperCase();
-                        if (currentUserRole === 'admin') document.getElementById('admin-only-nav').classList.remove('hidden');
+                        if (currentUserRole === 'admin') {
+                            document.getElementById('admin-only-nav').classList.remove('hidden');
+                            // The phone header has its own copy of these two
+                            ['m-nav-templates', 'm-nav-settings'].forEach(id => {
+                                const el = document.getElementById(id);
+                                if (el) el.classList.remove('hidden');
+                            });
+                        }
                         
                         await fetchAllGlobalData(globalAllowedClients);
                         
