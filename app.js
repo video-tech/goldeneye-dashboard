@@ -657,7 +657,7 @@ function cpTasksForClient() {
 // colour is the only thing distinguishing what they owe us from what we owe them.
 function cpOwnerBadge(t) {
     return cpTaskIsClients(t)
-        ? '<span class="text-[9px] uppercase tracking-widest font-bold text-amber-400 shrink-0"><span class="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1 align-middle"></span>Over to you</span>'
+        ? '<span class="text-[9px] uppercase tracking-widest font-bold text-amber-400 shrink-0"><span class="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1 align-middle"></span>Your to-do</span>'
         : '<span class="text-[9px] uppercase tracking-widest font-bold text-blue-400 shrink-0"><span class="inline-block w-2 h-2 rounded-full bg-blue-400 mr-1 align-middle"></span>We\'re handling it</span>';
 }
 
