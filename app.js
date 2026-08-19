@@ -650,25 +650,91 @@ function cpTasksForClient() {
         t.type !== 'Client Request');
 }
 
-function cpTaskRowHtml(t, actionable) {
-    const overdue = t.due && t.status !== 'Complete' && t.due < new Date().toISOString().split('T')[0];
-    const due = t.due
-        ? `<span class="${overdue ? 'text-red-400' : 'text-gray-500'} text-xs whitespace-nowrap">${overdue ? 'Overdue &middot; ' : 'Due '}${t.due}</span>`
-        : '';
+// Whose it is, stated on every card. In the board the two are mixed together, so the
+// colour is the only thing distinguishing what they owe us from what we owe them.
+function cpOwnerBadge(t) {
+    return cpTaskIsClients(t)
+        ? '<span class="text-[9px] uppercase tracking-widest font-bold text-amber-400 shrink-0"><span class="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1 align-middle"></span>Over to you</span>'
+        : '<span class="text-[9px] uppercase tracking-widest font-bold text-blue-400 shrink-0"><span class="inline-block w-2 h-2 rounded-full bg-blue-400 mr-1 align-middle"></span>We\'re handling it</span>';
+}
 
+function cpDueHtml(t) {
+    if (!t.due) return '';
+    const overdue = t.status !== 'Complete' && t.due < new Date().toISOString().split('T')[0];
+    return `<span class="${overdue ? 'text-red-400' : 'text-gray-500'} text-xs whitespace-nowrap">${overdue ? 'Overdue &middot; ' : 'Due '}${t.due}</span>`;
+}
+
+function cpDoneButtonHtml(t) {
+    return `<button onclick="cpCompleteTask('${escapeAttr(t.id)}')" class="shrink-0 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg transition">
+        <i class="fa-solid fa-check mr-1"></i> Done
+    </button>`;
+}
+
+function cpTaskRowHtml(t, actionable) {
     // Notes are where the internal detail lives, so only the title crosses over
-    return `<div class="glass px-5 py-4 flex items-center justify-between gap-4">
+    return `<div class="glass px-5 py-4 flex items-center justify-between gap-4 border-l-4 ${cpTaskIsClients(t) ? 'border-amber-400' : 'border-blue-400'}">
         <div class="min-w-0">
             <p class="text-sm font-bold ${t.status === 'Complete' ? 'text-gray-500 line-through' : 'text-white'} truncate">${escapeAttr(stripSlashEscapes(t.title))}</p>
             <div class="flex items-center gap-3 mt-1">
+                ${cpOwnerBadge(t)}
                 <span class="text-[10px] uppercase tracking-widest ${t.status === 'In Progress' ? 'text-blue-400' : t.status === 'Blocked' ? 'text-amber-400' : 'text-gray-500'}">${escapeAttr(t.status || 'Not Started')}</span>
-                ${due}
+                ${cpDueHtml(t)}
             </div>
         </div>
-        ${actionable ? `<button onclick="cpCompleteTask('${escapeAttr(t.id)}')" class="shrink-0 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg transition">
-            <i class="fa-solid fa-check mr-1"></i> Done
-        </button>` : ''}
+        ${actionable ? cpDoneButtonHtml(t) : ''}
     </div>`;
+}
+
+let cpTaskView = 'list';
+
+window.switchCpTaskView = function(mode) {
+    cpTaskView = mode === 'board' ? 'board' : 'list';
+
+    const listEl = document.getElementById('cp-tasks-list-view');
+    const boardEl = document.getElementById('cp-tasks-board-view');
+    if (listEl) listEl.classList.toggle('hidden', cpTaskView !== 'list');
+    if (boardEl) boardEl.classList.toggle('hidden', cpTaskView !== 'board');
+
+    ['list', 'board'].forEach(m => {
+        const b = document.getElementById(`cp-btn-tasks-${m}`);
+        if (b) b.classList.toggle('active', m === cpTaskView);
+    });
+
+    renderCpTasks();
+};
+
+function renderCpTaskBoard(all) {
+    const board = document.getElementById('cp-tasks-board-view');
+    if (!board) return;
+
+    // Same columns as the internal board, so a conversation about a task means the same
+    // thing on both sides of the screen
+    const columns = [
+        ['Not Started', 'text-gray-400'],
+        ['In Progress', 'text-blue-400'],
+        ['Blocked',     'text-amber-400'],
+        ['Complete',    'text-emerald-400']
+    ];
+
+    board.innerHTML = columns.map(([status, colour]) => {
+        const rows = all.filter(t => (t.status || 'Not Started') === status);
+
+        const cards = rows.length
+            ? rows.map(t => `<div class="glass p-4 border-l-4 ${cpTaskIsClients(t) ? 'border-amber-400' : 'border-blue-400'}">
+                   <div class="flex justify-between items-start gap-2 mb-2">${cpOwnerBadge(t)}${cpDueHtml(t)}</div>
+                   <p class="font-bold text-white text-sm leading-snug ${t.status === 'Complete' ? 'line-through opacity-60' : ''}">${escapeAttr(stripSlashEscapes(t.title))}</p>
+                   ${cpTaskIsClients(t) && t.status !== 'Complete' ? `<div class="mt-3">${cpDoneButtonHtml(t)}</div>` : ''}
+               </div>`).join('')
+            : '<p class="text-xs text-gray-600 italic px-1">Nothing here.</p>';
+
+        return `<div class="space-y-3">
+            <div class="flex items-center justify-between px-1">
+                <h4 class="text-[10px] font-bold uppercase tracking-widest ${colour}">${status}</h4>
+                <span class="text-[10px] text-gray-600">${rows.length}</span>
+            </div>
+            ${cards}
+        </div>`;
+    }).join('');
 }
 
 window.renderCpTasks = function() {
@@ -693,6 +759,9 @@ window.renderCpTasks = function() {
     paint('cp-tasks-mine', mine, "Nothing needs you right now.", true);
     paint('cp-tasks-ours', ours, "Nothing open at the moment.", false);
     paint('cp-tasks-done', done, "Nothing finished yet.", false);
+
+    // The board shows the finished column in full rather than the list's recent five
+    renderCpTaskBoard(all);
 
     const mineCount = document.getElementById('cp-tasks-mine-count');
     if (mineCount) mineCount.innerText = mine.length ? `${mine.length} waiting on you` : '';
