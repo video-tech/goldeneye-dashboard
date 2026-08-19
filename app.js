@@ -268,6 +268,21 @@
                     
                     const { data: profile } = await supabaseClient.from('user_profiles').select('role').eq('email', clientEmail).single();
                     currentUserRole = profile?.role || 'pending';
+
+                    // user_client_access has a foreign key to user_profiles, so access
+                    // can't be written until the person has actually signed up. That's
+                    // what pre_approved_users is for — an invite made before the account
+                    // exists — but nothing was applying it once they arrived, so an
+                    // invited client signed in and sat on the pending screen forever.
+                    const { data: preApproved } = await supabaseClient
+                        .from('pre_approved_users').select('role, client_access').eq('email', clientEmail).maybeSingle();
+
+                    if (preApproved && (currentUserRole === 'pending' || !profile)) {
+                        currentUserRole = preApproved.role || currentUserRole;
+                        // Their profile exists now, so the role can finally be written down
+                        await supabaseClient.from('user_profiles')
+                            .update({ role: currentUserRole }).eq('email', clientEmail).eq('role', 'pending');
+                    }
                     
                     let allowedClients = [];
                     if (currentUserRole === 'admin') {
@@ -279,7 +294,19 @@
                     } else {
                         const { data: accessData } = await supabaseClient.from('user_client_access').select('client_name').eq('user_email', clientEmail);
                         if (accessData) allowedClients = accessData.map(d => d.client_name);
-                        
+
+                        // Whatever the invite promised, now that the profile exists the
+                        // foreign key is satisfiable — so honour it and write it down, and
+                        // the next login reads it from the normal place.
+                        const promised = Array.isArray(preApproved?.client_access) ? preApproved.client_access : [];
+                        const missing = promised.filter(n => n && !allowedClients.includes(n));
+                        if (missing.length) {
+                            allowedClients = allowedClients.concat(missing);
+                            const { error: backfillErr } = await supabaseClient.from('user_client_access')
+                                .insert(missing.map(n => ({ user_email: clientEmail, client_name: n })));
+                            if (backfillErr) console.warn('Could not persist invited access:', backfillErr.message);
+                        }
+
                         // daily_reports has client_email only — there is no `email` column.
                         // Referencing one made PostgREST reject the whole query, silently
                         // disabling zero-touch portal onboarding.
@@ -2168,11 +2195,15 @@ window.submitClientRequest = async function() {
                 .upsert({ email: addr, role: 'client', client_access: [clientName] }, { onConflict: 'email' });
             if (preErr) throw preErr;
 
+            // user_client_access is keyed to user_profiles, so this only works once they
+            // have actually signed up. Before that the invite above is the whole grant,
+            // and the portal applies it on their first login — so a foreign key complaint
+            // here is the expected path for a new client, not a failure.
             await supabaseClient.from('user_client_access')
                 .delete().eq('user_email', addr).eq('client_name', clientName);
             const { error: accErr } = await supabaseClient.from('user_client_access')
                 .insert([{ user_email: addr, client_name: clientName }]);
-            if (accErr) throw accErr;
+            if (accErr && accErr.code !== '23503') throw accErr;
 
             // Only promotes someone still waiting, so an admin or member given client
             // access isn't demoted by it
