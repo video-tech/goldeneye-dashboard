@@ -1028,6 +1028,21 @@
                     </div>
 
                     <div id="s-view-notifications" class="space-y-6 hidden glass p-6">
+                        <div>
+                            <h3 class="text-lg font-bold">Text Alerts</h3>
+                            <p class="text-gray-400 text-sm mb-4">Who gets a text when a client sends a request, asks for help, or finishes onboarding. Switch someone off to stop their texts without removing them.</p>
+
+                            <div id="alert-recipients-list" class="space-y-2 max-w-xl mb-4"></div>
+
+                            <div class="flex flex-wrap gap-2 items-end bg-black/20 p-4 border border-white/5 rounded-xl max-w-xl">
+                                <div class="flex-1 min-w-[120px]"><label class="modal-label">Name</label><input type="text" id="new-alert-name" class="glass-input !py-2" placeholder="Aidan"></div>
+                                <div class="flex-1 min-w-[140px]"><label class="modal-label">Mobile</label><input type="tel" id="new-alert-phone" class="glass-input !py-2" placeholder="801 555 0100"></div>
+                                <button onclick="addAlertRecipient()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-5 rounded-lg text-sm"><i class="fa-solid fa-plus mr-1"></i> Add</button>
+                            </div>
+                        </div>
+
+                        <hr class="border-white/10">
+
                         <h3 class="text-lg font-bold">Notifications</h3>
                         <p class="text-gray-400 text-sm mb-4">Configure how tag notifications are delivered.</p>
                         <div class="space-y-3 max-w-md">

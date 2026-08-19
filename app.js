@@ -4232,6 +4232,96 @@ window.renderClientPayments = function() {
         };
 
         // Fallback stubs for unimplemented UI features
+        // ---- Text alert recipients ----
+        // Who the client-request trigger texts. Kept in the database rather than in the
+        // Make scenario so switching someone off is a toggle here, not an edit there.
+        let alertRecipients = [];
+
+        window.loadAlertRecipients = async function() {
+            if (currentUserRole !== 'admin') return;
+            const { data, error } = await supabaseClient
+                .from('admin_alert_recipients').select('*').order('name');
+            if (error) { console.error('Could not load alert recipients:', error); return; }
+            alertRecipients = data || [];
+            renderAlertRecipients();
+        };
+
+        function renderAlertRecipients() {
+            const el = document.getElementById('alert-recipients-list');
+            if (!el) return;
+
+            if (!alertRecipients.length) {
+                el.innerHTML = '<p class="text-sm text-gray-500 italic">Nobody yet — add someone below or these alerts go nowhere.</p>';
+                return;
+            }
+
+            el.innerHTML = alertRecipients.map(r => `
+                <div class="flex items-center justify-between gap-3 p-3 bg-black/20 border border-white/5 rounded-xl">
+                    <div class="min-w-0">
+                        <p class="font-medium text-sm ${r.active ? 'text-white' : 'text-gray-500'}">${escapeAttr(stripSlashEscapes(r.name || 'Unnamed'))}</p>
+                        <p class="text-xs text-gray-500">${escapeAttr(stripSlashEscapes(r.phone))}${r.active ? '' : ' &middot; muted'}</p>
+                    </div>
+                    <div class="flex items-center gap-3 shrink-0">
+                        <button onclick="toggleAlertRecipient('${escapeAttr(r.id)}')" class="text-xs font-bold px-3 py-1.5 rounded-md transition ${r.active ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">
+                            ${r.active ? 'On' : 'Off'}
+                        </button>
+                        <button onclick="deleteAlertRecipient('${escapeAttr(r.id)}')" class="text-red-500/60 hover:text-red-400 px-1" title="Remove">
+                            <i class="fa-solid fa-trash text-xs"></i>
+                        </button>
+                    </div>
+                </div>`).join('');
+        }
+
+        window.toggleAlertRecipient = async function(id) {
+            const r = alertRecipients.find(x => String(x.id) === String(id));
+            if (!r) return;
+
+            const next = !r.active;
+            r.active = next;
+            renderAlertRecipients();
+
+            const { error } = await supabaseClient
+                .from('admin_alert_recipients').update({ active: next }).eq('id', r.id);
+            if (error) {
+                r.active = !next;
+                renderAlertRecipients();
+                alert('Could not change that: ' + error.message);
+            }
+        };
+
+        window.addAlertRecipient = async function() {
+            const nameEl = document.getElementById('new-alert-name');
+            const phoneEl = document.getElementById('new-alert-phone');
+            const name = nameEl.value.trim();
+            const phone = phoneEl.value.trim();
+
+            if (!name || phone.replace(/\D/g, '').length < 10) {
+                alert('Needs a name and a full mobile number.');
+                return;
+            }
+
+            const { data, error } = await supabaseClient
+                .from('admin_alert_recipients').insert([{ name, phone, active: true }]).select();
+            if (error) { alert('Could not add them: ' + error.message); return; }
+
+            if (data?.length) alertRecipients.push(...data);
+            nameEl.value = ''; phoneEl.value = '';
+            renderAlertRecipients();
+        };
+
+        window.deleteAlertRecipient = async function(id) {
+            const r = alertRecipients.find(x => String(x.id) === String(id));
+            if (!r) return;
+            if (!confirm(`Remove ${r.name || r.phone} from text alerts?`)) return;
+
+            const { error } = await supabaseClient
+                .from('admin_alert_recipients').delete().eq('id', r.id);
+            if (error) { alert('Could not remove them: ' + error.message); return; }
+
+            alertRecipients = alertRecipients.filter(x => String(x.id) !== String(id));
+            renderAlertRecipients();
+        };
+
         window.switchSettingsView = window.switchSettingsView || function(view) {
             const views = ['users', 'scoring', 'milestones', 'health', 'notifications', 'data'];
             views.forEach(v => {
@@ -4248,6 +4338,8 @@ window.renderClientPayments = function() {
             
             if (view === 'milestones') renderMilestonesSettings();
             if (view === 'users') { renderUsersTable(); populateInviteClientList(); }
+            // Fetched on demand — nobody needs this on every dashboard load
+            if (view === 'notifications') loadAlertRecipients();
         };
 
         // Checkbox list of clients for the invite form
