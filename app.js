@@ -2156,11 +2156,44 @@ window.submitClientRequest = async function() {
         function openInviteModal() { document.getElementById('invite-modal').style.display = 'flex'; }
         function closeInviteModal() { document.getElementById('invite-modal').style.display = 'none'; }
         async function submitClientInvite() {
-            const btn = document.getElementById('submit-invite-btn'); const email = document.getElementById('input-invite-email').value.trim();
-            if(!email) return alert("Please enter an email address"); btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            const { error } = await supabaseClient.from('pre_approved_users').upsert({ email: email, role: 'client', client_access: [currentActiveClient] });
-            if (error) { alert("Error: " + error.message); } else { alert("Invite sent! They can now sign in with their email to view this dashboard."); closeInviteModal(); document.getElementById('input-invite-email').value = ''; }
-            btn.disabled = false; btn.innerText = "Send Invite";
+            const btn = document.getElementById('submit-invite-btn');
+            const email = document.getElementById('input-invite-email').value.trim().toLowerCase();
+            if (!email) return alert("Please enter an email address");
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+            try {
+                // pre_approved_users is only consulted when the account is first created,
+                // so on its own this worked for someone yet to sign up and did nothing at
+                // all for anyone who already had.
+                const { error } = await supabaseClient.from('pre_approved_users')
+                    .upsert({ email: email, role: 'client', client_access: [currentActiveClient] }, { onConflict: 'email' });
+                if (error) throw error;
+
+                // What the portal actually reads when deciding what they can see. Without
+                // it an invited client only got in through the zero-touch match against
+                // daily_reports, which a new client with no ad data yet never satisfies.
+                await supabaseClient.from('user_client_access')
+                    .delete().eq('user_email', email).eq('client_name', currentActiveClient);
+                const { error: accErr } = await supabaseClient.from('user_client_access')
+                    .insert([{ user_email: email, client_name: currentActiveClient }]);
+                if (accErr) throw accErr;
+
+                // Catches someone who signed in before being invited and is sitting on the
+                // pending screen. Scoped to pending so it can't demote a member or admin.
+                await supabaseClient.from('user_profiles')
+                    .update({ role: 'client' }).eq('email', email).eq('role', 'pending');
+
+                alert(`${email} can now sign in and see ${currentActiveClient}.`);
+                closeInviteModal();
+                document.getElementById('input-invite-email').value = '';
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Send Invite";
+            }
         }
 
         // =========================================================================================
