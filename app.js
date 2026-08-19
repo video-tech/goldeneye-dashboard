@@ -487,7 +487,7 @@
                 supabaseClient.from('client_contacts').select('*').in('client_name', allowedClients),
                 supabaseClient.from('onboarding_steps').select('*').order('sort_order'),
                 supabaseClient.from('client_onboarding_progress').select('*').in('client_name', allowedClients),
-                supabaseClient.from('clients').select('name, client_email').in('name', allowedClients),
+                supabaseClient.from('clients').select('name, client_email, current_stage').in('name', allowedClients),
                 supabaseClient.from('weekly_reports').select('*').order('created_at', { ascending: false })
             ]);
 
@@ -532,13 +532,16 @@
                 // someone who never finished never saw it twice.
                 updateGetStartedTabVisibility();
                 const done = onboardingIsComplete(currentActiveClient);
-                switchCpTab(done ? 'dashboard' : 'getstarted');
+                // Never land them on Get Started once it's hidden — a client moved on with
+                // steps still outstanding would otherwise open to a tab that isn't there
+                const onboarding = portalClientStage() === 'Onboarding';
+                switchCpTab(!done && onboarding ? 'getstarted' : 'dashboard');
 
                 // Paint the tab's dot even when they land elsewhere, then ask. Onboarding
                 // comes first — a client still working through it doesn't need a second
                 // thing shouting at them.
                 renderWeeklyCheckin();
-                if (done) maybeShowWeeklyCheckin();
+                if (done || !onboarding) maybeShowWeeklyCheckin();
             }, 50);
         }
 
@@ -1382,17 +1385,30 @@ window.updateGetStartedTabVisibility = function() {
     // Meta bills, what they agreed to on the forms — and hiding the tab meant the only
     // way back was asking us. First login still lands them here; a finished client just
     // isn't sent here, and sees the done panel if they come looking.
-    const show = steps.length > 0;
+    //
+    // Leaving the Onboarding stage is the exception: at that point it's history rather
+    // than something they might still need, and the same videos live on in the Knowledge
+    // Base anyway.
+    const show = steps.length > 0 && portalClientStage() === 'Onboarding';
     tab.classList.toggle('hidden', !show);
 
     // Hiding the button while its content is still on screen left the client stranded on
-    // a view they could no longer navigate back to. They keep the finished panel — with
-    // its own way out — and only get moved on once they've reloaded or moved off it.
+    // a view they could no longer navigate back to.
     const view = document.getElementById('cp-view-getstarted');
-    if (!show && view && !view.classList.contains('hidden') && !steps.length) {
+    if (!show && view && !view.classList.contains('hidden')) {
         switchCpTab('dashboard');
     }
 };
+
+// Onboarding is over once the stage says so, whatever the checklist looks like. Unknown
+// counts as Onboarding: if the clients row can't be read, a genuinely new client must
+// still get their checklist rather than being locked out of it.
+function portalClientStage() {
+    const want = normalize(currentActiveClient || '');
+    const row = portalClientRows.find(c => normalize(c.name) === want)
+             || globalClientsData.find(c => normalize(c.name) === want);
+    return row?.current_stage || 'Onboarding';
+}
 
 // The Knowledge Base is the same videos as the onboarding sequence, but as a permanent
 // library: no completion state, always available to rewatch. Replaces two hardcoded
