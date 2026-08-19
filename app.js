@@ -1323,9 +1323,12 @@ function buildOnboardingHandoffTask(clientName) {
 // they're created. generateStageTasks dedupes on title against the database, so both
 // the portal and the dashboard can call this and only one set is ever created.
 async function raiseOnboardingAgencyTasks(clientName) {
+    // Logged even when it creates nothing: "no agency steps configured" and "they all
+    // exist already" are different problems, and silence looked the same as never running
+    const configured = allOnboardingItems().filter(s => s.owner === 'agency').length;
     try {
         const made = await generateStageTasks(clientName, 'Onboarding');
-        if (made) console.log(`[LIFECYCLE ENGINE] ${clientName}: ${made} onboarding task(s) raised.`);
+        console.log(`[LIFECYCLE ENGINE] ${clientName}: ${configured} agency step(s) configured, ${made} task(s) raised.`);
     } catch (err) {
         console.error(`[LIFECYCLE ENGINE] Could not raise onboarding tasks for ${clientName}:`, err);
     }
