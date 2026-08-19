@@ -1180,10 +1180,19 @@ window.renderGetStarted = function() {
 };
 
 // Restore playback position so a client returning mid-video isn't sent back to zero
+// Onboarding videos start at 1.5x. Browsers preserve pitch, so it stays perfectly
+// intelligible, and the native controls still let anyone slow it down. Only applies to
+// self-hosted files — a Loom embed is a cross-origin iframe we can't reach into.
+const OB_VIDEO_RATE = 1.5;
+
 window.obVideoReady = function(stepId) {
     const v = document.getElementById('ob-vid-' + stepId);
+    if (!v) return;
+
+    v.playbackRate = OB_VIDEO_RATE;
+
     const prog = onboardingProgressFor(currentActiveClient, stepId);
-    if (!v || !prog?.watch_percent || prog.completed_at) return;
+    if (!prog?.watch_percent || prog.completed_at) return;
     if (v.duration && isFinite(v.duration)) v.currentTime = (prog.watch_percent / 100) * v.duration;
 };
 
@@ -1459,7 +1468,7 @@ window.renderKnowledgeBase = function() {
 
     grid.innerHTML = videos.map(s => {
         const player = isDirectVideo(s.embed_url)
-            ? `<video controls playsinline class="w-full h-full outline-none"><source src="${escapeAttr(stripSlashEscapes(s.embed_url))}"></video>`
+            ? `<video controls playsinline onloadedmetadata="this.playbackRate = OB_VIDEO_RATE" class="w-full h-full outline-none"><source src="${escapeAttr(stripSlashEscapes(s.embed_url))}"></video>`
             : `<iframe src="${escapeAttr(stripSlashEscapes(s.embed_url))}" class="w-full h-full" frameborder="0" allowfullscreen></iframe>`;
 
         const done = !!onboardingProgressFor(currentActiveClient, s.id)?.completed_at;
