@@ -2160,6 +2160,13 @@ window.submitClientRequest = async function() {
             const email = document.getElementById('input-invite-email').value.trim().toLowerCase();
             if (!email) return alert("Please enter an email address");
 
+            // The admin dashboard tracks its selection separately from the portal, and this
+            // button now appears on both
+            const inviteTarget = (typeof cSelectedAccount !== 'undefined' && cSelectedAccount && cSelectedAccount !== 'ALL')
+                ? cSelectedAccount
+                : currentActiveClient;
+            if (!inviteTarget) return alert("Select a client first.");
+
             btn.disabled = true;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
@@ -2168,16 +2175,16 @@ window.submitClientRequest = async function() {
                 // so on its own this worked for someone yet to sign up and did nothing at
                 // all for anyone who already had.
                 const { error } = await supabaseClient.from('pre_approved_users')
-                    .upsert({ email: email, role: 'client', client_access: [currentActiveClient] }, { onConflict: 'email' });
+                    .upsert({ email: email, role: 'client', client_access: [inviteTarget] }, { onConflict: 'email' });
                 if (error) throw error;
 
                 // What the portal actually reads when deciding what they can see. Without
                 // it an invited client only got in through the zero-touch match against
                 // daily_reports, which a new client with no ad data yet never satisfies.
                 await supabaseClient.from('user_client_access')
-                    .delete().eq('user_email', email).eq('client_name', currentActiveClient);
+                    .delete().eq('user_email', email).eq('client_name', inviteTarget);
                 const { error: accErr } = await supabaseClient.from('user_client_access')
-                    .insert([{ user_email: email, client_name: currentActiveClient }]);
+                    .insert([{ user_email: email, client_name: inviteTarget }]);
                 if (accErr) throw accErr;
 
                 // Catches someone who signed in before being invited and is sitting on the
@@ -2185,7 +2192,7 @@ window.submitClientRequest = async function() {
                 await supabaseClient.from('user_profiles')
                     .update({ role: 'client' }).eq('email', email).eq('role', 'pending');
 
-                alert(`${email} can now sign in and see ${currentActiveClient}.`);
+                alert(`${email} can now sign in and see ${inviteTarget}.`);
                 closeInviteModal();
                 document.getElementById('input-invite-email').value = '';
             } catch (err) {
@@ -2847,6 +2854,12 @@ function filterAdsData() {
                     } else if (transitionBtn) {
                         transitionBtn.classList.add('hidden'); // Ensure Team Members don't see it
                     }
+
+                    // Portal invite (admin only). The original lived in the client portal
+                    // header, which admins never open — so the only way to grant a client
+                    // access was by hand in SQL.
+                    const inviteBtn = document.getElementById('btn-invite-client');
+                    if (inviteBtn) inviteBtn.classList.toggle('hidden', currentUserRole !== 'admin' || cSelectedAccount === 'ALL');
 
                     // Pause / resume control (admin only) — reflects the client's current state
                     const pauseBtn = document.getElementById('btn-toggle-pause');
