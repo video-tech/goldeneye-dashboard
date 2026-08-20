@@ -2573,6 +2573,23 @@ window.submitClientRequest = async function() {
         // Amber matches how the same tasks are marked in their portal.
         const taskIsClients = t => normalize(t.assignee || '') === 'client';
 
+        // Which side of the board you're looking at. Kept out of the search box so the two
+        // filters compose — searching a client name while showing only what they owe us.
+        let taskOwnerFilter = 'all';
+
+        const matchesTaskOwner = t =>
+            taskOwnerFilter === 'all' ||
+            (taskOwnerFilter === 'theirs' ? taskIsClients(t) : !taskIsClients(t));
+
+        window.setTaskOwnerFilter = function(mode) {
+            taskOwnerFilter = ['all', 'ours', 'theirs'].includes(mode) ? mode : 'all';
+            ['all', 'ours', 'theirs'].forEach(m => {
+                const b = document.getElementById(`btn-owner-${m}`);
+                if (b) b.classList.toggle('active', m === taskOwnerFilter);
+            });
+            renderActiveTaskView();
+        };
+
         const clientTaskBadge = t => taskIsClients(t)
             ? '<span class="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded whitespace-nowrap">Client to do</span>'
             : '';
@@ -2580,6 +2597,7 @@ window.submitClientRequest = async function() {
         function renderKanban() {
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
             let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
+            f = f.filter(matchesTaskOwner);
             const cols = { 'Not Started': document.getElementById('col-todo'), 'In Progress': document.getElementById('col-prog'), 'Blocked': document.getElementById('col-rev'), 'Complete': document.getElementById('col-done') };
             const counts = { 'Not Started': 0, 'In Progress': 0, 'Blocked': 0, 'Complete': 0 };
             Object.values(cols).forEach(el => { if(el) el.innerHTML = ''; }); f.sort((a,b) => b.score - a.score);
@@ -2608,6 +2626,7 @@ window.submitClientRequest = async function() {
 
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
             let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
+            f = f.filter(matchesTaskOwner);
             f.sort((a,b) => { let vA=a[currentTaskSort]||'', vB=b[currentTaskSort]||''; if(currentTaskSort==='score'){ if(taskPrioMode==='total'){vA=a.score;vB=b.score;} if(taskPrioMode==='dueDate'){vA=a.u;vB=b.u;} if(taskPrioMode==='et'){vA=a.e;vB=b.e;} } if(vA<vB) return taskSortDir==='asc'?-1:1; if(vA>vB) return taskSortDir==='asc'?1:-1; return 0; });
 
             const td = new Date().toISOString().split('T')[0]; let bH = ''; if(f.length===0) bH = `<tr><td colspan="10" class="p-8 text-center text-gray-500">No tasks.</td></tr>`;
