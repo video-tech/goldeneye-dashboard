@@ -2610,7 +2610,7 @@ window.submitClientRequest = async function() {
 
                 steps.forEach(s => {
                     const prog = onboardingProgressFor(c.name, s.id);
-                    if (prog?.completed_at) return;
+                    const done = !!prog?.completed_at;
 
                     out.push({
                         __onboardingStep: true,
@@ -2618,8 +2618,10 @@ window.submitClientRequest = async function() {
                         title: s.title,
                         stage: 'Onboarding',
                         type: 'Checklist',
-                        // A part-watched video is genuinely underway, not untouched
-                        status: prog?.watch_percent ? 'In Progress' : 'Not Started',
+                        // Finished steps stay on the board rather than vanishing, so the
+                        // columns show progress. A part-watched video is genuinely
+                        // underway, not untouched.
+                        status: done ? 'Complete' : (prog?.watch_percent ? 'In Progress' : 'Not Started'),
                         assignee: 'Client',
                         p: 3, u: 3, e: 3, score: 60,
                         due: null, notes: null
@@ -2633,9 +2635,10 @@ window.submitClientRequest = async function() {
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
             let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
             f = f.filter(matchesTaskOwner);
-            // Board only, and only under the Client filter — the list view has checkboxes
-            // wired to real task ids, and these have none
-            if (taskOwnerFilter === "theirs") {
+            // Shown under All as well as Client — "All" meaning all but these was just
+            // confusing. Hidden under Ours, which is the point of that filter. Board only:
+            // the list view has checkboxes wired to real task ids, and these have none.
+            if (taskOwnerFilter !== "ours") {
                 f = f.concat(clientOnboardingPseudoTasks().filter(t =>
                     (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q)));
             }
