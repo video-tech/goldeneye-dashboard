@@ -2567,6 +2567,16 @@ window.submitClientRequest = async function() {
             document.getElementById('stat-total').innerText = globalTasksData.length; document.getElementById('stat-overdue').innerText = o; document.getElementById('stat-today').innerText = dt; document.getElementById('stat-progress').innerText = ip; document.getElementById('stat-completed').innerText = c;
         }
 
+        // A task assigned to "Client" is theirs to do, not ours. They already appeared on
+        // our board — nothing filters by assignee — but looked identical to our own work,
+        // so a column full of Not Started could be mostly things we're waiting on them for.
+        // Amber matches how the same tasks are marked in their portal.
+        const taskIsClients = t => normalize(t.assignee || '') === 'client';
+
+        const clientTaskBadge = t => taskIsClients(t)
+            ? '<span class="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded whitespace-nowrap">Client to do</span>'
+            : '';
+
         function renderKanban() {
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
             let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
@@ -2578,7 +2588,7 @@ window.submitClientRequest = async function() {
                 const s = t.status || 'Not Started'; if(!cols[s]) return; counts[s]++;
                 let dI='', dCol='text-gray-500'; if(s!=='Complete'&&t.due){ const td=new Date().toISOString().split('T')[0]; if(t.due<td){ dI='<i class="fa-solid fa-circle-exclamation mr-1"></i>'; dCol='text-red-400'; } else if(t.due===td){ dI='<i class="fa-solid fa-bell mr-1"></i>'; dCol='text-yellow-400'; } }
                 const cColor = t.score>75?'#ef4444':(t.score>50?'#f59e0b':'#3b82f6'); const init = t.assignee?t.assignee.substring(0,2).toUpperCase():'?';
-                cols[s].innerHTML += `<div class="glass kanban-card p-4 transition border border-white/10 hover:border-blue-500/50" data-id="${t.id}" onclick="openTaskDrawer(${t.id})"><div class="flex justify-between items-start mb-2"><span onclick="goToClient('${escapeHTML(t.client)}'); event.stopPropagation();" class="cursor-pointer hover:text-blue-300 hover:underline text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-black/20 px-2 py-0.5 rounded truncate max-w-[120px] block" title="Open Dashboard">${t.client || 'Unknown'}</span><span class="${dCol} text-[10px] font-bold whitespace-nowrap">${dI} ${t.due||'-'}</span></div><h4 class="font-bold text-white text-sm mb-4 leading-snug">${t.title || 'Untitled Task'}</h4><div class="flex justify-between items-center mt-auto"><div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">${init}</div><div class="flex items-center gap-2 bg-black/20 px-2 py-1 rounded-lg"><div class="w-2 h-2 rounded-full" style="background:${cColor};"></div><span class="font-bold text-white text-[10px]">${t.score}</span></div></div></div>`;
+                cols[s].innerHTML += `<div class="glass kanban-card p-4 transition border border-white/10 hover:border-blue-500/50 ${taskIsClients(t) ? 'border-l-4 border-l-amber-400' : ''}" data-id="${t.id}" onclick="openTaskDrawer(${t.id})"><div class="flex justify-between items-start gap-2 mb-2">${clientTaskBadge(t)}<span onclick="goToClient('${escapeHTML(t.client)}'); event.stopPropagation();" class="cursor-pointer hover:text-blue-300 hover:underline text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-black/20 px-2 py-0.5 rounded truncate max-w-[120px] block" title="Open Dashboard">${t.client || 'Unknown'}</span><span class="${dCol} text-[10px] font-bold whitespace-nowrap">${dI} ${t.due||'-'}</span></div><h4 class="font-bold text-white text-sm mb-4 leading-snug">${t.title || 'Untitled Task'}</h4><div class="flex justify-between items-center mt-auto"><div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">${init}</div><div class="flex items-center gap-2 bg-black/20 px-2 py-1 rounded-lg"><div class="w-2 h-2 rounded-full" style="background:${cColor};"></div><span class="font-bold text-white text-[10px]">${t.score}</span></div></div></div>`;
             });
             document.getElementById('count-todo').innerText = counts['Not Started']; document.getElementById('count-prog').innerText = counts['In Progress']; document.getElementById('count-rev').innerText = counts['Blocked']; document.getElementById('count-done').innerText = counts['Complete'];
             
@@ -2608,7 +2618,7 @@ window.submitClientRequest = async function() {
                 
                 bH += `<tr class="hover:bg-white/5 transition border-b border-white/5 ${chk?'bg-blue-900/20':''}">
                     <td class="p-4"><input type="checkbox" class="row-checkbox" value="${t.id}" ${chk} onchange="toggleTaskRow(this, ${t.id})"></td>
-                    <td class="p-4 font-bold text-white cursor-pointer hover:text-blue-400 transition" onclick="openTaskDrawer(${t.id})">${t.title || 'Untitled'}</td>
+                    <td class="p-4 font-bold text-white cursor-pointer hover:text-blue-400 transition" onclick="openTaskDrawer(${t.id})"><span class="flex items-center gap-2 flex-wrap">${t.title || 'Untitled'}${clientTaskBadge(t)}</span></td>
                     <td class="p-4 text-blue-400 hover:underline cursor-pointer" onclick="goToClient('${escapeHTML(t.client)}')">${t.client || 'Unknown'}</td>
                     <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-white text-xs">${t.score}</span></td>
                     <td class="p-4 ${dC} cursor-pointer" onclick="openTaskDrawer(${t.id})">${dI}${t.due||'-'}</td>
