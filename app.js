@@ -2590,14 +2590,55 @@ window.submitClientRequest = async function() {
             renderActiveTaskView();
         };
 
-        const clientTaskBadge = t => taskIsClients(t)
-            ? '<span class="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded whitespace-nowrap">Client to do</span>'
-            : '';
+        const clientTaskBadge = t => !taskIsClients(t) ? ''
+            : t.__onboardingStep
+                ? '<span class="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded whitespace-nowrap">Onboarding step</span>'
+                : '<span class="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded whitespace-nowrap">Client to do</span>';
+
+        // The client's outstanding onboarding steps, mirrored onto the board so we can see
+        // what we're waiting on them for. Deliberately not rows in `tasks`: the stage
+        // advance needs every Onboarding task Complete, and real rows for steps only the
+        // client can tick would strand everyone at Onboarding forever.
+        function clientOnboardingPseudoTasks() {
+            const steps = activeOnboardingSteps();
+            if (!steps.length) return [];
+
+            const out = [];
+            globalClientsData.forEach(c => {
+                if ((c.current_stage || 'Onboarding') !== 'Onboarding') return;
+                if ((c.status || 'active') !== 'active') return;
+
+                steps.forEach(s => {
+                    const prog = onboardingProgressFor(c.name, s.id);
+                    if (prog?.completed_at) return;
+
+                    out.push({
+                        __onboardingStep: true,
+                        client: c.name,
+                        title: s.title,
+                        stage: 'Onboarding',
+                        type: 'Checklist',
+                        // A part-watched video is genuinely underway, not untouched
+                        status: prog?.watch_percent ? 'In Progress' : 'Not Started',
+                        assignee: 'Client',
+                        p: 3, u: 3, e: 3, score: 60,
+                        due: null, notes: null
+                    });
+                });
+            });
+            return out;
+        }
 
         function renderKanban() {
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
             let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
             f = f.filter(matchesTaskOwner);
+            // Board only, and only under the Client filter — the list view has checkboxes
+            // wired to real task ids, and these have none
+            if (taskOwnerFilter === "theirs") {
+                f = f.concat(clientOnboardingPseudoTasks().filter(t =>
+                    (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q)));
+            }
             const cols = { 'Not Started': document.getElementById('col-todo'), 'In Progress': document.getElementById('col-prog'), 'Blocked': document.getElementById('col-rev'), 'Complete': document.getElementById('col-done') };
             const counts = { 'Not Started': 0, 'In Progress': 0, 'Blocked': 0, 'Complete': 0 };
             Object.values(cols).forEach(el => { if(el) el.innerHTML = ''; }); f.sort((a,b) => b.score - a.score);
@@ -2606,7 +2647,7 @@ window.submitClientRequest = async function() {
                 const s = t.status || 'Not Started'; if(!cols[s]) return; counts[s]++;
                 let dI='', dCol='text-gray-500'; if(s!=='Complete'&&t.due){ const td=new Date().toISOString().split('T')[0]; if(t.due<td){ dI='<i class="fa-solid fa-circle-exclamation mr-1"></i>'; dCol='text-red-400'; } else if(t.due===td){ dI='<i class="fa-solid fa-bell mr-1"></i>'; dCol='text-yellow-400'; } }
                 const cColor = t.score>75?'#ef4444':(t.score>50?'#f59e0b':'#3b82f6'); const init = t.assignee?t.assignee.substring(0,2).toUpperCase():'?';
-                cols[s].innerHTML += `<div class="glass kanban-card p-4 transition border border-white/10 hover:border-blue-500/50 ${taskIsClients(t) ? 'border-l-4 border-l-amber-400' : ''}" data-id="${t.id}" onclick="openTaskDrawer(${t.id})"><div class="flex justify-between items-start gap-2 mb-2">${clientTaskBadge(t)}<span onclick="goToClient('${escapeHTML(t.client)}'); event.stopPropagation();" class="cursor-pointer hover:text-blue-300 hover:underline text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-black/20 px-2 py-0.5 rounded truncate max-w-[120px] block" title="Open Dashboard">${t.client || 'Unknown'}</span><span class="${dCol} text-[10px] font-bold whitespace-nowrap">${dI} ${t.due||'-'}</span></div><h4 class="font-bold text-white text-sm mb-4 leading-snug">${t.title || 'Untitled Task'}</h4><div class="flex justify-between items-center mt-auto"><div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">${init}</div><div class="flex items-center gap-2 bg-black/20 px-2 py-1 rounded-lg"><div class="w-2 h-2 rounded-full" style="background:${cColor};"></div><span class="font-bold text-white text-[10px]">${t.score}</span></div></div></div>`;
+                cols[s].innerHTML += `<div class="glass kanban-card p-4 transition border border-white/10 hover:border-blue-500/50 ${taskIsClients(t) ? 'border-l-4 border-l-amber-400' : ''} ${t.__onboardingStep ? 'border-dashed opacity-90' : ''}" data-id="${t.id}" onclick="${t.__onboardingStep ? "goToClient('" + escapeHTML(t.client) + "')" : "openTaskDrawer(" + t.id + ")"}"><div class="flex justify-between items-start gap-2 mb-2">${clientTaskBadge(t)}<span onclick="goToClient('${escapeHTML(t.client)}'); event.stopPropagation();" class="cursor-pointer hover:text-blue-300 hover:underline text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-black/20 px-2 py-0.5 rounded truncate max-w-[120px] block" title="Open Dashboard">${t.client || 'Unknown'}</span><span class="${dCol} text-[10px] font-bold whitespace-nowrap">${dI} ${t.due||'-'}</span></div><h4 class="font-bold text-white text-sm mb-4 leading-snug">${t.title || 'Untitled Task'}</h4><div class="flex justify-between items-center mt-auto"><div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">${init}</div><div class="flex items-center gap-2 bg-black/20 px-2 py-1 rounded-lg"><div class="w-2 h-2 rounded-full" style="background:${cColor};"></div><span class="font-bold text-white text-[10px]">${t.score}</span></div></div></div>`;
             });
             document.getElementById('count-todo').innerText = counts['Not Started']; document.getElementById('count-prog').innerText = counts['In Progress']; document.getElementById('count-rev').innerText = counts['Blocked']; document.getElementById('count-done').innerText = counts['Complete'];
             
