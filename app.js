@@ -2844,7 +2844,7 @@ function switchClientView(view) {
             views.forEach(v => {
                 const btn = document.getElementById(`tab-btn-${v}`);
                 const el = document.getElementById(`c-view-${v}`);
-                if(btn) btn.className = 'pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
+                if(btn) btn.className = 'whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
                 if(el) el.classList.add('hidden');
             });
 
@@ -2852,7 +2852,7 @@ function switchClientView(view) {
             const activeEl = document.getElementById(`c-view-${view}`);
             if(activeBtn) {
                 let color = view === 'ads' ? 'yellow' : (view === 'health' ? 'green' : (view === 'chat' ? 'purple' : (view === 'reports' ? 'blue' : (view === 'payments' ? 'emerald' : 'gray'))));
-                activeBtn.className = `pb-3 text-sm font-bold text-${color}-400 border-b-2 border-${color}-400 transition hover:text-${color}-300`;
+                activeBtn.className = `whitespace-nowrap pb-3 text-sm font-bold text-${color}-400 border-b-2 border-${color}-400 transition hover:text-${color}-300`;
             }
             if(activeEl) activeEl.classList.remove('hidden');
 

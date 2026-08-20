@@ -343,7 +343,7 @@
                         </div>
                         <div id="t-bulk-bar" class="p-4 bg-blue-900/40 border-b border-blue-500/30 flex justify-between items-center hidden"><div class="flex items-center gap-4"><span class="text-sm font-bold text-blue-300"><span id="t-bulk-count">0</span> Selected</span><button onclick="updateSelectedStatus()" class="text-xs font-bold text-white hover:text-blue-300"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button onclick="deleteSelectedTasks()" class="text-xs font-bold text-red-400 hover:text-red-300"><i class="fa-solid fa-trash mr-1"></i> Delete</button></div><button onclick="clearSelection()" class="text-xs text-gray-400 hover:text-white"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
                         
-                        <div id="view-kanban" class="flex-1 p-6 overflow-x-auto">
+                        <div id="view-kanban" class="flex-1 p-4 md:p-6 overflow-x-auto">
                             <div class="flex gap-6 h-full min-w-max items-start">
                                 <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-gray-400 mr-2"></span>To Do <span class="text-gray-500 text-xs ml-1" id="count-todo">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="Not Started" id="col-todo"></div></div>
                                 <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-blue-400 mr-2"></span>In Progress <span class="text-gray-500 text-xs ml-1" id="count-prog">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="In Progress" id="col-prog"></div></div>
@@ -424,13 +424,13 @@
                         </div>
                     </header>
 
-                    <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2">
-                        <button id="tab-btn-ads" onclick="switchClientView('ads')" class="pb-3 text-sm font-bold text-yellow-400 border-b-2 border-yellow-400"><i class="fa-brands fa-facebook mr-2"></i>Ads Performance</button>
-                        <button id="tab-btn-health" onclick="switchClientView('health')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-heart-pulse mr-2"></i>Relationship Health</button>
-                        <button id="tab-btn-seo" onclick="switchClientView('seo')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-brands fa-google mr-2"></i>SEO & Organic</button>
-                        <button id="tab-btn-chat" onclick="switchClientView('chat')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-robot mr-2"></i>AI Agent</button>
-                        <button id="tab-btn-reports" onclick="switchClientView('reports')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-folder-open mr-2"></i>Reports</button>
-<button id="tab-btn-payments" onclick="switchClientView('payments')" class="pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-credit-card mr-2"></i>Payments</button>
+                    <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2 overflow-x-auto">
+                        <button id="tab-btn-ads" onclick="switchClientView('ads')" class="whitespace-nowrap pb-3 text-sm font-bold text-yellow-400 border-b-2 border-yellow-400"><i class="fa-brands fa-facebook mr-2"></i>Ads Performance</button>
+                        <button id="tab-btn-health" onclick="switchClientView('health')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-heart-pulse mr-2"></i>Relationship Health</button>
+                        <button id="tab-btn-seo" onclick="switchClientView('seo')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-brands fa-google mr-2"></i>SEO & Organic</button>
+                        <button id="tab-btn-chat" onclick="switchClientView('chat')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-robot mr-2"></i>AI Agent</button>
+                        <button id="tab-btn-reports" onclick="switchClientView('reports')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-folder-open mr-2"></i>Reports</button>
+<button id="tab-btn-payments" onclick="switchClientView('payments')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-credit-card mr-2"></i>Payments</button>
 
                     </div>
 
