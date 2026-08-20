@@ -334,13 +334,42 @@
                         <div class="glass p-4 text-center border-b-4 border-green-500/50"><p class="text-[10px] font-bold text-green-400 uppercase tracking-widest mb-1">Completed</p><h2 class="text-3xl font-extrabold text-green-400" id="stat-completed">0</h2></div>
                     </div>
                     <div class="glass flex flex-col min-h-[600px]">
-                        <div class="p-4 border-b border-white/10 flex flex-wrap justify-between items-center gap-4 bg-white/5">
-                            <div class="flex items-center gap-4 flex-1 min-w-[300px]">
-                                <div class="flex bg-black/40 p-1 rounded-lg border border-white/5"><button onclick="switchTaskView('kanban')" id="btn-view-kanban" class="view-btn active"><i class="fa-solid fa-table-columns mr-2"></i>Board</button><button onclick="switchTaskView('table')" id="btn-view-table" class="view-btn"><i class="fa-solid fa-list mr-2"></i>List</button></div>
-                                <div class="flex bg-black/40 p-1 rounded-lg border border-white/5"><button onclick="setTaskOwnerFilter('all')" id="btn-owner-all" class="view-btn active">All</button><button onclick="setTaskOwnerFilter('ours')" id="btn-owner-ours" class="view-btn">Ours</button><button onclick="setTaskOwnerFilter('theirs')" id="btn-owner-theirs" class="view-btn">Client</button></div>
-                                <div class="relative w-64 max-w-full"><i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i><input type="text" id="task-search-filter" placeholder="Search tasks..." class="glass-input pl-8 py-1.5" onkeyup="renderActiveTaskView()"></div>
+                        <div class="p-4 border-b border-white/10 flex flex-wrap justify-between items-end gap-4 bg-white/5">
+                            <div class="flex flex-wrap items-end gap-5 flex-1 min-w-[280px]">
+
+                                <div class="flex flex-col gap-1.5">
+                                    <span class="text-[10px] font-bold uppercase tracking-widest text-gray-500">Search</span>
+                                    <div class="relative w-56 max-w-full">
+                                        <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                                        <input type="text" id="task-search-filter" placeholder="Task or client…" class="glass-input pl-8 py-1.5" onkeyup="renderActiveTaskView()">
+                                    </div>
+                                </div>
+
+                                <!-- Labelled, because two unlabelled pill groups side by side
+                                     gave no clue that one filters and the other changes the view -->
+                                <div class="flex flex-col gap-1.5">
+                                    <span class="text-[10px] font-bold uppercase tracking-widest text-gray-500">Whose</span>
+                                    <div class="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                                        <button onclick="setTaskOwnerFilter('all')" id="btn-owner-all" class="view-btn active">All</button>
+                                        <button onclick="setTaskOwnerFilter('ours')" id="btn-owner-ours" class="view-btn">Ours</button>
+                                        <button onclick="setTaskOwnerFilter('theirs')" id="btn-owner-theirs" class="view-btn">Client</button>
+                                    </div>
+                                </div>
+
+                                <div class="flex flex-col gap-1.5">
+                                    <span class="text-[10px] font-bold uppercase tracking-widest text-gray-500">View</span>
+                                    <div class="flex items-center gap-2">
+                                        <div class="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                                            <button onclick="switchTaskView('kanban')" id="btn-view-kanban" class="view-btn active"><i class="fa-solid fa-table-columns mr-2"></i>Board</button>
+                                            <button onclick="switchTaskView('table')" id="btn-view-table" class="view-btn"><i class="fa-solid fa-list mr-2"></i>List</button>
+                                        </div>
+                                        <button id="btn-columns" onclick="openColumnDrawer()" class="glass-pill hidden !py-1.5 !px-3 !text-xs" title="Choose which columns the list shows"><i class="fa-solid fa-table-columns"></i> Columns</button>
+                                    </div>
+                                </div>
+
                             </div>
-                            <div class="flex items-center gap-3"><button id="btn-columns" onclick="openColumnDrawer()" class="glass-pill hidden"><i class="fa-solid fa-table-columns"></i> Columns</button><button onclick="openTaskDrawer('new')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg"><i class="fa-solid fa-plus mr-2"></i> New Task</button></div>
+
+                            <button onclick="openTaskDrawer('new')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg whitespace-nowrap"><i class="fa-solid fa-plus mr-2"></i> New Task</button>
                         </div>
                         <div id="t-bulk-bar" class="p-4 bg-blue-900/40 border-b border-blue-500/30 flex justify-between items-center hidden"><div class="flex items-center gap-4"><span class="text-sm font-bold text-blue-300"><span id="t-bulk-count">0</span> Selected</span><button onclick="updateSelectedStatus()" class="text-xs font-bold text-white hover:text-blue-300"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button onclick="deleteSelectedTasks()" class="text-xs font-bold text-red-400 hover:text-red-300"><i class="fa-solid fa-trash mr-1"></i> Delete</button></div><button onclick="clearSelection()" class="text-xs text-gray-400 hover:text-white"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
                         
