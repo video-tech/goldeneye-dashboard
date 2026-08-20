@@ -19,6 +19,17 @@
         .nav-item.hidden,
         .dropdown-item.hidden,
         .glass-icon-btn.hidden { display: none; }
+
+        /* Three button sizes, one radius. Colour still carries meaning (blue creates,
+           red destroys, yellow is the page's primary) — this only settles the geometry,
+           which had drifted to ten different size and radius combinations. */
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; font-weight: 700; font-size: 0.85rem; line-height: 1.2; padding: 0.6rem 1.15rem; border-radius: 0.6rem; transition: all 0.2s; cursor: pointer; white-space: nowrap; border: none; }
+        .btn-sm { font-size: 0.75rem; padding: 0.35rem 0.8rem; border-radius: 0.5rem; }
+        .btn-lg { font-size: 0.9rem; padding: 0.8rem 1.4rem; }
+        .btn.hidden { display: none; }
+        /* Icons inside these carry mr-2 from before the gap existed; .btn i outranks
+           .mr-2 on specificity, so the spacing stays single rather than doubling. */
+        .btn i { margin-right: 0; }
         
         .glass-icon-btn { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.15); width: 38px; height: 38px; border-radius: 0.6rem; color: white; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; backdrop-filter: blur(8px); flex-shrink: 0; }
         .glass-icon-btn:hover { background: rgba(255, 255, 255, 0.1); transform: scale(1.05); }
@@ -106,7 +117,7 @@
 
         <div id="client-preview-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:10000; background:linear-gradient(90deg,#7c3aed,#2563eb); color:white; padding:10px 16px; align-items:center; justify-content:center; gap:16px; box-shadow:0 4px 20px rgba(0,0,0,0.4);">
             <span class="text-sm font-bold"><i class="fa-solid fa-eye mr-2"></i>Client preview &mdash; viewing as <span id="client-preview-name">Client</span></span>
-            <button onclick="exitClientPreview()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white font-bold py-1 px-4 rounded-full text-xs transition">
+            <button onclick="exitClientPreview()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white btn btn-sm text-xs transition">
                 <i class="fa-solid fa-arrow-left mr-1"></i> Back to dashboard
             </button>
         </div>
@@ -225,10 +236,10 @@
                                 </div>
                             </div>
                             <div class="flex flex-col sm:flex-row gap-3 w-full md:w-auto shrink-0">
-    <button onclick="navTo('audits')" class="w-full sm:w-auto bg-black/20 hover:bg-white/10 text-white border border-white/10 font-bold py-2.5 px-6 rounded-lg text-sm shadow-lg transition whitespace-nowrap">
+    <button onclick="navTo('audits')" class="w-full sm:w-auto bg-black/20 hover:bg-white/10 text-white border border-white/10 btn text-sm shadow-lg transition whitespace-nowrap">
         <i class="fa-solid fa-clock-rotate-left mr-2"></i> Audit History
     </button>
-    <button id="btn-run-global-ai" onclick="runGlobalAIAudit()" class="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-400 text-yellow-900 font-bold py-2.5 px-6 rounded-lg text-sm shadow-lg transition whitespace-nowrap">
+    <button id="btn-run-global-ai" onclick="runGlobalAIAudit()" class="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-400 text-yellow-900 btn text-sm shadow-lg transition whitespace-nowrap">
         <i class="fa-solid fa-bolt mr-2"></i> Run Morning Audit
     </button>
 </div>
@@ -369,7 +380,7 @@
 
                             </div>
 
-                            <button onclick="openTaskDrawer('new')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg whitespace-nowrap"><i class="fa-solid fa-plus mr-2"></i> New Task</button>
+                            <button onclick="openTaskDrawer('new')" class="bg-blue-600 hover:bg-blue-500 text-white btn text-sm shadow-lg whitespace-nowrap"><i class="fa-solid fa-plus mr-2"></i> New Task</button>
                         </div>
                         <div id="t-bulk-bar" class="p-4 bg-blue-900/40 border-b border-blue-500/30 flex justify-between items-center hidden"><div class="flex items-center gap-4"><span class="text-sm font-bold text-blue-300"><span id="t-bulk-count">0</span> Selected</span><button onclick="updateSelectedStatus()" class="text-xs font-bold text-white hover:text-blue-300"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button onclick="deleteSelectedTasks()" class="text-xs font-bold text-red-400 hover:text-red-300"><i class="fa-solid fa-trash mr-1"></i> Delete</button></div><button onclick="clearSelection()" class="text-xs text-gray-400 hover:text-white"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
                         
@@ -391,7 +402,7 @@
                     <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-2">
                         <div class="flex items-center gap-4">
                             <div><h1 class="text-3xl font-bold tracking-tight">Clients & Reports</h1><p class="text-gray-400">Monitor individual ad performance and retention.</p></div>
-                            <button id="btn-add-client" onclick="openAddClientModal()" class="hidden bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg text-xs shadow-lg transition">
+                            <button id="btn-add-client" onclick="openAddClientModal()" class="hidden bg-green-600 hover:bg-green-500 text-white btn text-xs shadow-lg transition">
                                 <i class="fa-solid fa-plus mr-2"></i> New Client
                             </button>
                         </div>
@@ -445,7 +456,7 @@
                                 <i class="fa-solid fa-pen-to-square"></i>
                             </button>
 
-                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" class="hidden bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold py-2 px-4 rounded-lg text-sm shadow-lg transition whitespace-nowrap">
+                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" class="hidden bg-yellow-500 hover:bg-yellow-400 text-slate-900 btn text-sm shadow-lg transition whitespace-nowrap">
                                 <i class="fa-solid fa-arrow-right-arrow-left mr-2"></i> Move Stage
                             </button>
 
@@ -484,7 +495,7 @@
                         <div id="client-specific-tasks-box" class="glass p-6 border-l-4 border-blue-500 hidden flex flex-col min-h-[160px]">
                             <div class="flex justify-between items-center mb-4">
                                 <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-check-square mr-2 text-blue-400"></i> Active Tasks for <span id="c-task-client-name" class="text-white">Client</span></h3>
-                                <button onclick="openTaskDrawer('new', true)" class="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-md transition">+ Task</button>
+                                <button onclick="openTaskDrawer('new', true)" class="text-xs bg-blue-600 hover:bg-blue-500 text-white btn btn-sm transition">+ Task</button>
                             </div>
                             <div id="c-task-list" class="space-y-2 flex-1 overflow-y-auto max-h-[200px] pr-2">
                                 </div>
@@ -564,7 +575,7 @@
                         </div>
 
                         <div id="health-dashboard-content" class="space-y-6">
-                            <div class="flex justify-between items-center px-2"><div><h2 class="text-xl font-bold">Health Dashboard</h2><p class="text-sm text-gray-400">Tracking retention probability based on 6 core factors.</p></div><button onclick="openHealthDrawer()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg"><i class="fa-solid fa-pen-to-square mr-2"></i> Update</button></div>
+                            <div class="flex justify-between items-center px-2"><div><h2 class="text-xl font-bold">Health Dashboard</h2><p class="text-sm text-gray-400">Tracking retention probability based on 6 core factors.</p></div><button onclick="openHealthDrawer()" class="bg-blue-600 hover:bg-blue-500 text-white btn text-sm shadow-lg"><i class="fa-solid fa-pen-to-square mr-2"></i> Update</button></div>
                             
                             <div id="client-health-alert-container" class="hidden"></div>
 
@@ -591,8 +602,8 @@
                                     <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-flag-checkered mr-2 text-blue-400"></i> Onboarding Progress</h3>
                                     <div class="flex items-center gap-3">
                                         <span id="c-onboarding-summary" class="text-[10px] text-gray-500 uppercase tracking-widest"></span>
-                                        <button id="c-onboarding-backfill" onclick="markOnboardingComplete()" class="hidden text-xs bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold py-1 px-3 rounded-md transition" title="Tick off every client step for a client who onboarded before the portal existed">Mark client steps done</button>
-                                        <button onclick="addAdhocOnboardingTask()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-md transition">+ Task</button>
+                                        <button id="c-onboarding-backfill" onclick="markOnboardingComplete()" class="hidden text-xs bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 btn btn-sm transition" title="Tick off every client step for a client who onboarded before the portal existed">Mark client steps done</button>
+                                        <button onclick="addAdhocOnboardingTask()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white btn btn-sm transition">+ Task</button>
                                     </div>
                                 </div>
                                 <div id="c-onboarding-list" class="space-y-2"></div>
@@ -604,8 +615,8 @@
                             </div>
 
                             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                <div class="glass p-8 flex flex-col items-center justify-center relative min-h-[300px]"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest absolute top-6 left-6">Current Score</h3><div class="relative w-full max-w-[200px] mt-6"><canvas id="healthGaugeChart"></canvas><div class="absolute inset-0 flex flex-col items-center justify-center mt-10"><h2 class="text-5xl font-extrabold text-white" id="health-gauge-number">--</h2></div></div></div>
-                                <div class="glass p-8 lg:col-span-2 min-h-[300px] flex flex-col"><div class="flex justify-between items-start mb-6"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Score History</h3></div><div class="relative w-full flex-1"><canvas id="healthLineChart"></canvas></div></div>
+                                <div class="glass p-6 flex flex-col items-center justify-center relative min-h-[300px]"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest absolute top-6 left-6">Current Score</h3><div class="relative w-full max-w-[200px] mt-6"><canvas id="healthGaugeChart"></canvas><div class="absolute inset-0 flex flex-col items-center justify-center mt-10"><h2 class="text-5xl font-extrabold text-white" id="health-gauge-number">--</h2></div></div></div>
+                                <div class="glass p-6 lg:col-span-2 min-h-[300px] flex flex-col"><div class="flex justify-between items-start mb-6"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Score History</h3></div><div class="relative w-full flex-1"><canvas id="healthLineChart"></canvas></div></div>
                             </div>
                         </div>
                     </div>
@@ -732,10 +743,10 @@
                                 </div>
                                 <div class="mt-6 border-t border-white/10 pt-4">
                                     <div class="flex flex-col sm:flex-row gap-3">
-    <button onclick="saveClientPayments()" id="btn-save-payments" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-lg shadow-lg transition">
+    <button onclick="saveClientPayments()" id="btn-save-payments" class="bg-blue-600 hover:bg-blue-500 text-white btn shadow-lg transition">
         Save Custom Edits
     </button>
-    <button onclick="logQuickPayment()" id="btn-quick-pay" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-6 rounded-lg shadow-lg transition flex-1">
+    <button onclick="logQuickPayment()" id="btn-quick-pay" class="bg-green-600 hover:bg-green-500 text-white btn shadow-lg transition flex-1">
         <i class="fa-solid fa-bolt mr-2"></i> Log Payment (+1 Month)
     </button>
 </div>
@@ -746,7 +757,7 @@
                     <div id="c-view-reports" class="space-y-6 hidden">
                         <div class="flex justify-between items-center px-2">
                             <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Saved Reports</h3>
-                            <button onclick="openReportModal()" class="bg-yellow-400 text-yellow-900 hover:bg-yellow-300 font-bold py-2 px-5 rounded-lg text-sm transition shadow-lg"><i class="fa-solid fa-plus mr-2"></i> New Report</button>
+                            <button onclick="openReportModal()" class="bg-yellow-400 text-yellow-900 hover:bg-yellow-300 btn text-sm transition shadow-lg"><i class="fa-solid fa-plus mr-2"></i> New Report</button>
                         </div>
                         <div class="glass p-6 min-h-[400px]">
                             <div class="overflow-x-auto">
@@ -798,7 +809,7 @@
                                 <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
                                 <input type="text" id="sales-search" placeholder="Search leads..." class="glass-input pl-8 py-1.5" onkeyup="renderSalesBoard()">
                             </div>
-                            <button onclick="openLeadDrawer('new')" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg">
+                            <button onclick="openLeadDrawer('new')" class="bg-green-600 hover:bg-green-500 text-white btn text-sm shadow-lg">
                                 <i class="fa-solid fa-plus mr-2"></i> New Lead
                             </button>
                         </div>
@@ -896,7 +907,7 @@
                         <div class="glass p-6">
                             <div class="flex justify-between items-center mb-6">
                                 <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400">Scheduled Operations</h3>
-                                <button onclick="openTemplateDrawer('recurring', 'new')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-xs shadow-lg">+ New Template</button>
+                                <button onclick="openTemplateDrawer('recurring', 'new')" class="bg-blue-600 hover:bg-blue-500 text-white btn text-xs shadow-lg">+ New Template</button>
                             </div>
                             <div class="overflow-x-auto">
                                 <table class="w-full text-left text-sm">
@@ -931,7 +942,7 @@
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <select id="tpl-stage-picker" class="glass-input !py-1.5 !w-52" onchange="renderStageTemplates()"></select>
-                                    <button onclick="addStageTemplateRow()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-4 rounded-lg text-xs shadow-lg transition">
+                                    <button onclick="addStageTemplateRow()" class="bg-blue-600 hover:bg-blue-500 text-white btn btn-sm text-xs shadow-lg transition">
                                         <i class="fa-solid fa-plus mr-1"></i> Add Task
                                     </button>
                                 </div>
@@ -950,7 +961,7 @@
 
                             <div class="flex justify-between items-center mt-6 pt-4 border-t border-white/10">
                                 <p id="tpl-stage-status" class="text-[11px] text-gray-500"></p>
-                                <button onclick="saveStageTemplates()" id="btn-save-stage-tpl" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg text-sm shadow-lg transition">
+                                <button onclick="saveStageTemplates()" id="btn-save-stage-tpl" class="bg-green-600 hover:bg-green-500 text-white btn text-sm shadow-lg transition">
                                     Save Checklist
                                 </button>
                             </div>
@@ -964,7 +975,7 @@
                                     <h3 class="text-lg font-bold text-white">Client Onboarding Steps</h3>
                                     <p class="text-xs text-gray-400 mt-1">What clients see under <strong class="text-gray-300">Get Started</strong> in their portal. They work through these in order.</p>
                                 </div>
-                                <button onclick="addOnboardingStepRow()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-4 rounded-lg text-xs shadow-lg transition">
+                                <button onclick="addOnboardingStepRow()" class="bg-blue-600 hover:bg-blue-500 text-white btn btn-sm text-xs shadow-lg transition">
                                     <i class="fa-solid fa-plus mr-1"></i> Add Step
                                 </button>
                             </div>
@@ -973,7 +984,7 @@
 
                             <div class="flex justify-between items-center mt-6 pt-4 border-t border-white/10">
                                 <p id="onboarding-steps-status" class="text-[11px] text-gray-500"></p>
-                                <button onclick="saveOnboardingSteps()" id="btn-save-onboarding" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg text-sm shadow-lg transition">
+                                <button onclick="saveOnboardingSteps()" id="btn-save-onboarding" class="bg-green-600 hover:bg-green-500 text-white btn text-sm shadow-lg transition">
                                     Save Steps
                                 </button>
                             </div>
@@ -1025,7 +1036,7 @@
                                         <div id="invite-client-list" class="space-y-1"></div>
                                     </div>
                                 </div>
-                                <button onclick="inviteUser(event)" id="btn-send-invite" class="w-full md:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg text-sm shadow-lg whitespace-nowrap"><i class="fa-solid fa-paper-plane mr-2"></i> Send Invite</button>
+                                <button onclick="inviteUser(event)" id="btn-send-invite" class="w-full md:w-auto bg-blue-600 hover:bg-blue-500 text-white btn text-sm shadow-lg whitespace-nowrap"><i class="fa-solid fa-paper-plane mr-2"></i> Send Invite</button>
                             </div>
                         </div>
 
@@ -1041,7 +1052,7 @@
                                 <div><label class="modal-label">Urgency Weight (%)</label><input type="number" id="sw-u" class="glass-input" value="40" oninput="previewScoreWeighting()"></div>
                                 <div><label class="modal-label">Effort Weight (%)</label><input type="number" id="sw-e" class="glass-input" value="20" oninput="previewScoreWeighting()"></div>
                                 <div id="sw-error" class="text-red-400 text-xs hidden">Weights must sum to 100%.</div>
-                                <button onclick="saveScoringWeights()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm mt-4">Save Weights</button>
+                                <button onclick="saveScoringWeights()" class="bg-blue-600 hover:bg-blue-500 text-white btn text-sm mt-4">Save Weights</button>
                             </div>
                             <div class="bg-black/20 p-6 rounded-xl border border-white/5">
                                 <h4 class="font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-calculator text-blue-400"></i> Live Preview</h4>
@@ -1059,7 +1070,7 @@
                         <div class="flex flex-wrap gap-2 mb-6 bg-black/20 p-4 border border-white/5 rounded-xl">
                             <div class="flex-1 min-w-[200px]"><label class="modal-label">Milestone Name</label><input type="text" id="ms-name" placeholder="e.g. Ads Launched" class="glass-input"></div>
                             <div class="w-32"><label class="modal-label">Target Days</label><input type="number" id="ms-days" placeholder="e.g. 7" class="glass-input w-full"></div>
-                            <div class="flex items-end"><button onclick="addMilestoneSetting()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm w-full"><i class="fa-solid fa-plus mr-1"></i> Add</button></div>
+                            <div class="flex items-end"><button onclick="addMilestoneSetting()" class="bg-blue-600 hover:bg-blue-500 text-white btn text-sm w-full"><i class="fa-solid fa-plus mr-1"></i> Add</button></div>
                         </div>
                         <div id="ms-list" class="space-y-3"></div>
                     </div>
@@ -1076,7 +1087,7 @@
                             <div><label class="modal-label">Closed Revenue (%)</label><input type="number" id="hw-deals" class="glass-input" value="10" oninput="checkHealthWeights()"></div>
                         </div>
                         <div id="hw-error" class="text-red-400 text-sm font-bold hidden mt-2 bg-red-500/10 border border-red-500/20 p-3 rounded flex items-center"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Weights must sum to 100%.</div>
-                        <button id="hw-save-btn" onclick="saveHealthWeights()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg text-sm mt-4 shadow-lg"><i class="fa-solid fa-save mr-2"></i> Save Health Config</button>
+                        <button id="hw-save-btn" onclick="saveHealthWeights()" class="bg-blue-600 hover:bg-blue-500 text-white btn btn-lg text-sm mt-4 shadow-lg"><i class="fa-solid fa-save mr-2"></i> Save Health Config</button>
                     </div>
 
                     <div id="s-view-notifications" class="space-y-6 hidden glass p-6">
@@ -1089,7 +1100,7 @@
                             <div class="flex flex-wrap gap-2 items-end bg-black/20 p-4 border border-white/5 rounded-xl max-w-xl">
                                 <div class="flex-1 min-w-[120px]"><label class="modal-label">Name</label><input type="text" id="new-alert-name" class="glass-input !py-2" placeholder="Aidan"></div>
                                 <div class="flex-1 min-w-[140px]"><label class="modal-label">Mobile</label><input type="tel" id="new-alert-phone" class="glass-input !py-2" placeholder="801 555 0100"></div>
-                                <button onclick="addAlertRecipient()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-5 rounded-lg text-sm"><i class="fa-solid fa-plus mr-1"></i> Add</button>
+                                <button onclick="addAlertRecipient()" class="bg-blue-600 hover:bg-blue-500 text-white btn text-sm"><i class="fa-solid fa-plus mr-1"></i> Add</button>
                             </div>
                         </div>
 
@@ -1108,9 +1119,9 @@
                         <h3 class="text-lg font-bold">Data Management</h3>
                         <p class="text-gray-400 text-sm mb-6">Manage global database imports and exports.</p>
                         <div class="flex flex-wrap gap-4">
-                            <button onclick="exportDataJson()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl text-sm shadow-lg"><i class="fa-solid fa-download mr-2"></i> Export Data (JSON)</button>
-                            <button class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl text-sm opacity-50 cursor-not-allowed shadow-lg" title="Not available"><i class="fa-solid fa-upload mr-2"></i> Import Template</button>
-                            <button class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-6 rounded-xl text-sm opacity-50 cursor-not-allowed shadow-lg"><i class="fa-solid fa-server mr-2"></i> Manual Backup</button>
+                            <button onclick="exportDataJson()" class="bg-green-600 hover:bg-green-500 text-white btn btn-lg text-sm shadow-lg"><i class="fa-solid fa-download mr-2"></i> Export Data (JSON)</button>
+                            <button class="bg-blue-600 hover:bg-blue-500 text-white btn btn-lg text-sm opacity-50 cursor-not-allowed shadow-lg" title="Not available"><i class="fa-solid fa-upload mr-2"></i> Import Template</button>
+                            <button class="bg-gray-600 hover:bg-gray-500 text-white btn btn-lg text-sm opacity-50 cursor-not-allowed shadow-lg"><i class="fa-solid fa-server mr-2"></i> Manual Backup</button>
                         </div>
                     </div>
                 </div>
@@ -1281,7 +1292,7 @@
                     <i class="fa-solid fa-circle-check text-4xl text-emerald-400 mb-3"></i>
                     <h3 class="text-xl font-bold text-white mb-1">You're all set</h3>
                     <p class="text-sm text-gray-400 mb-5">Everything's done on your end. We'll take it from here and your results will show up on the Dashboard.</p>
-                    <button onclick="switchCpTab('dashboard')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm transition">Go to my Dashboard</button>
+                    <button onclick="switchCpTab('dashboard')" class="bg-emerald-600 hover:bg-emerald-500 text-white btn text-sm transition">Go to my Dashboard</button>
                 </div>
             </div>
 
@@ -1423,7 +1434,7 @@
                     <i class="fa-solid fa-lock text-3xl text-amber-400 mb-3"></i>
                     <h3 class="text-xl font-bold text-white mb-1">Your report is waiting</h3>
                     <p class="text-sm text-gray-400 mb-5" id="cp-reports-locked-msg">Send us this week's numbers and your report unlocks straight away.</p>
-                    <button onclick="switchCpTab('checkin')" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-2.5 px-6 rounded-lg text-sm transition">Fill in this week's numbers</button>
+                    <button onclick="switchCpTab('checkin')" class="bg-amber-500 hover:bg-amber-400 text-slate-900 btn text-sm transition">Fill in this week's numbers</button>
                 </div>
                 <div id="cp-reports-list" class="space-y-2 max-w-4xl"></div>
             </div>
@@ -1467,7 +1478,7 @@
                 
                 <div class="flex gap-2 mb-6 bg-black/20 p-4 border border-white/5 rounded-xl items-end">
                     <div class="flex-1"><label class="modal-label">New Stage Name</label><input type="text" id="cp-new-stage-name" class="glass-input" placeholder="e.g. Follow Up"></div>
-                    <button onclick="addCpStage()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm"><i class="fa-solid fa-plus mr-1"></i> Add</button>
+                    <button onclick="addCpStage()" class="bg-blue-600 hover:bg-blue-500 text-white btn text-sm"><i class="fa-solid fa-plus mr-1"></i> Add</button>
                 </div>
                 
                 <div class="space-y-2" id="cp-stages-list">
