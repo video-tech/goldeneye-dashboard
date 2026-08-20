@@ -584,7 +584,14 @@
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
         if(el) el.classList.add('hidden');
-        if(btn) btn.className = 'pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
+        if(btn) {
+            // Rewriting className wholesale dropped whatever hid the tab, so a retired tab
+            // reappeared on the first switch and Get Started came back for clients long
+            // past onboarding. Carry the hidden state across the reset.
+            const wasHidden = btn.classList.contains('hidden');
+            btn.className = 'whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
+            if (wasHidden) btn.classList.add('hidden');
+        }
     });
     
     const activeEl = document.getElementById(`cp-view-${tabName}`);
