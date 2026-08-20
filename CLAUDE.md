@@ -60,6 +60,12 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   the SMS text, POSTs to Make with the recipient list.
 - `send_weekly_checkin_reminders()` + cron jobs `checkin-reminder-am` (`0 15 * * 1-5`) and
   `-pm` (`0 22 * * 1-5`), UTC.
+- `notify_new_client_welcome()` + `trg_new_client_welcome` on `clients` — welcome email
+  with the sign-in link, on insert only. **Posts straight to the Resend API, not Make** —
+  it was the one flow simple enough not to need a scenario. Sends from
+  `hello@mail.midasmediafirm.com` (the root domain is *not* verified in Resend), with
+  `reply_to` set to a real inbox since the copy invites replies. Rewording it means
+  re-running the function.
 - `user_has_client_access()`, `current_user_is_admin()` — SECURITY DEFINER helpers used by
   RLS policies.
 - `admin_alert_recipients` — who gets texted, toggleable in Settings → Notifications.
