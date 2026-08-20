@@ -12,9 +12,12 @@
         
         .glass-pill { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.15); padding: 0.6rem 1.25rem; border-radius: 9999px !important; color: white; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: all 0.3s ease; backdrop-filter: blur(8px); gap: 8px;}
         .light-mode .glass-pill { background: #ffffff; border: 1px solid #e2e8f0; color: #1e293b; }
-        /* This stylesheet is injected after Tailwind's, so .glass-pill's display beat
-           .hidden on equal specificity and these could never be hidden. */
-        .glass-pill.hidden { display: none; }
+        /* This stylesheet is injected after Tailwind's, so any class of ours that sets
+           display beats .hidden on equal specificity and the element can never be
+           hidden. Every such class needs a guard like these. */
+        .glass-pill.hidden,
+        .nav-item.hidden,
+        .glass-icon-btn.hidden { display: none; }
         
         .glass-icon-btn { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.15); width: 38px; height: 38px; border-radius: 0.6rem; color: white; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; backdrop-filter: blur(8px); flex-shrink: 0; }
         .glass-icon-btn:hover { background: rgba(255, 255, 255, 0.1); transform: scale(1.05); }
@@ -162,7 +165,7 @@
                     <button onclick="navTo('goldeneye')" id="nav-goldeneye" class="w-full nav-item active"><i class="fa-solid fa-chart-line w-5 text-center"></i> Dashboard</button>
                     <button onclick="navTo('tasks')" id="nav-tasks" class="w-full nav-item"><i class="fa-solid fa-check-square w-5 text-center"></i> Tasks</button>
                     <button onclick="navTo('clients')" id="nav-clients" class="w-full nav-item"><i class="fa-solid fa-users w-5 text-center"></i> Clients</button>
-                    <button onclick="navTo('sales')" id="nav-sales" class="w-full nav-item"><i class="fa-solid fa-sack-dollar w-5 text-center text-green-400"></i> Sales</button>
+                    <button onclick="navTo('sales')" id="nav-sales" class="w-full nav-item hidden"><i class="fa-solid fa-sack-dollar w-5 text-center text-green-400"></i> Sales</button>
                     <button onclick="navTo('creatives')" id="nav-creatives" class="w-full nav-item"><i class="fa-solid fa-palette w-5 text-center text-purple-400"></i> Creatives</button>
                     
                     <div id="admin-only-nav" class="hidden pt-6">
@@ -196,7 +199,7 @@
                         <button onclick="navTo('goldeneye')" class="glass-icon-btn shrink-0" title="Goldeneye"><i class="fa-solid fa-chart-line"></i></button>
                         <button onclick="navTo('tasks')" class="glass-icon-btn shrink-0" title="Tasks"><i class="fa-solid fa-check-square"></i></button>
                         <button onclick="navTo('clients')" class="glass-icon-btn shrink-0" title="Clients"><i class="fa-solid fa-users"></i></button>
-                        <button onclick="navTo('sales')" class="glass-icon-btn shrink-0" title="Sales"><i class="fa-solid fa-hand-holding-dollar"></i></button>
+                        <button onclick="navTo('sales')" class="glass-icon-btn shrink-0 hidden" title="Sales"><i class="fa-solid fa-hand-holding-dollar"></i></button>
                         <button onclick="navTo('creatives')" class="glass-icon-btn shrink-0" title="Ad Creatives"><i class="fa-solid fa-palette text-purple-400"></i></button>
                         <button onclick="navTo('templates')" id="m-nav-templates" class="glass-icon-btn shrink-0 hidden" title="Templates"><i class="fa-solid fa-layer-group"></i></button>
                         <button onclick="navTo('settings')" id="m-nav-settings" class="glass-icon-btn shrink-0 hidden" title="Settings"><i class="fa-solid fa-gear"></i></button>
