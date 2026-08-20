@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Golden Eye — PREVIEW</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* Match the dashboard's background so there's no white flash before body.html lands */
+        html, body { margin: 0; padding: 0; background: #020617; min-height: 100%; }
+
+        /* This build talks to the REAL database. The stripe is the only thing telling you
+           which copy you're looking at, so it stays put and stays loud. */
+        #preview-flag {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647;
+            background: #b45309; color: #fff; text-align: center;
+            font: 700 11px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+            letter-spacing: 0.1em; text-transform: uppercase; padding: 5px 8px;
+            pointer-events: none;
+        }
+        body { padding-top: 21px !important; }
+    </style>
+</head>
+<body>
+
+    <div id="preview-flag">Preview build · live data · not the real dashboard</div>
+
+    <!--
+      Standalone entry point, for embedding the dashboard as an iframe (e.g. a GHL custom
+      menu link). The GHL custom-HTML build gets these two values from merge fields; here
+      they have to be literals, since an iframe has no access to GHL's template context.
+
+      The anon key is safe in public source: every table has RLS enabled with
+      {authenticated} policies, so this key on its own reads nothing. Access comes from
+      signing in. The service_role key must never appear here.
+    -->
+    <div id="midas-master"
+         data-supa-url="https://hugnttsqucetldllfgoi.supabase.co"
+         data-supa-key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z250dHNxdWNldGxkbGxmZ29pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NzUyODcsImV4cCI6MjA4ODE1MTI4N30.OjUwMHZ-ZQLMtY__gktnY4RneMw7RWXLMKdHzcTWWgQ"></div>
+
+    <script>
+        (async () => {
+            const base = location.origin + location.pathname.replace(/\/[^\/]*$/, '');
+
+            // GitHub Pages caches for 10 minutes; without this a fresh deploy looks like
+            // a failed one. Same reasoning as the GHL loader.
+            const bust = "?v=" + Date.now();
+
+            const mount = document.getElementById('midas-master');
+            try {
+                mount.innerHTML = await fetch(base + "/body.html" + bust).then(r => r.text());
+
+                const s = document.createElement('script');
+                s.src = base + "/app.js" + bust;
+                s.onerror = () => console.error("Goldeneye: failed to load app.js from " + s.src);
+                document.body.appendChild(s);
+            } catch (e) {
+                console.error("Goldeneye: failed to load body.html from " + base, e);
+                mount.innerHTML = '<p style="color:#f87171;font-family:sans-serif;padding:2rem">Could not load the dashboard. Check the console.</p>';
+            }
+        })();
+    </script>
+
+</body>
+</html>
