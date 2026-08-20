@@ -17,6 +17,7 @@
            hidden. Every such class needs a guard like these. */
         .glass-pill.hidden,
         .nav-item.hidden,
+        .dropdown-item.hidden,
         .glass-icon-btn.hidden { display: none; }
         
         .glass-icon-btn { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.15); width: 38px; height: 38px; border-radius: 0.6rem; color: white; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; backdrop-filter: blur(8px); flex-shrink: 0; }
@@ -399,28 +400,43 @@
                                 </div>
                                 <button onclick="cycleDate(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
                             </div>
-                            <div id="global-health-pill" class="glass-pill hidden cursor-pointer border border-white/10 hover:bg-white/10 transition" onclick="switchClientView('health')" title="View Health Details">
+                            <span id="c-stage-chip" class="hidden text-[11px] font-bold uppercase tracking-widest text-blue-300 bg-blue-500/15 border border-blue-500/30 px-2.5 py-1 rounded-full whitespace-nowrap"></span>
+
+                            <div id="global-health-pill" class="glass-pill hidden cursor-pointer border border-white/10 hover:bg-white/10 transition" onclick="switchClientView('health')" title="Relationship health — click for detail">
                                 <i id="global-health-icon" class="fa-solid fa-heart-pulse mr-2 text-gray-400"></i>
                                 <span id="global-health-score" class="font-bold text-gray-400">--</span>
                             </div>
-                            <button id="btn-invite-client" onclick="openInviteModal()" class="hidden bg-purple-600 hover:bg-purple-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
-                                <i class="fa-solid fa-user-plus mr-2"></i> Invite to Portal
+
+                            <span class="hidden lg:block w-px h-7 bg-white/10 mx-0.5"></span>
+
+                            <button id="btn-preview-client" onclick="previewAsClient()" title="See this client's portal exactly as they do" class="hidden glass-icon-btn">
+                                <i class="fa-solid fa-eye"></i>
                             </button>
-                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" class="hidden bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
+                            <button id="btn-edit-client" onclick="openEditClientModal()" title="Edit this client's details" class="hidden glass-icon-btn">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                            </button>
+
+                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" class="hidden bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold py-2 px-4 rounded-lg text-sm shadow-lg transition whitespace-nowrap">
                                 <i class="fa-solid fa-arrow-right-arrow-left mr-2"></i> Move Stage
                             </button>
-                            <button id="btn-toggle-pause" onclick="toggleClientPause()" class="hidden bg-amber-600 hover:bg-amber-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
-                                <i id="btn-toggle-pause-icon" class="fa-solid fa-circle-pause mr-2"></i><span id="btn-toggle-pause-label">Pause Client</span>
-                            </button>
-                            <button id="btn-toggle-archive" onclick="toggleClientArchive()" title="Archive client" class="hidden bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold py-1.5 px-4 rounded-full text-xs transition">
-                                <i id="btn-toggle-archive-icon" class="fa-solid fa-box-archive mr-2"></i><span id="btn-toggle-archive-label">Archive</span>
-                            </button>
-                            <button id="btn-preview-client" onclick="previewAsClient()" title="See this client's portal exactly as they do" class="hidden bg-purple-600 hover:bg-purple-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition">
-                                <i class="fa-solid fa-eye mr-2"></i> View as Client
-                            </button>
-                            <button id="btn-edit-client" onclick="openEditClientModal()" title="Edit this client's details" class="hidden bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold py-1.5 px-4 rounded-full text-xs transition">
-                                <i class="fa-solid fa-pen-to-square mr-2"></i> Edit
-                            </button>
+
+                            <div class="dropdown-container">
+                                <button id="btn-client-more" onclick="toggleDropdown('c-more-menu')" title="More actions" class="hidden glass-icon-btn">
+                                    <i class="fa-solid fa-ellipsis"></i>
+                                </button>
+                                <div id="c-more-menu" class="custom-dropdown-menu !w-[232px] p-2">
+                                    <div class="dropdown-item" id="btn-invite-client" onclick="openInviteModal()">
+                                        <i class="fa-solid fa-user-plus w-4 text-purple-400"></i> Invite to portal
+                                    </div>
+                                    <div class="dropdown-item" id="btn-toggle-pause" onclick="toggleClientPause()">
+                                        <i id="btn-toggle-pause-icon" class="fa-solid fa-circle-pause w-4 text-amber-400"></i> <span id="btn-toggle-pause-label">Pause Client</span>
+                                    </div>
+                                    <div class="h-px bg-white/10 my-1.5 mx-1"></div>
+                                    <div class="dropdown-item !text-red-300" id="btn-toggle-archive" onclick="toggleClientArchive()">
+                                        <i id="btn-toggle-archive-icon" class="fa-solid fa-box-archive w-4"></i> <span id="btn-toggle-archive-label">Archive</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </header>
 

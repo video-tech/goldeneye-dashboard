@@ -2987,13 +2987,21 @@ function filterAdsData() {
                     const addClientBtn = document.getElementById('btn-add-client');
                     if (addClientBtn && currentUserRole === 'admin') addClientBtn.classList.remove('hidden');
 
-                    // Update and unhide Stage Transition button
+                    // The stage is state, so it reads as a chip beside the client's name.
+                    // The button is now the action ("Move Stage"), not a label of where
+                    // they currently are — the two were doing each other's jobs.
                     const transitionBtn = document.getElementById('btn-stage-transition');
+                    const stageChip = document.getElementById('c-stage-chip');
+                    const stageClient = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+                    const currentStage = stageClient ? (stageClient.current_stage || 'Onboarding') : null;
+
+                    if (stageChip) {
+                        stageChip.innerText = currentStage || '';
+                        stageChip.classList.toggle('hidden', !currentStage || cSelectedAccount === 'ALL');
+                    }
+
                     if (transitionBtn && currentUserRole === 'admin') {
-                        const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
-                        const currentStage = clientObj ? (clientObj.current_stage || 'Onboarding') : 'Onboarding';
-                        transitionBtn.innerHTML = `<i class="fa-solid fa-arrow-right-arrow-left mr-2"></i> ${currentStage}`;
-                        transitionBtn.classList.remove('hidden');
+                        transitionBtn.classList.toggle('hidden', cSelectedAccount === 'ALL');
                     } else if (transitionBtn) {
                         transitionBtn.classList.add('hidden'); // Ensure Team Members don't see it
                     }
@@ -3004,16 +3012,18 @@ function filterAdsData() {
                     const inviteBtn = document.getElementById('btn-invite-client');
                     if (inviteBtn) inviteBtn.classList.toggle('hidden', currentUserRole !== 'admin' || cSelectedAccount === 'ALL');
 
-                    // Pause / resume control (admin only) — reflects the client's current state
+                    // These now live inside the ⋯ menu, so they carry .dropdown-item and a
+                    // colour class rather than a whole button style. Rewriting className
+                    // wholesale (as this did) would strip the class that lays them out.
                     const pauseBtn = document.getElementById('btn-toggle-pause');
                     if (pauseBtn && currentUserRole === 'admin') {
                         const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
                         const paused = clientObj && !isActiveClient(clientObj);
                         document.getElementById('btn-toggle-pause-label').innerText = paused ? 'Resume Client' : 'Pause Client';
-                        document.getElementById('btn-toggle-pause-icon').className = paused ? 'fa-solid fa-circle-play mr-2' : 'fa-solid fa-circle-pause mr-2';
-                        pauseBtn.className = paused
-                            ? 'bg-green-600 hover:bg-green-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition'
-                            : 'bg-amber-600 hover:bg-amber-500 text-white font-bold py-1.5 px-4 rounded-full text-xs shadow-lg transition';
+                        document.getElementById('btn-toggle-pause-icon').className = paused
+                            ? 'fa-solid fa-circle-play w-4 text-emerald-400'
+                            : 'fa-solid fa-circle-pause w-4 text-amber-400';
+                        pauseBtn.classList.toggle('hidden', cSelectedAccount === 'ALL');
                     } else if (pauseBtn) {
                         pauseBtn.classList.add('hidden');
                     }
@@ -3024,14 +3034,18 @@ function filterAdsData() {
                         const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
                         const archived = clientObj && !isSelectableClient(clientObj);
                         document.getElementById('btn-toggle-archive-label').innerText = archived ? 'Restore' : 'Archive';
-                        document.getElementById('btn-toggle-archive-icon').className = archived ? 'fa-solid fa-rotate-left mr-2' : 'fa-solid fa-box-archive mr-2';
+                        document.getElementById('btn-toggle-archive-icon').className = archived ? 'fa-solid fa-rotate-left w-4' : 'fa-solid fa-box-archive w-4';
                         archiveBtn.title = archived ? 'Restore this client to paused' : 'Offboard this client';
-                        archiveBtn.className = 'bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold py-1.5 px-4 rounded-full text-xs transition';
+                        archiveBtn.classList.toggle('hidden', cSelectedAccount === 'ALL');
                         // Pausing an already-archived client is meaningless
                         if (archived && pauseBtn) pauseBtn.classList.add('hidden');
                     } else if (archiveBtn) {
                         archiveBtn.classList.add('hidden');
                     }
+
+                    // The ⋯ button itself only earns its place when something is in it
+                    const moreBtn = document.getElementById('btn-client-more');
+                    if (moreBtn) moreBtn.classList.toggle('hidden', currentUserRole !== 'admin' || cSelectedAccount === 'ALL');
 
                     const previewBtn = document.getElementById('btn-preview-client');
                     if (previewBtn) previewBtn.classList.toggle('hidden', currentUserRole !== 'admin');
@@ -6383,7 +6397,7 @@ window.executeStageTransition = async function() {
 
         // 3. Trigger UI Refresh
         const transitionBtn = document.getElementById('btn-stage-transition');
-        if(transitionBtn) transitionBtn.innerHTML = `<i class="fa-solid fa-arrow-right-arrow-left mr-2"></i> ${targetStage}`;
+        const chip = document.getElementById("c-stage-chip"); if(chip) chip.innerText = targetStage;
         
         // 4. Conditional Generation — from the stage's checklist template
         if (generateTasks) {
