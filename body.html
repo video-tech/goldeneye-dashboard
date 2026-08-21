@@ -1,8 +1,16 @@
     <style>
         body, html, .main-content, .section, .row, .container, .inner_section { background-color: transparent !important; max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+
+        /* The closed drawers are position:fixed and parked off-canvas with translateX(100%),
+           which on a phone makes the document a full screen-width wider than the viewport.
+           You could pinch out to that empty strip, and since html/body are deliberately
+           transparent for GHL, the strip rendered as white bars down both sides. */
+        /* Scoped to phones on purpose: overflow-x on html/body breaks position:sticky,
+           which the desktop sidebar uses, and that sidebar is hidden below md anyway. */
+        @media (max-width: 767px) { html, body { overflow-x: hidden; } }
         
         /* Unified Theme Wrapper */
-        #theme-wrapper { background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #0f172a 40%, #020617 100%); color: white; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif; min-height: 100vh; width: 100%; box-sizing: border-box; transition: background 0.3s ease; overflow: hidden; }
+        #theme-wrapper { background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #0f172a 40%, #020617 100%); color: white; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif; min-height: 100vh; width: 100%; max-width: 100%; box-sizing: border-box; transition: background 0.3s ease; overflow: hidden; }
         #theme-wrapper.light-mode { background: linear-gradient(-45deg, #f8fafc, #f1f5f9, #e2e8f0, #cbd5e1); color: #1e293b; }
         
         /* Shared Glassmorphism */
