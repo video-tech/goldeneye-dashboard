@@ -470,14 +470,20 @@
                 </div>
 
                 <div id="page-clients" class="p-4 md:p-8 space-y-6 hidden">
-                    <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-2">
-                        <div class="flex items-center gap-4">
-                            <div><h1 class="text-3xl font-bold tracking-tight">Clients & Reports</h1><p class="text-gray-400">Monitor individual ad performance and retention.</p></div>
-                            <button id="btn-add-client" onclick="openAddClientModal()" class="hidden bg-green-600 hover:bg-green-500 text-white btn text-xs shadow-lg transition">
-                                <i class="fa-solid fa-plus mr-2"></i> New Client
+                    <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 lg:gap-4 mb-2">
+                        <div class="flex items-center gap-3 lg:gap-4">
+                            <div>
+                                <h1 class="text-2xl md:text-3xl font-bold tracking-tight">
+                                    <span class="md:hidden">Clients</span>
+                                    <span class="hidden md:inline">Clients &amp; Reports</span>
+                                </h1>
+                                <p class="hidden md:block text-gray-400">Monitor individual ad performance and retention.</p>
+                            </div>
+                            <button id="btn-add-client" onclick="openAddClientModal()" title="Add a new client" class="hidden bg-green-600 hover:bg-green-500 text-white btn text-xs shadow-lg transition whitespace-nowrap">
+                                <i class="fa-solid fa-plus sm:mr-2"></i><span class="hidden sm:inline">New Client</span>
                             </button>
                         </div>
-                        <div class="flex items-center flex-wrap gap-3">
+                        <div class="flex items-center flex-wrap gap-2 lg:gap-3">
                             <span id="c-stage-chip" class="hidden text-[11px] font-bold uppercase tracking-widest text-blue-300 bg-blue-500/15 border border-blue-500/30 px-2.5 py-1 rounded-full whitespace-nowrap"></span>
 
                             <div id="global-health-pill" class="glass-pill hidden cursor-pointer border border-white/10 hover:bg-white/10 transition" onclick="switchClientView('health')" title="Relationship health — click for detail">
@@ -494,8 +500,8 @@
                                 <i class="fa-solid fa-pen-to-square"></i>
                             </button>
 
-                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" class="hidden bg-yellow-500 hover:bg-yellow-400 text-slate-900 btn text-sm shadow-lg transition whitespace-nowrap">
-                                <i class="fa-solid fa-arrow-right-arrow-left mr-2"></i> Move Stage
+                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" title="Move this client to another stage" class="hidden bg-yellow-500 hover:bg-yellow-400 text-slate-900 btn text-sm shadow-lg transition whitespace-nowrap">
+                                <i class="fa-solid fa-arrow-right-arrow-left sm:mr-2"></i><span class="hidden sm:inline">Move Stage</span>
                             </button>
 
                             <div class="dropdown-container">
