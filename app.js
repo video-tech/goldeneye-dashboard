@@ -1132,12 +1132,27 @@ function decodePreviewUrl(url) {
         .trim();
 }
 
+// Meta sizes each placement differently — a feed preview is 335x450, a story is taller
+// and narrower. The snippet carries those dimensions, so use them rather than forcing
+// one size on everything: the iframe's contents don't reflow, so a wrong box either
+// crops the ad or strands it in white space.
+function adPreviewBox(snippet) {
+    const raw = String(snippet || '');
+    const width  = parseInt((raw.match(/width=["'](\d+)["']/i)  || [])[1], 10);
+    const height = parseInt((raw.match(/height=["'](\d+)["']/i) || [])[1], 10);
+    return {
+        url: decodePreviewUrl(raw),
+        width:  Number.isFinite(width)  ? width  : 335,
+        height: Number.isFinite(height) ? height : 450
+    };
+}
+
 function adPreviewEntries(row) {
     const previews = row?.previews;
     if (!previews || typeof previews !== 'object') return [];
     return Object.entries(previews)
-        .filter(([, url]) => !!url)
-        .map(([k, url]) => [k, decodePreviewUrl(url)]);
+        .filter(([, snippet]) => !!snippet)
+        .map(([k, snippet]) => [k, adPreviewBox(snippet)]);
 }
 
 function adStatusBadge(status) {
@@ -1316,10 +1331,12 @@ window.renderClientCreatives = function() {
                 return `<button onclick="cpSetPlacement('${r.id}', '${k}')" class="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border transition ${on ? 'text-white bg-white/10 border-white/20' : 'text-gray-500 border-transparent hover:text-gray-300'}">${escapeAttr(AD_PLACEMENT_LABELS[k] || k)}</button>`;
             }).join('');
 
-            // Meta's preview iframe sizes itself; the wrapper just gives it room
+            const box = active[1];
             body = `<div class="flex flex-wrap gap-1 mb-3">${tabs}</div>
-                    <div class="bg-white rounded-xl overflow-hidden border border-white/10">
-                        <iframe src="${escapeAttr(active[1])}" class="w-full" style="height:620px;border:0" scrolling="no"></iframe>
+                    <div class="bg-white rounded-xl overflow-hidden border border-white/10 flex justify-center p-2">
+                        <iframe src="${escapeAttr(box.url)}"
+                                width="${box.width}" height="${box.height}"
+                                style="border:0;max-width:100%" scrolling="no" allow="autoplay"></iframe>
                     </div>`;
         }
 
