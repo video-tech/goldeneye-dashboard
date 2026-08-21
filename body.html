@@ -127,7 +127,9 @@
            behind it. display:contents dissolves the check-ins/tasks grid so those two
            can be ordered separately without losing the side-by-side pairing on desktop. */
         @media (max-width: 1023px) {
-            #cp-view-dashboard { display: flex; flex-direction: column; gap: 2rem; }
+            /* :not(.hidden) is load-bearing — an id selector outranks Tailwind's .hidden,
+               so a bare rule here kept the dashboard displayed on every other tab. */
+            #cp-view-dashboard:not(.hidden) { display: flex; flex-direction: column; gap: 2rem; }
             /* space-y-8 and mt-8 order by DOM position, which no longer matches what's
                on screen — the gap above handles spacing instead. */
             #cp-view-dashboard > *, #cp-view-dashboard > .cp-split > * { margin-top: 0 !important; }
