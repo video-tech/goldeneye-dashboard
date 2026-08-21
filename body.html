@@ -937,8 +937,12 @@
                     </header>
 
                     <div class="glass p-6 mb-8">
-                        <h3 class="text-lg font-bold mb-4 border-b border-white/10 pb-2">Upload New Creative</h3>
-                        <form id="creative-upload-form" onsubmit="uploadCreative(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                        <h3 class="text-lg font-bold mb-1 border-b border-white/10 pb-2">Send an ad for approval</h3>
+                        <p class="text-xs text-gray-400 mt-3 mb-4">
+                            Build the ad in Meta and leave it paused, then paste its Ad ID here. We pull Meta's own
+                            preview so the client reviews the finished ad &mdash; headline, copy and button &mdash; not just the image.
+                        </p>
+                        <form id="creative-upload-form" onsubmit="submitAdForApproval(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                             <div>
                                 <label class="modal-label">Client</label>
                                 <select id="creative-client" class="glass-input" required></select>
@@ -948,11 +952,11 @@
                                 <input type="text" id="creative-name" class="glass-input" placeholder="Summer Promo V1" required>
                             </div>
                             <div>
-                                <label class="modal-label">Media File</label>
-                                <input type="file" id="creative-file" class="glass-input" accept="image/*,video/*" required>
+                                <label class="modal-label">Meta Ad ID</label>
+                                <input type="text" id="creative-ad-id" class="glass-input" placeholder="120200000000000000" required>
                             </div>
                             <div>
-                                <button type="submit" id="btn-upload-creative" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg shadow-lg transition">Upload Creative</button>
+                                <button type="submit" id="btn-upload-creative" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg shadow-lg transition">Request Previews</button>
                             </div>
                         </form>
                     </div>
@@ -963,12 +967,12 @@
                             <table class="w-full text-left text-sm">
                                 <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
                                     <tr>
-                                        <th class="pb-3 p-2">Preview</th>
                                         <th class="pb-3 p-2">Client</th>
                                         <th class="pb-3 p-2">Ad Name</th>
+                                        <th class="pb-3 p-2">Previews</th>
                                         <th class="pb-3 p-2">Status</th>
                                         <th class="pb-3 p-2">Client Feedback</th>
-                                        <th class="pb-3 p-2">Actions</th>
+                                        <th class="pb-3 p-2 text-right">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="admin-creatives-list" class="divide-y divide-white/5">
@@ -1565,8 +1569,7 @@
                     <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Creative Approvals</h3>
                     <p class="text-sm text-gray-400">Review your latest ad creatives, provide feedback, or approve them for launch.</p>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" id="client-creatives-grid">
-                    </div>
+                <div class="space-y-6 max-w-2xl" id="client-creatives-grid"></div>
             </div>
 
             <div id="cp-view-profile" class="space-y-6 hidden max-w-2xl">

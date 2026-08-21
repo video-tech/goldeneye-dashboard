@@ -1082,6 +1082,268 @@ window.obSaveTeam = async function(stepId, justMe) {
 // to sit in the header. On a phone that header row was competing with the date control
 // for space, and sign-out in particular is a thing you look for deliberately rather than
 // something that needs to be one tap away on every screen.
+// ================= AD APPROVALS =================
+// Clients approve the finished ad, not the raw asset. Meta renders it for us: an ad's
+// preview endpoint returns an iframe showing exactly what will run, per placement, so
+// there is nothing to keep in sync with what is actually in the ad account.
+//
+// The preview URL carries a token, so Make fetches it server-side and writes the result
+// here — the browser never holds Meta credentials. Those URLs also expire, which is why
+// preview_fetched_at is recorded and stale rows can be re-requested.
+const AD_PREVIEW_HOOK = 'https://hook.us2.make.com/REPLACE_WITH_PREVIEW_WEBHOOK';
+
+// Meta's placement identifiers, with names a person would use
+const AD_PLACEMENT_LABELS = {
+    MOBILE_FEED_STANDARD:  'Facebook feed',
+    DESKTOP_FEED_STANDARD: 'Desktop feed',
+    INSTAGRAM_STANDARD:    'Instagram feed',
+    INSTAGRAM_STORY:       'Instagram story',
+    FACEBOOK_STORY_MOBILE: 'Facebook story'
+};
+
+// Previews go stale; past this we stop trusting them and offer a refresh
+const AD_PREVIEW_STALE_HOURS = 20;
+
+function adPreviewIsStale(row) {
+    if (!row?.preview_fetched_at) return true;
+    const age = (Date.now() - new Date(row.preview_fetched_at).getTime()) / 36e5;
+    return age > AD_PREVIEW_STALE_HOURS;
+}
+
+function adPreviewEntries(row) {
+    const previews = row?.previews;
+    if (!previews || typeof previews !== 'object') return [];
+    return Object.entries(previews).filter(([, url]) => !!url);
+}
+
+function adStatusBadge(status) {
+    if (status === 'approved')          return '<span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border text-emerald-400 bg-emerald-500/10 border-emerald-500/25">Approved</span>';
+    if (status === 'changes_requested') return '<span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border text-amber-400 bg-amber-500/10 border-amber-500/25">Changes asked</span>';
+    return '<span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border text-blue-400 bg-blue-500/10 border-blue-500/25">Awaiting client</span>';
+}
+
+// Ask Make to fetch this ad's previews. Fire-and-forget with no-cors: the scenario
+// writes straight to Supabase, and a Make outage must not undo the insert that already
+// succeeded — same reasoning as the Postgres webhooks.
+async function requestAdPreviews(approvalId, adId) {
+    if (AD_PREVIEW_HOOK.includes('REPLACE_WITH')) {
+        console.warn('Ad preview webhook not configured yet — row saved, previews will stay empty.');
+        return;
+    }
+    try {
+        await fetch(AD_PREVIEW_HOOK, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ approval_id: approvalId, ad_id: adId })
+        });
+    } catch (e) {
+        console.error('Could not reach the preview webhook:', e);
+    }
+}
+
+window.submitAdForApproval = async function(e) {
+    e.preventDefault();
+    if (currentUserRole !== 'admin') return;
+
+    const btn = document.getElementById('btn-upload-creative');
+    const client = document.getElementById('creative-client').value;
+    const name = document.getElementById('creative-name').value.trim();
+    // Meta ad ids are digits; people paste act_ prefixes and stray spaces
+    const adId = document.getElementById('creative-ad-id').value.replace(/[^0-9]/g, '');
+
+    if (!client || !name || !adId) return;
+
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Sending...';
+    btn.disabled = true;
+
+    try {
+        const { data, error } = await supabaseClient.from('ad_approvals').insert({
+            client_name: client,
+            ad_name: name,
+            ad_id: adId,
+            status: 'pending',
+            previews: {}
+        }).select().single();
+        if (error) throw error;
+
+        await requestAdPreviews(data.id, adId);
+
+        document.getElementById('creative-name').value = '';
+        document.getElementById('creative-ad-id').value = '';
+
+        await reloadAdApprovals();
+        renderAdminCreatives();
+    } catch (err) {
+        alert('Could not send that ad for approval: ' + err.message);
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+};
+
+window.refreshAdPreviews = async function(approvalId) {
+    const row = globalCreativesData.find(r => r.id === approvalId);
+    if (!row) return;
+    await requestAdPreviews(row.id, row.ad_id);
+    // Make writes asynchronously, so give it a moment before re-reading
+    setTimeout(async () => { await reloadAdApprovals(); renderAdminCreatives(); }, 4000);
+};
+
+window.deleteAdApproval = async function(approvalId) {
+    if (currentUserRole !== 'admin') return;
+    if (!confirm('Remove this ad from the approval list? The ad itself is untouched.')) return;
+    const { error } = await supabaseClient.from('ad_approvals').delete().eq('id', approvalId);
+    if (error) { alert('Could not remove it: ' + error.message); return; }
+    await reloadAdApprovals();
+    renderAdminCreatives();
+};
+
+async function reloadAdApprovals() {
+    const { data, error } = await supabaseClient.from('ad_approvals').select('*').order('created_at', { ascending: false });
+    if (!error) globalCreativesData = data || [];
+}
+
+window.renderAdminCreatives = function() {
+    const body = document.getElementById('admin-creatives-list');
+    if (!body) return;
+
+    const rows = [...globalCreativesData].sort((a, b) =>
+        new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-xs text-gray-500 italic">Nothing sent for approval yet.</td></tr>';
+        return;
+    }
+
+    body.innerHTML = rows.map(r => {
+        const count = adPreviewEntries(r).length;
+        let previewCell;
+        if (r.preview_error) {
+            previewCell = `<span class="text-xs text-red-400" title="${escapeAttr(r.preview_error)}"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Failed</span>`;
+        } else if (!count) {
+            previewCell = '<span class="text-xs text-gray-500"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i>Fetching&hellip;</span>';
+        } else {
+            previewCell = `<span class="text-xs text-gray-300">${count} placement${count === 1 ? '' : 's'}${adPreviewIsStale(r) ? ' <span class="text-amber-400">(stale)</span>' : ''}</span>`;
+        }
+
+        return `<tr class="hover:bg-white/5 transition">
+            <td class="p-2 text-xs text-gray-400">${escapeAttr(stripSlashEscapes(r.client_name || ''))}</td>
+            <td class="p-2 text-xs font-bold text-white">${escapeAttr(stripSlashEscapes(r.ad_name || ''))}
+                <span class="block text-[10px] text-gray-600 font-normal">${escapeAttr(r.ad_id || '')}</span></td>
+            <td class="p-2">${previewCell}</td>
+            <td class="p-2">${adStatusBadge(r.status)}</td>
+            <td class="p-2 text-xs text-gray-400 max-w-[220px]">${escapeAttr(stripSlashEscapes(r.feedback || '—'))}</td>
+            <td class="p-2 text-right whitespace-nowrap">
+                <button onclick="refreshAdPreviews('${r.id}')" title="Fetch the previews again" class="glass-icon-btn !w-8 !h-8 inline-flex"><i class="fa-solid fa-rotate text-xs"></i></button>
+                <button onclick="deleteAdApproval('${r.id}')" title="Remove from the list" class="glass-icon-btn !w-8 !h-8 inline-flex text-red-400"><i class="fa-solid fa-trash text-xs"></i></button>
+            </td>
+        </tr>`;
+    }).join('');
+};
+
+// --- Client side ---
+
+window.cpSetPlacement = function(approvalId, placement) {
+    const wrap = document.getElementById('ad-preview-' + approvalId);
+    if (!wrap) return;
+    wrap.dataset.placement = placement;
+    renderClientCreatives();
+};
+
+window.renderClientCreatives = function() {
+    const grid = document.getElementById('client-creatives-grid');
+    if (!grid) return;
+
+    const want = normalize(currentActiveClient);
+    const rows = globalCreativesData
+        .filter(r => normalize(r.client_name) === want)
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+    if (!rows.length) {
+        grid.innerHTML = '<p class="text-sm text-gray-500 italic px-2">Nothing waiting on you right now. New ads appear here before they run.</p>';
+        return;
+    }
+
+    grid.innerHTML = rows.map(r => {
+        const entries = adPreviewEntries(r);
+        const chosen = document.getElementById('ad-preview-' + r.id)?.dataset.placement;
+        const active = entries.find(([k]) => k === chosen) || entries[0];
+
+        let body;
+        if (!entries.length) {
+            body = `<div class="bg-black/20 border border-white/5 rounded-xl p-8 text-center text-xs text-gray-500">
+                        <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Preparing this ad &mdash; check back shortly.
+                    </div>`;
+        } else {
+            const tabs = entries.map(([k]) => {
+                const on = k === active[0];
+                return `<button onclick="cpSetPlacement('${r.id}', '${k}')" class="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border transition ${on ? 'text-white bg-white/10 border-white/20' : 'text-gray-500 border-transparent hover:text-gray-300'}">${escapeAttr(AD_PLACEMENT_LABELS[k] || k)}</button>`;
+            }).join('');
+
+            // Meta's preview iframe sizes itself; the wrapper just gives it room
+            body = `<div class="flex flex-wrap gap-1 mb-3">${tabs}</div>
+                    <div class="bg-white rounded-xl overflow-hidden border border-white/10">
+                        <iframe src="${escapeAttr(active[1])}" class="w-full" style="height:620px;border:0" scrolling="no"></iframe>
+                    </div>`;
+        }
+
+        const decided = r.status === 'approved' || r.status === 'changes_requested';
+        const actions = decided
+            ? `<p class="text-xs ${r.status === 'approved' ? 'text-emerald-400' : 'text-amber-400'} mt-4">
+                   <i class="fa-solid fa-circle-check mr-1"></i>
+                   ${r.status === 'approved' ? 'You approved this' : 'You asked for changes'}${r.reviewed_at ? ' on ' + new Date(r.reviewed_at).toLocaleDateString() : ''}.
+                   ${r.feedback ? '<span class="block text-gray-400 mt-1">&ldquo;' + escapeAttr(stripSlashEscapes(r.feedback)) + '&rdquo;</span>' : ''}
+               </p>`
+            : `<div class="mt-4 space-y-3">
+                   <textarea id="ad-feedback-${r.id}" rows="2" class="glass-input text-xs" placeholder="Anything you would change? (optional if approving)"></textarea>
+                   <div class="flex flex-wrap gap-2">
+                       <button onclick="decideAd('${r.id}', 'approved')" class="bg-emerald-600 hover:bg-emerald-500 text-white btn text-xs shadow-lg transition">
+                           <i class="fa-solid fa-check mr-2"></i> Approve
+                       </button>
+                       <button onclick="decideAd('${r.id}', 'changes_requested')" class="glass-pill text-xs !py-2 text-amber-400 !border-amber-500/30">
+                           <i class="fa-solid fa-pen mr-2"></i> Request changes
+                       </button>
+                   </div>
+               </div>`;
+
+        return `<div id="ad-preview-${r.id}" class="glass p-5" data-placement="${escapeAttr(active ? active[0] : '')}">
+                    <div class="flex items-start justify-between gap-3 mb-3">
+                        <h4 class="font-bold text-white">${escapeAttr(stripSlashEscapes(r.ad_name || 'Untitled ad'))}</h4>
+                        ${adStatusBadge(r.status)}
+                    </div>
+                    ${body}
+                    ${actions}
+                </div>`;
+    }).join('');
+};
+
+window.decideAd = async function(approvalId, status) {
+    const box = document.getElementById('ad-feedback-' + approvalId);
+    const feedback = box ? box.value.trim() : '';
+
+    // An approval needs no explanation; a rejection we can't act on is worse than none
+    if (status === 'changes_requested' && !feedback) {
+        alert('Tell us what you would like changed so we know what to fix.');
+        if (box) box.focus();
+        return;
+    }
+
+    const { error } = await supabaseClient.from('ad_approvals').update({
+        status,
+        feedback: feedback || null,
+        reviewed_by: clientEmail || null,
+        reviewed_at: new Date().toISOString()
+    }).eq('id', approvalId);
+
+    if (error) { alert('Could not save that: ' + error.message); return; }
+
+    const row = globalCreativesData.find(r => r.id === approvalId);
+    if (row) Object.assign(row, { status, feedback: feedback || null, reviewed_at: new Date().toISOString() });
+    renderClientCreatives();
+};
+
 window.renderCpProfile = function() {
     const client = currentActiveClient;
     const want = normalize(client);
@@ -4974,7 +5236,7 @@ window.deleteMilestoneSetting = async function(id) {
         };
         window.previewScoreWeighting = window.previewScoreWeighting || function() { console.log("Preview score stub"); };
         window.saveScoringWeights = window.saveScoringWeights || function() { console.log("Save scoring weights stub"); };
-        window.uploadCreative = window.uploadCreative || function(e) { e.preventDefault(); console.log("Upload creative stub"); };
+
 
 window.openEditReportModal = function(id) {
     // Find the correct report from the table data
