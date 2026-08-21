@@ -1110,10 +1110,24 @@ function adPreviewIsStale(row) {
     return age > AD_PREVIEW_STALE_HOURS;
 }
 
+// Meta returns the preview inside an HTML snippet, so the URL arrives with its query
+// string entity-escaped. Decoding here rather than in Make keeps the scenario to a
+// plain pattern match — and a URL that still had &amp; in it would break twice over,
+// since escapeAttr re-escapes the ampersand on the way into the iframe.
+function decodePreviewUrl(url) {
+    return String(url || '')
+        .replace(/&amp;/g, '&')
+        .replace(/&#0?39;/g, "'")
+        .replace(/&quot;/g, '"')
+        .trim();
+}
+
 function adPreviewEntries(row) {
     const previews = row?.previews;
     if (!previews || typeof previews !== 'object') return [];
-    return Object.entries(previews).filter(([, url]) => !!url);
+    return Object.entries(previews)
+        .filter(([, url]) => !!url)
+        .map(([k, url]) => [k, decodePreviewUrl(url)]);
 }
 
 function adStatusBadge(status) {
