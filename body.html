@@ -133,10 +133,11 @@
             #cp-view-dashboard > *, #cp-view-dashboard > .cp-split > * { margin-top: 0 !important; }
             .cp-split { display: contents; }
             .cp-order-tasks    { order: 1; }
-            .cp-order-charts   { order: 2; }
+            .cp-order-leads    { order: 2; }
             .cp-order-kpis     { order: 3; }
-            .cp-order-checkins { order: 4; }
-            .cp-order-rest     { order: 5; }
+            .cp-order-spend    { order: 4; }
+            .cp-order-checkins { order: 5; }
+            .cp-order-rest     { order: 6; }
         }
 
         /* Seven tiles at desktop size ran four rows deep on a phone before anything
@@ -1371,12 +1372,12 @@
                     <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Jobs Closed</p><h4 class="text-3xl font-bold text-emerald-400" id="stat-deals-count">0</h4></div>
                 </div>
 
-                <div class="cp-order-charts grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="glass p-6 min-h-[400px] flex flex-col">
+                <div class="cp-split grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="cp-order-leads glass p-6 min-h-[400px] flex flex-col">
                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 shrink-0">New Leads</h3>
                         <div class="flex-1 relative"><canvas id="leadsChart"></canvas></div>
                     </div>
-                    <div class="glass p-6 min-h-[400px] flex flex-col">
+                    <div class="cp-order-spend glass p-6 min-h-[400px] flex flex-col">
                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 shrink-0">Ad Spend vs Revenue</h3>
                         <div class="flex-1 relative"><canvas id="roiChart"></canvas></div>
                     </div>
