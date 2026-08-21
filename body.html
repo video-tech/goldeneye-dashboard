@@ -107,6 +107,20 @@
            so every closed drawer was casting onto the visible page. Five of them stacked
            read as a vignette down that side. Only cast it once the drawer is actually out. */
         .side-drawer:not(.open) { box-shadow: none; }
+
+        /* <main> is the scroll container (h-screen overflow-y-auto), so top:0 pins to the
+           top of the content area rather than the document. Sits under the drawers (100)
+           and modals (9999), above the page's own content. */
+        .sticky-toolbar {
+            position: sticky; top: 0; z-index: 30;
+            background: rgba(2, 6, 23, 0.88);
+            backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .light-mode .sticky-toolbar {
+            background: rgba(248, 250, 252, 0.92);
+            border-bottom-color: rgba(0, 0, 0, 0.08);
+        }
         .light-mode .side-drawer { background: rgba(255, 255, 255, 0.98); border-left: 1px solid rgba(0,0,0,0.1); }
         #drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         #drawer-overlay.show { opacity: 1; pointer-events: auto; }
@@ -423,39 +437,6 @@
                             </button>
                         </div>
                         <div class="flex items-center flex-wrap gap-3">
-                            <div class="flex items-center gap-1">
-                                <button onclick="cycleClient(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
-                                <div class="dropdown-container">
-                                    <div class="glass-pill !w-[180px] justify-between" onclick="toggleDropdown('c-account-menu')">
-                                        <span id="c-account-label" class="truncate flex-1 text-center pr-2">All Accounts</span>
-                                        <i class="fa-solid fa-chevron-down text-[10px] shrink-0"></i>
-                                    </div>
-                                    <div id="c-account-menu" class="custom-dropdown-menu max-h-[300px] overflow-y-auto"></div>
-                                </div>
-                                <button onclick="cycleClient(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
-                            </div>
-                            <div class="flex items-center gap-1">
-                                <button onclick="cycleDate(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
-                                <div class="dropdown-container flex gap-2">
-                                    <div class="glass-pill" onclick="toggleDropdown('c-date-menu')"><i class="fa-regular fa-calendar-range mr-2 text-yellow-400" id="c-date-icon"></i><span id="c-date-label">Last 7 Days</span><i class="fa-solid fa-chevron-down text-[10px] ml-3"></i></div>
-                                    <div id="c-date-menu" class="custom-dropdown-menu">
-                                        <div class="dropdown-item" onclick="cSelectDate('today', 'Today')">Today</div>
-                                        <div class="dropdown-item" onclick="cSelectDate('yesterday', 'Yesterday')">Yesterday</div>
-                                        <div class="dropdown-item" onclick="cSelectDate('last7', 'Last 7 Days')">Last 7 Days</div>
-                                        <div class="dropdown-item" onclick="cSelectDate('last30', 'Last 30 Days')">Last 30 Days</div>
-                                        <div class="dropdown-item" onclick="cSelectDate('max', 'Maximum Time')">Maximum Time</div>
-                                        <div class="p-3" onclick="event.stopPropagation()">
-                                            <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-3 px-1">Custom Range</p>
-                                            <div class="flex flex-col gap-2">
-                                                <input type="date" id="c-custom-start" class="glass-input !py-1.5 !px-3">
-                                                <input type="date" id="c-custom-end" class="glass-input !py-1.5 !px-3">
-                                                <button onclick="applyDateRange()" class="w-full bg-white text-black font-bold py-2 rounded-xl text-xs mt-2">Apply</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <button onclick="cycleDate(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
-                            </div>
                             <span id="c-stage-chip" class="hidden text-[11px] font-bold uppercase tracking-widest text-blue-300 bg-blue-500/15 border border-blue-500/30 px-2.5 py-1 rounded-full whitespace-nowrap"></span>
 
                             <div id="global-health-pill" class="glass-pill hidden cursor-pointer border border-white/10 hover:bg-white/10 transition" onclick="switchClientView('health')" title="Relationship health — click for detail">
@@ -495,6 +476,48 @@
                             </div>
                         </div>
                     </header>
+
+                    <!-- Pinned to the top of the scroll area. Cycling clients from halfway
+                         down a long report meant scrolling back up to reach the arrows, then
+                         back down to read the result. Only the two selectors travel: the
+                         action buttons stay put, so the bar is never more than two rows. -->
+                    <div class="sticky-toolbar -mx-4 md:-mx-8 px-4 md:px-8 py-3">
+                        <div class="flex items-center flex-wrap gap-3">
+                                <div class="flex items-center gap-1">
+                                    <button onclick="cycleClient(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                                    <div class="dropdown-container">
+                                        <div class="glass-pill !w-[180px] justify-between" onclick="toggleDropdown('c-account-menu')">
+                                            <span id="c-account-label" class="truncate flex-1 text-center pr-2">All Accounts</span>
+                                            <i class="fa-solid fa-chevron-down text-[10px] shrink-0"></i>
+                                        </div>
+                                        <div id="c-account-menu" class="custom-dropdown-menu max-h-[300px] overflow-y-auto"></div>
+                                    </div>
+                                    <button onclick="cycleClient(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <button onclick="cycleDate(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                                    <div class="dropdown-container flex gap-2">
+                                        <div class="glass-pill" onclick="toggleDropdown('c-date-menu')"><i class="fa-regular fa-calendar-range mr-2 text-yellow-400" id="c-date-icon"></i><span id="c-date-label">Last 7 Days</span><i class="fa-solid fa-chevron-down text-[10px] ml-3"></i></div>
+                                        <div id="c-date-menu" class="custom-dropdown-menu">
+                                            <div class="dropdown-item" onclick="cSelectDate('today', 'Today')">Today</div>
+                                            <div class="dropdown-item" onclick="cSelectDate('yesterday', 'Yesterday')">Yesterday</div>
+                                            <div class="dropdown-item" onclick="cSelectDate('last7', 'Last 7 Days')">Last 7 Days</div>
+                                            <div class="dropdown-item" onclick="cSelectDate('last30', 'Last 30 Days')">Last 30 Days</div>
+                                            <div class="dropdown-item" onclick="cSelectDate('max', 'Maximum Time')">Maximum Time</div>
+                                            <div class="p-3" onclick="event.stopPropagation()">
+                                                <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-3 px-1">Custom Range</p>
+                                                <div class="flex flex-col gap-2">
+                                                    <input type="date" id="c-custom-start" class="glass-input !py-1.5 !px-3">
+                                                    <input type="date" id="c-custom-end" class="glass-input !py-1.5 !px-3">
+                                                    <button onclick="applyDateRange()" class="w-full bg-white text-black font-bold py-2 rounded-xl text-xs mt-2">Apply</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button onclick="cycleDate(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+                                </div>
+                        </div>
+                    </div>
 
                     <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2 overflow-x-auto">
                         <button id="tab-btn-ads" onclick="switchClientView('ads')" class="whitespace-nowrap pb-3 text-sm font-bold text-yellow-400 border-b-2 border-yellow-400"><i class="fa-brands fa-facebook mr-2"></i>Ads Performance</button>
