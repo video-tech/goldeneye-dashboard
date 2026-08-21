@@ -8,6 +8,13 @@
         /* Scoped to phones on purpose: overflow-x on html/body breaks position:sticky,
            which the desktop sidebar uses, and that sidebar is hidden below md anyway. */
         @media (max-width: 767px) { html, body { overflow-x: hidden; } }
+
+        /* Paint the canvas itself, so pinching out shows more of the same colour rather
+           than white. Only <html> — the GHL containers above stay transparent, which is
+           what stops the dashboard fighting the page it's pasted into. #020617 is the
+           outer stop of the wrapper's radial gradient, so the seam is invisible. */
+        html { background-color: #020617 !important; }
+        html:has(#theme-wrapper.light-mode) { background-color: #e2e8f0 !important; }
         
         /* Unified Theme Wrapper */
         #theme-wrapper { background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #0f172a 40%, #020617 100%); color: white; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif; min-height: 100vh; width: 100%; max-width: 100%; box-sizing: border-box; transition: background 0.3s ease; overflow: hidden; }
