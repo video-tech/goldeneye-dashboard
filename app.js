@@ -1090,7 +1090,7 @@ window.obSaveTeam = async function(stepId, justMe) {
 // The preview URL carries a token, so Make fetches it server-side and writes the result
 // here — the browser never holds Meta credentials. Those URLs also expire, which is why
 // preview_fetched_at is recorded and stale rows can be re-requested.
-const AD_PREVIEW_HOOK = 'https://hook.us2.make.com/REPLACE_WITH_PREVIEW_WEBHOOK';
+const AD_PREVIEW_HOOK = 'https://hook.us2.make.com/2kan16ro46vkcxsubi90aaobv1ym1fxg';
 
 // Meta's placement identifiers, with names a person would use
 const AD_PLACEMENT_LABELS = {
