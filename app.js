@@ -1233,7 +1233,7 @@ window.submitAdForApproval = async function(e) {
 };
 
 window.refreshAdPreviews = async function(approvalId) {
-    const row = globalCreativesData.find(r => r.id === approvalId);
+    const row = globalCreativesData.find(r => String(r.id) === String(approvalId));
     if (!row) return;
     await requestAdPreviews(row.id, row.ad_id, row);
     // Make writes asynchronously, so give it a moment before re-reading
@@ -1390,7 +1390,7 @@ window.decideAd = async function(approvalId, status) {
 
     if (error) { alert('Could not save that: ' + error.message); return; }
 
-    const row = globalCreativesData.find(r => r.id === approvalId);
+    const row = globalCreativesData.find(r => String(r.id) === String(approvalId));
     if (row) Object.assign(row, { status, feedback: feedback || null, reviewed_at: new Date().toISOString() });
     renderClientCreatives();
 };
