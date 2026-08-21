@@ -1114,22 +1114,28 @@ function adPreviewIsStale(row) {
 // string entity-escaped. Decoding here rather than in Make keeps the scenario to a
 // plain pattern match — and a URL that still had &amp; in it would break twice over,
 // since escapeAttr re-escapes the ampersand on the way into the iframe.
+// Three shapes reach this: a bare URL, Meta's <iframe src="..."> snippet, or — when a
+// Make mapping points at the whole HTTP response rather than data[1].body — that snippet
+// JSON-encoded, where every quote arrives as \". Matching an optional backslash on both
+// sides covers all three, so a mis-mapped field degrades to a working preview instead of
+// handing the iframe a blob of JSON and rendering a 404.
 function decodePreviewUrl(url) {
     let out = String(url || '').trim();
 
-    // Meta answers with a whole <iframe src="..."> snippet rather than a bare URL.
-    // Pulling the src out here means the Make scenario can map the response body
-    // straight through — no parser module, no regex typed into a mapping field.
-    const match = out.match(/src=["']([^"']+)["']/i);
+    const match = out.match(/src=\\?["']([^"'\\]+)/i);
     if (match) out = match[1];
 
-    // Whichever form it arrived in, the query string is entity-escaped. Left alone the
-    // &amp; breaks twice, since escapeAttr re-escapes the ampersand into the iframe.
-    return out
+    // However it arrived, the query string is entity-escaped. Left alone the &amp; breaks
+    // twice, since escapeAttr re-escapes the ampersand on the way into the iframe.
+    out = out
         .replace(/&amp;/g, '&')
         .replace(/&#0?39;/g, "'")
         .replace(/&quot;/g, '"')
+        .replace(/\\\//g, '/')
         .trim();
+
+    // Anything that isn't a URL by now is a mapping mistake, not a preview
+    return /^https?:\/\//i.test(out) ? out : '';
 }
 
 // Meta sizes each placement differently — a feed preview is 335x450, a story is taller
@@ -1138,8 +1144,8 @@ function decodePreviewUrl(url) {
 // crops the ad or strands it in white space.
 function adPreviewBox(snippet) {
     const raw = String(snippet || '');
-    const width  = parseInt((raw.match(/width=["'](\d+)["']/i)  || [])[1], 10);
-    const height = parseInt((raw.match(/height=["'](\d+)["']/i) || [])[1], 10);
+    const width  = parseInt((raw.match(/width=\\?["'](\d+)/i)  || [])[1], 10);
+    const height = parseInt((raw.match(/height=\\?["'](\d+)/i) || [])[1], 10);
     return {
         url: decodePreviewUrl(raw),
         width:  Number.isFinite(width)  ? width  : 335,
@@ -1163,13 +1169,19 @@ function adPreviewEntries(row) {
 
     // Columns first, so the placement order matches the table above
     for (const [column, placement] of Object.entries(AD_PREVIEW_COLUMNS)) {
-        if (row[column]) found.set(placement, adPreviewBox(row[column]));
+        if (row[column]) {
+            const box = adPreviewBox(row[column]);
+            if (box.url) found.set(placement, box);
+        }
     }
 
     const previews = row.previews;
     if (previews && typeof previews === 'object') {
         for (const [placement, snippet] of Object.entries(previews)) {
-            if (snippet && !found.has(placement)) found.set(placement, adPreviewBox(snippet));
+            if (snippet && !found.has(placement)) {
+                const box = adPreviewBox(snippet);
+                if (box.url) found.set(placement, box);
+            }
         }
     }
 
