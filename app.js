@@ -1115,7 +1115,17 @@ function adPreviewIsStale(row) {
 // plain pattern match — and a URL that still had &amp; in it would break twice over,
 // since escapeAttr re-escapes the ampersand on the way into the iframe.
 function decodePreviewUrl(url) {
-    return String(url || '')
+    let out = String(url || '').trim();
+
+    // Meta answers with a whole <iframe src="..."> snippet rather than a bare URL.
+    // Pulling the src out here means the Make scenario can map the response body
+    // straight through — no parser module, no regex typed into a mapping field.
+    const match = out.match(/src=["']([^"']+)["']/i);
+    if (match) out = match[1];
+
+    // Whichever form it arrived in, the query string is entity-escaped. Left alone the
+    // &amp; breaks twice, since escapeAttr re-escapes the ampersand into the iframe.
+    return out
         .replace(/&amp;/g, '&')
         .replace(/&#0?39;/g, "'")
         .replace(/&quot;/g, '"')
