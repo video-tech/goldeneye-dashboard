@@ -1149,7 +1149,12 @@ function adStatusBadge(status) {
 // Ask Make to fetch this ad's previews. Fire-and-forget with no-cors: the scenario
 // writes straight to Supabase, and a Make outage must not undo the insert that already
 // succeeded — same reasoning as the Postgres webhooks.
-async function requestAdPreviews(approvalId, adId) {
+// Make's Supabase app has no plain update — it upserts, which Postgres runs as an
+// insert that falls back to update. That means the row still has to satisfy NOT NULL
+// on the way in, so the payload carries the identifying fields rather than just the id.
+// status is deliberately absent: re-fetching previews must never overwrite a decision
+// the client has already made.
+async function requestAdPreviews(approvalId, adId, row) {
     if (AD_PREVIEW_HOOK.includes('REPLACE_WITH')) {
         console.warn('Ad preview webhook not configured yet — row saved, previews will stay empty.');
         return;
@@ -1159,7 +1164,12 @@ async function requestAdPreviews(approvalId, adId) {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ approval_id: approvalId, ad_id: adId })
+            body: JSON.stringify({
+                approval_id: approvalId,
+                ad_id: adId,
+                client_name: row?.client_name || null,
+                ad_name: row?.ad_name || null
+            })
         });
     } catch (e) {
         console.error('Could not reach the preview webhook:', e);
@@ -1192,7 +1202,7 @@ window.submitAdForApproval = async function(e) {
         }).select().single();
         if (error) throw error;
 
-        await requestAdPreviews(data.id, adId);
+        await requestAdPreviews(data.id, adId, data);
 
         document.getElementById('creative-name').value = '';
         document.getElementById('creative-ad-id').value = '';
@@ -1210,7 +1220,7 @@ window.submitAdForApproval = async function(e) {
 window.refreshAdPreviews = async function(approvalId) {
     const row = globalCreativesData.find(r => r.id === approvalId);
     if (!row) return;
-    await requestAdPreviews(row.id, row.ad_id);
+    await requestAdPreviews(row.id, row.ad_id, row);
     // Make writes asynchronously, so give it a moment before re-reading
     setTimeout(async () => { await reloadAdApprovals(); renderAdminCreatives(); }, 4000);
 };
