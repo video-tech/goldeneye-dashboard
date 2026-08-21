@@ -1147,12 +1147,33 @@ function adPreviewBox(snippet) {
     };
 }
 
+// One column per placement rather than a JSON blob. Meta's snippet is full of double
+// quotes, so building JSON for it inside a Make mapping field means hand-escaping every
+// one — a plain text column takes the snippet as-is. The jsonb column is still read if
+// something writes it, so nothing that already worked stops working.
+const AD_PREVIEW_COLUMNS = {
+    preview_facebook_feed:   'MOBILE_FEED_STANDARD',
+    preview_instagram_feed:  'INSTAGRAM_STANDARD',
+    preview_instagram_story: 'INSTAGRAM_STORY'
+};
+
 function adPreviewEntries(row) {
-    const previews = row?.previews;
-    if (!previews || typeof previews !== 'object') return [];
-    return Object.entries(previews)
-        .filter(([, snippet]) => !!snippet)
-        .map(([k, snippet]) => [k, adPreviewBox(snippet)]);
+    if (!row) return [];
+    const found = new Map();
+
+    // Columns first, so the placement order matches the table above
+    for (const [column, placement] of Object.entries(AD_PREVIEW_COLUMNS)) {
+        if (row[column]) found.set(placement, adPreviewBox(row[column]));
+    }
+
+    const previews = row.previews;
+    if (previews && typeof previews === 'object') {
+        for (const [placement, snippet] of Object.entries(previews)) {
+            if (snippet && !found.has(placement)) found.set(placement, adPreviewBox(snippet));
+        }
+    }
+
+    return [...found.entries()];
 }
 
 function adStatusBadge(status) {
@@ -1216,8 +1237,7 @@ window.submitAdForApproval = async function(e) {
             client_name: client,
             ad_name: name,
             ad_id: adId,
-            status: 'pending',
-            previews: {}
+            status: 'pending'
         }).select().single();
         if (error) throw error;
 
