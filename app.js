@@ -579,7 +579,42 @@
             }, 50);
         }
 
+        // The date range only means something on views that actually plot one. Rather than
+        // keeping a copy per view, the single control moves to where it applies — and on
+        // the dashboard that's below the tasks, next to the first chart it filters.
+        // Desktop leaves it in the header, where there's room for it.
+        const CP_DATE_SLOTS = {
+            dashboard:   'cp-date-slot-dash',
+            seo:         'cp-date-slot-top',
+            leaderboard: 'cp-date-slot-top'
+        };
+
+        window.cpCurrentTab = 'dashboard';
+
+        window.placePortalDateControl = function(tabName) {
+            const ctrl = document.getElementById('portal-date-control');
+            if (!ctrl) return;
+
+            // Same breakpoint as the mobile running order in body.html
+            if (!window.matchMedia('(max-width: 1023px)').matches) {
+                const home = document.getElementById('portal-date-home');
+                if (home && ctrl.nextElementSibling !== home) home.parentElement.insertBefore(ctrl, home);
+                ctrl.classList.remove('hidden');
+                return;
+            }
+
+            const slot = document.getElementById(CP_DATE_SLOTS[tabName] || '');
+            if (!slot) { ctrl.classList.add('hidden'); return; }
+
+            if (ctrl.parentElement !== slot) slot.appendChild(ctrl);
+            ctrl.classList.remove('hidden');
+        };
+
+        // Rotating the phone crosses the breakpoint, so the control has to be re-placed
+        window.addEventListener('resize', () => placePortalDateControl(window.cpCurrentTab));
+
         function switchCpTab(tabName) {
+            window.cpCurrentTab = tabName;
     ['getstarted', 'knowledge', 'dashboard', 'tasks', 'support', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
@@ -615,6 +650,8 @@
     if(tabName === 'seo') renderCpSeo();
     if(tabName === 'leaderboard') renderAnonymizedLeaderboard();
     if(tabName === 'knowledge') renderKnowledgeBase();
+
+    placePortalDateControl(tabName);
 }
 
 // ================= CLIENT ONBOARDING (Get Started) =================

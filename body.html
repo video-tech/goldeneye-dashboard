@@ -117,6 +117,8 @@
             backdrop-filter: blur(14px);
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
+        #cp-date-slot-top:empty, #cp-date-slot-dash:empty { display: none; }
+
         @media (max-width: 480px) {
             #client-preview-banner span { font-size: 11px; }
             #client-preview-banner button { padding: 6px 10px; }
@@ -140,11 +142,12 @@
             #cp-view-dashboard > *, #cp-view-dashboard > .cp-split > * { margin-top: 0 !important; }
             .cp-split { display: contents; }
             .cp-order-tasks    { order: 1; }
-            .cp-order-leads    { order: 2; }
-            .cp-order-kpis     { order: 3; }
-            .cp-order-spend    { order: 4; }
-            .cp-order-checkins { order: 5; }
-            .cp-order-rest     { order: 6; }
+            .cp-order-date     { order: 2; }
+            .cp-order-leads    { order: 3; }
+            .cp-order-kpis     { order: 4; }
+            .cp-order-spend    { order: 5; }
+            .cp-order-checkins { order: 6; }
+            .cp-order-rest     { order: 7; }
         }
 
         /* Seven tiles at desktop size ran four rows deep on a phone before anything
@@ -1303,7 +1306,7 @@
     </select>
 </div>
                     <button onclick="openInviteModal()" class="glass-pill text-sm !border-purple-500/50 text-purple-400"><i class="fa-solid fa-user-plus mr-2"></i> Invite Team</button>
-                    <div class="relative dropdown-container">
+                    <div id="portal-date-control" class="relative dropdown-container">
                         <div class="glass-pill" onclick="toggleDropdown('portal-date-menu')">
                             <i class="fa-regular fa-calendar text-yellow-400"></i>
                             <span id="selected-date-label">Last 7 Days</span>
@@ -1322,6 +1325,7 @@
                             </div>
                         </div>
                     </div>
+                    <span id="portal-date-home" class="hidden"></span>
                     <button onclick="toggleTheme()" class="glass-pill !min-w-0 px-4"><i class="theme-icon fa-solid fa-moon"></i></button>
                     <button onclick="signOut()" class="glass-pill !min-w-0 px-4 text-red-400"><i class="fa-solid fa-sign-out"></i></button>
                 </div>
@@ -1343,6 +1347,11 @@
                 <button id="cp-tab-leaderboard" onclick="switchCpTab('leaderboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-trophy mr-2 text-yellow-500"></i> Network Ranks</button>
                 <button id="cp-tab-knowledge" onclick="switchCpTab('knowledge')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-graduation-cap mr-2"></i> Knowledge Base</button>
             </div>
+
+            <!-- The date control is moved into whichever of these applies to the current
+                 tab; on views where a range means nothing it's hidden instead. Empty slots
+                 collapse, so nothing here costs space when unused. -->
+            <div id="cp-date-slot-top" class="mb-4"></div>
 
             <div id="cp-view-getstarted" class="space-y-6 hidden">
                 <div class="glass p-6">
@@ -1369,6 +1378,7 @@
             </div>
 
             <div id="cp-view-dashboard" class="space-y-8 hidden">
+                <div id="cp-date-slot-dash" class="cp-order-date"></div>
                 <div class="cp-order-kpis grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4">
                     <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Marketing ROI</p><h4 class="text-3xl font-bold text-yellow-400" id="stat-roi">0.0x</h4></div>
                     <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">New Leads</p><h4 class="text-3xl font-bold text-green-400" id="stat-leads">0</h4></div>
