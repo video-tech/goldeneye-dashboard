@@ -20,6 +20,38 @@
         faLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
         document.head.appendChild(faLink);
 
+        // Home-screen install. GHL owns this page's <head>, so these go in from here —
+        // Safari reads the live DOM at the moment someone taps "Add to Home Screen", so
+        // injected tags count. Without them the icon is a screenshot and the app opens
+        // inside Safari with the address bar still showing.
+        const meta = (name, content) => {
+            const m = document.createElement('meta');
+            m.name = name; m.content = content;
+            document.head.appendChild(m);
+        };
+        meta('apple-mobile-web-app-capable', 'yes');
+        meta('mobile-web-app-capable', 'yes');
+        meta('apple-mobile-web-app-title', 'Golden Eye');
+        // Translucent lets the dashboard's own background run under the clock and
+        // battery, which is why the wrapper pads for the safe area in standalone.
+        meta('apple-mobile-web-app-status-bar-style', 'black-translucent');
+        meta('theme-color', '#020617');
+
+        const icon = document.createElement('link');
+        icon.rel = 'apple-touch-icon';
+        icon.href = 'https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png';
+        document.head.appendChild(icon);
+
+        // Without viewport-fit=cover a translucent status bar leaves a blank band
+        const vp = document.querySelector('meta[name="viewport"]');
+        if (vp && !/viewport-fit/.test(vp.content)) vp.content += ', viewport-fit=cover';
+
+        // navigator.standalone is the iOS signal; display-mode covers everyone else
+        if (window.navigator.standalone === true ||
+            window.matchMedia('(display-mode: standalone)').matches) {
+            document.documentElement.classList.add('pwa-standalone');
+        }
+
         const base = "https://video-tech.github.io/goldeneye-dashboard";
 
         // GitHub Pages serves these with Cache-Control: max-age=600, so without a

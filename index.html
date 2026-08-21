@@ -2,8 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Golden Eye</title>
+
+    <!--
+      Home-screen install. This origin can serve a real manifest, so Android gets a
+      proper standalone install here; the GHL-hosted copy can only do the Apple tags,
+      since a manifest has to sit on the same origin as the page that links it.
+    -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#020617">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Golden Eye">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -35,6 +48,12 @@
 
     <script>
         (async () => {
+            // body.html pads for the notch only when this class is present
+            if (window.navigator.standalone === true ||
+                window.matchMedia('(display-mode: standalone)').matches) {
+                document.documentElement.classList.add('pwa-standalone');
+            }
+
             const base = location.origin + location.pathname.replace(/\/[^\/]*$/, '');
 
             // GitHub Pages caches for 10 minutes; without this a fresh deploy looks like

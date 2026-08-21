@@ -23,6 +23,15 @@
             padding-left: 0 !important; padding-right: 0 !important;
         }
 
+        /* Installed to the home screen the status bar is translucent, so without this the
+           clock and battery sit on top of the header. Only applies in standalone — in a
+           normal browser tab Safari's own chrome already reserves the space. */
+        html.pwa-standalone #theme-wrapper {
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        html.pwa-standalone { background-color: #020617 !important; }
+
         html { background-color: #020617 !important; }
         html:has(#theme-wrapper.light-mode) { background-color: #e2e8f0 !important; }
         
