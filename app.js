@@ -1174,16 +1174,20 @@ async function requestAdPreviews(approvalId, adId, row) {
         console.warn('Ad preview webhook not configured yet — row saved, previews will stay empty.');
         return;
     }
+    // Form-encoded, not JSON. Make's webhooks send no CORS headers, so this has to be a
+    // no-cors request — and no-cors permits only a few Content-Type values. Setting
+    // application/json there gets silently downgraded to text/plain, which Make can't
+    // parse: the whole body arrives as a single field called "value" instead of named
+    // fields. URLSearchParams sends a Content-Type that survives, so Make sees the keys.
     try {
         await fetch(AD_PREVIEW_HOOK, {
             method: 'POST',
             mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                approval_id: approvalId,
-                ad_id: adId,
-                client_name: row?.client_name || null,
-                ad_name: row?.ad_name || null
+            body: new URLSearchParams({
+                approval_id: String(approvalId),
+                ad_id: String(adId),
+                client_name: row?.client_name || '',
+                ad_name: row?.ad_name || ''
             })
         });
     } catch (e) {
