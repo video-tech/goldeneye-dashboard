@@ -263,7 +263,71 @@
                             <p class="text-gray-400 mt-1">Real-time agency performance metrics.</p>
                         </div>
                     </header>
-<div class="glass p-6 mb-6 border-l-4 border-yellow-400 relative overflow-hidden flex flex-col">
+                    <!-- One feed instead of three panels. Client Tasks, Alerts & Approvals and
+                         HQ Tasks each showed a slice of the same table, so the same work could
+                         appear twice and the highest-priority item wasn't necessarily on screen.
+                         Everything outstanding now sorts together, labelled by who owns it. -->
+                    <div class="glass p-5 md:p-6 mb-6 flex flex-col max-h-[440px]">
+                        <div class="flex justify-between items-center mb-4 shrink-0">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                <i class="fa-solid fa-bell"></i> Notifications
+                                <span id="dash-feed-count" class="text-[10px] font-bold bg-white/10 text-gray-300 px-2 py-0.5 rounded-full normal-case tracking-normal"></span>
+                            </h3>
+                            <button onclick="navTo('tasks')" class="text-xs text-blue-400 hover:text-blue-300 hover:underline shrink-0">View All</button>
+                        </div>
+                        <div id="dash-feed" class="space-y-2 flex-1 overflow-y-auto pr-1"></div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                        <div class="glass p-6 lg:col-span-2 flex flex-col min-h-[350px]">
+                            <div class="flex justify-between items-start mb-4 relative z-10">
+                                <div>
+                                    <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-1">Monthly Recurring Revenue</h3>
+                                    <h2 class="text-4xl font-extrabold text-white" id="dash-mrr-total">$0</h2>
+                                </div>
+                                <a href="https://goldeneye.midasmediafirm.com/investor-dashboard-page" target="_blank" class="flex items-center gap-2 text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-full hover:bg-blue-500/30 transition cursor-pointer">
+                                    <div class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div> View All
+                                </a>
+                            </div>
+                            <div class="flex-1 relative w-full mt-2">
+                                <canvas id="dashMrrChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="glass p-6 lg:col-span-1 flex flex-col relative text-center">
+                            <div class="flex justify-between items-start mb-2 z-10 relative">
+                                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest text-left">Network Health</h3>
+                                <button onclick="navTo('clients'); setTimeout(() => switchClientView('health'), 50);" class="text-xs font-bold text-blue-400 hover:underline cursor-pointer">
+                                    View Breakdown
+                                </button>
+                            </div>
+                            <!-- The gauge draws a half doughnut, so a square canvas left its whole
+                                 bottom half blank — that was the empty space. A 2:1 box fits the
+                                 arc that's actually rendered, and the reading sits in the well. -->
+                            <div class="relative w-full max-w-[240px] mx-auto mt-2" style="aspect-ratio: 2 / 1;">
+                                <canvas id="dashAvgHealthGauge"></canvas>
+                                <div class="absolute inset-x-0 bottom-0 flex flex-col items-center">
+                                    <h2 class="text-4xl font-extrabold text-white leading-none" id="dash-avg-health-val">--</h2>
+                                    <p class="text-[10px] text-gray-400 mt-1 uppercase tracking-widest" id="dash-avg-health-lbl">Calculating</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass p-6 flex flex-col min-h-[300px]">
+                        <div class="flex justify-between items-center mb-6">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Active Roster</h3>
+                            <span class="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold" id="dash-client-count">0 Clients</span>
+                        </div>
+                        <div class="flex-1 overflow-x-auto">
+                            <table class="w-full text-left text-sm">
+                                <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                    <tr><th class="pb-3 font-semibold">Client Name</th><th class="pb-3 font-semibold text-center">Health</th><th class="pb-3 font-semibold text-right">MRR</th></tr>
+                                </thead>
+                                <tbody id="dash-client-list" class="divide-y divide-white/5"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="glass p-6 mt-6 border-l-4 border-yellow-400 relative overflow-hidden flex flex-col">
                         <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10 pointer-events-none"></div>
                         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10 relative">
                             <div class="flex items-center gap-3">
@@ -284,92 +348,6 @@
                         </div>
                         <div id="global-ai-output" class="hidden mt-6 pt-6 border-t border-white/10 z-10 relative text-sm text-gray-300 leading-relaxed">
                             </div>
-                    </div>
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                        
-                        <div class="glass p-6 flex flex-col h-[400px]">
-                            <div class="flex justify-between items-center mb-4 shrink-0">
-                                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Client Tasks</h3>
-                                <button onclick="navTo('tasks')" class="text-xs text-blue-400 hover:text-blue-300 hover:underline">View All</button>
-                            </div>
-                            <div id="dash-urgent-tasks" class="space-y-3 flex-1 overflow-y-auto pr-2"></div>
-                        </div>
-
-                        <div class="glass p-6 flex flex-col h-[400px]">
-                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 shrink-0">Alerts & Approvals</h3>
-                            <div class="space-y-4 flex-1 overflow-y-auto pr-2">
-                                <div id="dash-churn-flags-container" class="hidden">
-                                    <h4 class="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-2"><i class="fa-solid fa-triangle-exclamation"></i> Churn Risks</h4>
-                                    <div id="dash-churn-flags" class="space-y-2"></div>
-                                </div>
-                                <div id="dash-client-requests-container" class="hidden">
-                                    <h4 class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-2"><i class="fa-solid fa-bell"></i> Inbound Requests</h4>
-                                    <div id="dash-client-requests" class="space-y-2"></div>
-                                </div>
-                                <div id="dash-creative-alerts-container" class="hidden">
-                                    <h4 class="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-2"><i class="fa-solid fa-palette"></i> Creative Reviews</h4>
-                                    <div id="dash-creative-alerts" class="space-y-2"></div>
-                                </div>
-                                <div id="dash-no-notifications" class="text-center text-xs text-gray-500 italic mt-10">All clear! No alerts.</div>
-                                
-                            </div>
-                        </div>
-
-                        <div class="glass p-6 flex flex-col h-[400px]">
-                            <div class="flex justify-between items-center mb-4 shrink-0">
-                                <h3 class="text-sm font-bold text-yellow-400 uppercase tracking-widest"><i class="fa-solid fa-crown mr-1"></i> HQ Tasks</h3>
-                                <button onclick="goToClient('Midas Media')" class="text-xs text-yellow-400 hover:text-yellow-300 hover:underline">Our Board</button>
-                            </div>
-                            <div id="dash-internal-tasks" class="space-y-3 flex-1 overflow-y-auto pr-2"></div>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                        <div class="glass p-6 lg:col-span-2 flex flex-col min-h-[350px]">
-                            <div class="flex justify-between items-start mb-4 relative z-10">
-                                <div>
-                                    <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-1">Monthly Recurring Revenue</h3>
-                                    <h2 class="text-4xl font-extrabold text-white" id="dash-mrr-total">$0</h2>
-                                </div>
-                                <a href="https://goldeneye.midasmediafirm.com/investor-dashboard-page" target="_blank" class="flex items-center gap-2 text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-full hover:bg-blue-500/30 transition cursor-pointer">
-                                    <div class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div> View All
-                                </a>
-                            </div>
-                            <div class="flex-1 relative w-full mt-2">
-                                <canvas id="dashMrrChart"></canvas>
-                            </div>
-                        </div>
-
-                        <div class="glass p-6 lg:col-span-1 min-h-[350px] flex flex-col justify-between relative text-center">
-                            <div class="flex justify-between items-start mb-2 z-10 relative">
-                                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest text-left">Network Health</h3>
-                                <button onclick="navTo('clients'); setTimeout(() => switchClientView('health'), 50);" class="text-xs font-bold text-blue-400 hover:underline cursor-pointer">
-                                    View Breakdown
-                                </button>
-                            </div>
-                            <div class="relative w-full max-w-[220px] mx-auto mt-4 flex-1 flex justify-center items-center">
-                                <canvas id="dashAvgHealthGauge"></canvas>
-                                <div class="absolute inset-0 flex flex-col items-center justify-center mt-6">
-                                    <h2 class="text-5xl font-extrabold text-white" id="dash-avg-health-val">--</h2>
-                                    <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest" id="dash-avg-health-lbl">Calculating</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="glass p-6 flex flex-col min-h-[300px]">
-                        <div class="flex justify-between items-center mb-6">
-                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Active Roster</h3>
-                            <span class="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold" id="dash-client-count">0 Clients</span>
-                        </div>
-                        <div class="flex-1 overflow-x-auto">
-                            <table class="w-full text-left text-sm">
-                                <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
-                                    <tr><th class="pb-3 font-semibold">Client Name</th><th class="pb-3 font-semibold text-center">Health</th><th class="pb-3 font-semibold text-right">MRR</th></tr>
-                                </thead>
-                                <tbody id="dash-client-list" class="divide-y divide-white/5"></tbody>
-                            </table>
-                        </div>
                     </div>
                 </div>
 

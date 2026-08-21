@@ -2447,6 +2447,81 @@ window.submitClientRequest = async function() {
         
         function goToClient(clientName) { cSelectAccount(clientName, clientName); switchAppPage('clients'); }
 
+        // One list for everything outstanding. Client Tasks, Alerts & Approvals and HQ
+        // Tasks were three windows onto the same table — the same task could show up in
+        // two of them, and because each capped its own list the highest-priority item
+        // wasn't guaranteed to be on screen anywhere. Sorting the lot together fixes both.
+        //
+        // Contract renewal flags used to live here too and have been dropped: they fired
+        // off contract_end_date, which isn't maintained, so they were noise.
+        function dashFeedLabel(t) {
+            if (normalize(t.client) === normalize('Midas Media'))
+                return { text: 'HQ', cls: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/25' };
+            if (t.type === 'Client Request')
+                return { text: 'Request', cls: 'text-blue-400 bg-blue-500/10 border-blue-500/25' };
+            // The assignee is what makes a task the client's own — see the task board
+            if (String(t.assignee || '').trim().toLowerCase() === 'client')
+                return { text: 'Client', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25' };
+            return { text: 'For client', cls: 'text-gray-400 bg-white/5 border-white/10' };
+        }
+
+        function renderDashFeed() {
+            const list = document.getElementById('dash-feed');
+            const countEl = document.getElementById('dash-feed-count');
+            if (!list) return;
+
+            const open = globalTasksData.filter(t => t.status !== 'Complete');
+            const today = new Date().toISOString().split('T')[0];
+
+            // Overdue outranks score: a low-priority task that's already late is a
+            // commitment we've broken, which beats a high-scoring one that isn't due yet.
+            open.sort((a, b) => {
+                const aLate = a.due && a.due < today ? 1 : 0;
+                const bLate = b.due && b.due < today ? 1 : 0;
+                if (aLate !== bLate) return bLate - aLate;
+                return (b.score || 0) - (a.score || 0);
+            });
+
+            if (countEl) countEl.innerText = open.length ? String(open.length) : '';
+
+            if (!open.length) {
+                list.innerHTML = '<p class="text-center text-xs text-gray-500 italic mt-8">All clear &mdash; nothing outstanding.</p>';
+                return;
+            }
+
+            list.innerHTML = open.map(t => {
+                const label = dashFeedLabel(t);
+                const pC = t.score > 75 ? '#ef4444' : (t.score > 50 ? '#f59e0b' : '#3b82f6');
+
+                let due = '';
+                if (t.due && t.due < today) {
+                    due = '<span class="text-[10px] font-bold text-red-400 whitespace-nowrap"><i class="fa-solid fa-circle-exclamation mr-1"></i>Overdue</span>';
+                } else if (t.due === today) {
+                    due = '<span class="text-[10px] font-bold text-yellow-400 whitespace-nowrap"><i class="fa-solid fa-bell mr-1"></i>Today</span>';
+                }
+
+                // HQ items name the person; client work names the client
+                const who = label.text === 'HQ' ? (t.assignee || 'HQ Team') : t.client;
+
+                return `<div class="bg-black/20 p-3 rounded-xl border border-white/5 cursor-pointer hover:bg-white/5 transition"
+                             onclick="navTo('tasks'); setTimeout(() => openTaskDrawer(${t.id}), 100)">
+                            <div class="flex justify-between items-center gap-2 mb-1.5">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <span class="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border shrink-0 ${label.cls}">${label.text}</span>
+                                    <span class="text-[10px] text-gray-400 truncate">${escapeAttr(stripSlashEscapes(who || ''))}</span>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    ${due}
+                                    <div class="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded text-[9px] font-bold">
+                                        <div class="w-1.5 h-1.5 rounded-full" style="background:${pC};"></div>${t.score ?? 0}
+                                    </div>
+                                </div>
+                            </div>
+                            <p class="text-xs font-bold text-white leading-tight">${escapeAttr(stripSlashEscapes(t.title || ''))}</p>
+                        </div>`;
+            }).join('');
+        }
+
         // --- GOLDEN EYE (DASHBOARD) RENDERING ---
         function renderGoldenEye() {
             // Check for a cached audit first thing!
@@ -2462,60 +2537,7 @@ window.submitClientRequest = async function() {
             if (dashMrrChartInstance) dashMrrChartInstance.destroy();
             dashMrrChartInstance = new Chart(document.getElementById('dashMrrChart').getContext('2d'), { type: 'bar', data: { labels: mrrLabels, datasets: [{ label: 'Retainer ($)', data: mrrData, backgroundColor: 'rgba(59, 130, 246, 0.8)', borderRadius: 4, hoverBackgroundColor: '#60a5fa' }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } } });
 
-            const requestTasks = globalTasksData.filter(t => t.type === 'Client Request' && t.status !== 'Complete');
-            const reqContainer = document.getElementById('dash-client-requests-container');
-            if (requestTasks.length > 0) {
-                let reqHtml = '';
-                requestTasks.sort((a,b) => b.score - a.score).forEach(t => {
-                    reqHtml += `<div class="bg-blue-500/10 border border-blue-500/20 px-3 py-2 rounded-lg flex justify-between items-center cursor-pointer hover:bg-blue-500/20 transition" onclick="navTo('tasks'); setTimeout(() => openTaskDrawer(${t.id}), 100)"><div class="truncate pr-2"><span class="text-xs font-bold text-white block truncate">${t.title}</span><span class="text-[10px] text-blue-300">${t.client}</span></div><span class="text-[10px] font-bold text-blue-400 uppercase bg-blue-500/10 px-2 py-0.5 rounded shrink-0">New Request</span></div>`;
-                });
-                document.getElementById('dash-client-requests').innerHTML = reqHtml;
-                reqContainer.classList.remove('hidden');
-            } else {
-                reqContainer.classList.add('hidden');
-                document.getElementById('dash-client-requests').innerHTML = '';
-            }
-
-            const todayDate = new Date(); const thirtyDaysFromNow = new Date(); thirtyDaysFromNow.setDate(todayDate.getDate() + 30);
-            let churnHtml = ''; let churnCount = 0;
-            
-            activeClients.forEach(c => {
-                let isHealthRisk = c.current_score > 0 && c.current_score < 40; let isExpiring = false; let daysLeft = null;
-                if (c.contract_end_date) {
-                    const diffDays = Math.ceil((new Date(c.contract_end_date + 'T12:00:00').getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
-                    if (diffDays <= 30 && diffDays >= 0) { isExpiring = true; daysLeft = `${diffDays}d`; } else if (diffDays < 0) { isExpiring = true; daysLeft = `Expired`; }
-                }
-                if (isHealthRisk || isExpiring) {
-                    churnCount++; let reason = [];
-                    if (isHealthRisk) reason.push(`Health: ${c.current_score}`); if (isExpiring) reason.push(`Renews: ${daysLeft}`);
-                    churnHtml += `<div class="bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-lg flex justify-between items-center cursor-pointer hover:bg-red-500/20 transition" onclick="goToClient('${escapeHTML(c.name)}')"><span class="text-xs font-bold text-white truncate max-w-[120px]">${c.name}</span><span class="text-[10px] font-bold text-red-400 uppercase bg-red-500/10 px-2 py-0.5 rounded">${reason.join(' | ')}</span></div>`;
-                }
-            });
-
-            const churnContainer = document.getElementById('dash-churn-flags-container');
-            if (churnCount > 0) { document.getElementById('dash-churn-flags').innerHTML = churnHtml; churnContainer.classList.remove('hidden'); } else { churnContainer.classList.add('hidden'); document.getElementById('dash-churn-flags').innerHTML = ''; }
-
-            const incompleteTasks = globalTasksData.filter(t => t.status !== 'Complete'); incompleteTasks.sort((a,b) => b.score - a.score);
-            const topTasks = incompleteTasks.slice(0, 5); let tasksHtml = '';
-            if(topTasks.length === 0) tasksHtml = '<p class="text-xs text-gray-500">No pending tasks.</p>';
-            topTasks.forEach(t => {
-                let pC = t.score>75?'#ef4444':(t.score>50?'#f59e0b':'#3b82f6');
-                let dI='', dC='text-gray-500'; if(t.due){ const td=new Date().toISOString().split('T')[0]; if(t.due<td){ dI='<i class="fa-solid fa-circle-exclamation mr-1"></i>'; dC='text-red-400'; } else if(t.due===td){ dI='<i class="fa-solid fa-bell mr-1"></i>'; dC='text-yellow-400'; } }
-                tasksHtml += `<div class="bg-black/20 p-3 rounded-xl border border-white/5 cursor-pointer hover:bg-white/5 transition" onclick="navTo('tasks')"><div class="flex justify-between items-start mb-1"><span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-black/40 px-2 py-0.5 rounded truncate max-w-[120px] block" title="Open Dashboard">${t.client}</span><div class="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded text-[9px] font-bold"><div class="w-1.5 h-1.5 rounded-full" style="background:${pC};"></div>${t.score}</div></div><p class="text-xs font-bold text-white leading-tight">${t.title}</p></div>`;
-            });
-            document.getElementById('dash-urgent-tasks').innerHTML = tasksHtml;
-
-	    // --- POPULATE HQ TASKS ---
-            const hqTasks = globalTasksData.filter(t => normalize(t.client) === normalize('Midas Media') && t.status !== 'Complete');
-            hqTasks.sort((a,b) => b.score - a.score);
-            let hqHtml = '';
-            if(hqTasks.length === 0) hqHtml = '<p class="text-xs text-gray-500 italic mt-2 text-center">All caught up!</p>';
-            hqTasks.forEach(t => {
-                let pC = t.score>75?'#ef4444':(t.score>50?'#f59e0b':'#3b82f6');
-                let dI='', dC='text-gray-500'; if(t.due){ const td=new Date().toISOString().split('T')[0]; if(t.due<td){ dI='<i class="fa-solid fa-circle-exclamation mr-1"></i>'; dC='text-red-400'; } else if(t.due===td){ dI='<i class="fa-solid fa-bell mr-1"></i>'; dC='text-yellow-400'; } }
-                hqHtml += `<div class="bg-black/20 p-3 rounded-xl border border-white/5 cursor-pointer hover:bg-white/5 transition" onclick="navTo('tasks'); setTimeout(() => openTaskDrawer(${t.id}), 100)"><div class="flex justify-between items-start mb-1"><span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-black/40 px-2 py-0.5 rounded truncate block">${t.assignee || 'HQ Team'}</span><div class="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded text-[9px] font-bold"><div class="w-1.5 h-1.5 rounded-full" style="background:${pC};"></div>${t.score}</div></div><p class="text-xs font-bold text-white leading-tight">${t.title}</p></div>`;
-            });
-            document.getElementById('dash-internal-tasks').innerHTML = hqHtml;
+            renderDashFeed();
 
             let totalScore = 0; let scoredClients = 0;
             activeClients.forEach(c => { if(c.current_score > 0) { totalScore += c.current_score; scoredClients++; } });
@@ -2524,7 +2546,7 @@ window.submitClientRequest = async function() {
             
             let ac='#4ade80'; if(avgScore<70)ac='#facc15'; if(avgScore<40)ac='#ef4444'; if(avgScore===0)ac='#64748b';
             if (dashAvgHealthInstance) dashAvgHealthInstance.destroy();
-            dashAvgHealthInstance = new Chart(document.getElementById('dashAvgHealthGauge').getContext('2d'), { type: 'doughnut', data: { datasets: [{ data: [avgScore, 100 - avgScore], backgroundColor: [ac, isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)'], borderWidth: 0 }] }, options: { cutout: '85%', rotation: 270, circumference: 180, plugins: { legend: { display: false }, tooltip: {enabled: false} } } });
+            dashAvgHealthInstance = new Chart(document.getElementById('dashAvgHealthGauge').getContext('2d'), { type: 'doughnut', data: { datasets: [{ data: [avgScore, 100 - avgScore], backgroundColor: [ac, isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)'], borderWidth: 0 }] }, options: { maintainAspectRatio: false, cutout: '85%', rotation: 270, circumference: 180, plugins: { legend: { display: false }, tooltip: {enabled: false} } } });
 
             document.getElementById('dash-client-count').innerText = `${activeClients.length} Active`; let clientListHtml = '';
             activeClients.sort((a,b) => b.monthly_retainer - a.monthly_retainer).forEach(c => {
