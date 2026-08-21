@@ -13,6 +13,16 @@
            than white. Only <html> — the GHL containers above stay transparent, which is
            what stops the dashboard fighting the page it's pasted into. #020617 is the
            outer stop of the wrapper's radial gradient, so the seam is invisible. */
+        /* GHL's page builder wraps the custom-code block in .c-row / .c-section, and the
+           row carries 10px of horizontal padding. That inset the dashboard 10px from each
+           edge and left two strips of bare page down the sides — the bars on mobile. The
+           reset on the first line misses them because GHL's classes are .c-row/.c-column,
+           not the .row/.container it was written for. */
+        .c-section, .c-row, .c-column, .c-custom-code, .custom-code-container,
+        .c-wrapper > .inner, .vertical.inner {
+            padding-left: 0 !important; padding-right: 0 !important;
+        }
+
         html { background-color: #020617 !important; }
         html:has(#theme-wrapper.light-mode) { background-color: #e2e8f0 !important; }
         
