@@ -2465,6 +2465,16 @@ window.submitClientRequest = async function() {
             return { text: 'For client', cls: 'text-gray-400 bg-white/5 border-white/10' };
         }
 
+        // Ten is about a phone screen's worth. The rest are one tap away rather than a
+        // scroll away, so the top of the list stays the thing you actually see.
+        const DASH_FEED_CAP = 10;
+        let dashFeedExpanded = false;
+
+        window.toggleDashFeed = function() {
+            dashFeedExpanded = !dashFeedExpanded;
+            renderDashFeed();
+        };
+
         function renderDashFeed() {
             const list = document.getElementById('dash-feed');
             const countEl = document.getElementById('dash-feed-count');
@@ -2489,7 +2499,10 @@ window.submitClientRequest = async function() {
                 return;
             }
 
-            list.innerHTML = open.map(t => {
+            const shown = dashFeedExpanded ? open : open.slice(0, DASH_FEED_CAP);
+            const hidden = open.length - shown.length;
+
+            list.innerHTML = shown.map(t => {
                 const label = dashFeedLabel(t);
                 const pC = t.score > 75 ? '#ef4444' : (t.score > 50 ? '#f59e0b' : '#3b82f6');
 
@@ -2520,6 +2533,16 @@ window.submitClientRequest = async function() {
                             <p class="text-xs font-bold text-white leading-tight">${escapeAttr(stripSlashEscapes(t.title || ''))}</p>
                         </div>`;
             }).join('');
+
+            if (hidden > 0) {
+                list.innerHTML += `<button onclick="toggleDashFeed()" class="w-full text-center text-xs text-blue-400 hover:text-blue-300 hover:underline py-2 transition">
+                                       ${hidden} more <i class="fa-solid fa-chevron-down ml-1 text-[10px]"></i>
+                                   </button>`;
+            } else if (dashFeedExpanded && open.length > DASH_FEED_CAP) {
+                list.innerHTML += `<button onclick="toggleDashFeed()" class="w-full text-center text-xs text-gray-400 hover:text-white hover:underline py-2 transition">
+                                       Show less <i class="fa-solid fa-chevron-up ml-1 text-[10px]"></i>
+                                   </button>`;
+            }
         }
 
         // --- GOLDEN EYE (DASHBOARD) RENDERING ---
