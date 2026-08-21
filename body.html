@@ -121,6 +121,31 @@
             background: rgba(248, 250, 252, 0.92);
             border-bottom-color: rgba(0, 0, 0, 0.08);
         }
+
+        /* Client dashboard, phones and tablets only — desktop keeps its own layout.
+           Running order is what they have to do, then the trend, then the numbers
+           behind it. display:contents dissolves the check-ins/tasks grid so those two
+           can be ordered separately without losing the side-by-side pairing on desktop. */
+        @media (max-width: 1023px) {
+            #cp-view-dashboard { display: flex; flex-direction: column; gap: 2rem; }
+            /* space-y-8 and mt-8 order by DOM position, which no longer matches what's
+               on screen — the gap above handles spacing instead. */
+            #cp-view-dashboard > *, #cp-view-dashboard > .cp-split > * { margin-top: 0 !important; }
+            .cp-split { display: contents; }
+            .cp-order-tasks    { order: 1; }
+            .cp-order-charts   { order: 2; }
+            .cp-order-kpis     { order: 3; }
+            .cp-order-checkins { order: 4; }
+            .cp-order-rest     { order: 5; }
+        }
+
+        /* Seven tiles at desktop size ran four rows deep on a phone before anything
+           else was reachable. Same information, roughly half the height. */
+        @media (max-width: 767px) {
+            .cp-kpi { padding: 0.75rem !important; border-radius: 1rem; }
+            .cp-kpi p { font-size: 9px; margin-bottom: 0.125rem; letter-spacing: 0.08em; }
+            .cp-kpi h4 { font-size: 1.25rem; line-height: 1.6rem; }
+        }
         .light-mode .side-drawer { background: rgba(255, 255, 255, 0.98); border-left: 1px solid rgba(0,0,0,0.1); }
         #drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         #drawer-overlay.show { opacity: 1; pointer-events: auto; }
@@ -1336,34 +1361,40 @@
             </div>
 
             <div id="cp-view-dashboard" class="space-y-8 hidden">
-                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4">
-                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Marketing ROI</p><h4 class="text-3xl font-bold text-yellow-400" id="stat-roi">0.0x</h4></div>
-                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">New Leads</p><h4 class="text-3xl font-bold text-green-400" id="stat-leads">0</h4></div>
-                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CPL</p><h4 class="text-3xl font-bold text-purple-400" id="stat-cpl">$0</h4></div>
-                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Total Ad Spend</p><h4 class="text-3xl font-bold" id="stat-spend">$0</h4></div>
-                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Closed Revenue</p><h4 class="text-3xl font-bold text-blue-400" id="stat-revenue">$0</h4></div>
-                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Estimates Sent</p><h4 class="text-3xl font-bold text-gray-300" id="stat-est-count">0</h4></div>
-                    <div class="glass p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Jobs Closed</p><h4 class="text-3xl font-bold text-emerald-400" id="stat-deals-count">0</h4></div>
+                <div class="cp-order-kpis grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4">
+                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Marketing ROI</p><h4 class="text-3xl font-bold text-yellow-400" id="stat-roi">0.0x</h4></div>
+                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">New Leads</p><h4 class="text-3xl font-bold text-green-400" id="stat-leads">0</h4></div>
+                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CPL</p><h4 class="text-3xl font-bold text-purple-400" id="stat-cpl">$0</h4></div>
+                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Total Ad Spend</p><h4 class="text-3xl font-bold" id="stat-spend">$0</h4></div>
+                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Closed Revenue</p><h4 class="text-3xl font-bold text-blue-400" id="stat-revenue">$0</h4></div>
+                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Estimates Sent</p><h4 class="text-3xl font-bold text-gray-300" id="stat-est-count">0</h4></div>
+                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Jobs Closed</p><h4 class="text-3xl font-bold text-emerald-400" id="stat-deals-count">0</h4></div>
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="glass p-6 min-h-[400px]"><canvas id="leadsChart"></canvas></div>
-                    <div class="glass p-6 min-h-[400px]"><canvas id="roiChart"></canvas></div>
+                <div class="cp-order-charts grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="glass p-6 min-h-[400px] flex flex-col">
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 shrink-0">New Leads</h3>
+                        <div class="flex-1 relative"><canvas id="leadsChart"></canvas></div>
+                    </div>
+                    <div class="glass p-6 min-h-[400px] flex flex-col">
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 shrink-0">Ad Spend vs Revenue</h3>
+                        <div class="flex-1 relative"><canvas id="roiChart"></canvas></div>
+                    </div>
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="space-y-4">
+                <div class="cp-split grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="cp-order-checkins space-y-4">
                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest px-2">Your Weekly Check-ins</h3>
                         <div class="glass overflow-x-auto"><table class="history-table w-full"><thead><tr class="text-left text-[10px] text-gray-500"><th>Week of</th><th>Estimates</th><th>Closed</th><th class="text-right">Revenue</th></tr></thead><tbody id="job-history-body"></tbody></table></div>
                     </div>
 
-                    <div class="space-y-4">
+                    <div class="cp-order-tasks space-y-4">
                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest px-2">Active Project Tasks</h3>
                         <div id="portal-tasks-container" class="grid grid-cols-1 gap-4"></div>
                     </div>
                 </div>
                 
-                <div class="glass p-6 border-l-4 border-yellow-400 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-8">
+                <div class="cp-order-rest glass p-6 border-l-4 border-yellow-400 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-8">
                     <div class="flex-1">
                         <div class="flex items-center gap-2 mb-2">
                             <i class="fa-solid fa-sparkles text-yellow-400"></i>
@@ -1376,7 +1407,7 @@
                     </button>
                 </div>
 
-                <div class="glass p-6 border-l-4 border-blue-500 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-8">
+                <div class="cp-order-rest glass p-6 border-l-4 border-blue-500 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-8">
                     <div class="flex-1">
                         <div class="flex items-center gap-2 mb-2">
                             <i class="fa-solid fa-headset text-blue-400"></i>
