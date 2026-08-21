@@ -2666,6 +2666,9 @@ window.submitClientRequest = async function() {
             if (dashAvgHealthInstance) dashAvgHealthInstance.destroy();
             dashAvgHealthInstance = new Chart(document.getElementById('dashAvgHealthGauge').getContext('2d'), { type: 'doughnut', data: { datasets: [{ data: [avgScore, 100 - avgScore], backgroundColor: [ac, isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)'], borderWidth: 0 }] }, options: { maintainAspectRatio: false, cutout: '85%', rotation: 270, circumference: 180, plugins: { legend: { display: false }, tooltip: {enabled: false} } } });
 
+            const rosterAdd = document.getElementById('btn-add-client-roster');
+            if (rosterAdd) rosterAdd.classList.toggle('hidden', currentUserRole !== 'admin');
+
             document.getElementById('dash-client-count').innerText = `${activeClients.length} Active`; let clientListHtml = '';
             activeClients.sort((a,b) => b.monthly_retainer - a.monthly_retainer).forEach(c => {
                 const score = c.current_score; 
@@ -3114,6 +3117,12 @@ function filterAdsData() {
                         const el = document.getElementById(id);
                         if (el) el.classList.add('hidden');
                     });
+
+                    // Adding a client is an action on the roster, not on whoever happens
+                    // to be selected — it used to appear once you'd picked someone and
+                    // then linger here, which read as "add a client to this client".
+                    const addHere = document.getElementById('btn-add-client');
+                    if (addHere) addHere.classList.toggle('hidden', currentUserRole !== 'admin');
                 } else {
                     document.getElementById('client-specific-tasks-box').classList.remove('hidden');
                     document.getElementById('ai-box-container').classList.remove('hidden');
@@ -3123,9 +3132,8 @@ function filterAdsData() {
                     const tLbl = document.getElementById('c-task-client-name'); if(tLbl) tLbl.innerText = cSelectedAccount;
                     const aiLbl = document.getElementById('ai-client-lbl'); if (aiLbl) aiLbl.innerText = cSelectedAccount;
                     
-                    // Update and unhide Admin Controls
                     const addClientBtn = document.getElementById('btn-add-client');
-                    if (addClientBtn && currentUserRole === 'admin') addClientBtn.classList.remove('hidden');
+                    if (addClientBtn) addClientBtn.classList.add('hidden');
 
                     // The stage is state, so it reads as a chip beside the client's name.
                     // The button is now the action ("Move Stage"), not a label of where
