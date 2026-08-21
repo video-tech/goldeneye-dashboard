@@ -615,7 +615,7 @@
 
         function switchCpTab(tabName) {
             window.cpCurrentTab = tabName;
-    ['getstarted', 'knowledge', 'dashboard', 'tasks', 'support', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard'].forEach(t => {
+    ['getstarted', 'knowledge', 'dashboard', 'tasks', 'support', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard', 'profile'].forEach(t => {
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
         if(el) el.classList.add('hidden');
@@ -650,6 +650,7 @@
     if(tabName === 'seo') renderCpSeo();
     if(tabName === 'leaderboard') renderAnonymizedLeaderboard();
     if(tabName === 'knowledge') renderKnowledgeBase();
+    if(tabName === 'profile') renderCpProfile();
 
     placePortalDateControl(tabName);
 }
@@ -1075,6 +1076,63 @@ window.obSaveTeam = async function(stepId, justMe) {
         show("Couldn't save that — please try again.");
         console.error('Sales team save failed:', e);
     }
+};
+
+// Everything the client can see about their own account, plus the controls that used
+// to sit in the header. On a phone that header row was competing with the date control
+// for space, and sign-out in particular is a thing you look for deliberately rather than
+// something that needs to be one tap away on every screen.
+window.renderCpProfile = function() {
+    const client = currentActiveClient;
+    const want = normalize(client);
+    const row = globalClientsData.find(c => normalize(c.name) === want)
+             || portalClientRows.find(c => normalize(c.name) === want);
+
+    const nameEl = document.getElementById('cp-profile-name');
+    if (nameEl) nameEl.innerText = client || 'Your business';
+
+    const avatar = document.getElementById('cp-profile-avatar');
+    if (avatar) {
+        avatar.innerText = String(client || '?')
+            .split(/s+/).filter(Boolean).slice(0, 2)
+            .map(w => w[0]).join('').toUpperCase() || '?';
+    }
+
+    // client_email can hold several addresses; show the one they signed in with
+    const emailEl = document.getElementById('cp-profile-email');
+    if (emailEl) emailEl.innerText = clientEmail || row?.client_email || '—';
+
+    const stageEl = document.getElementById('cp-profile-stage');
+    if (stageEl) stageEl.innerText = row?.current_stage || 'Active';
+
+    const obEl = document.getElementById('cp-profile-onboarding');
+    if (obEl) {
+        const steps = activeOnboardingSteps();
+        if (!steps.length) {
+            obEl.innerText = 'Nothing outstanding';
+        } else {
+            const done = steps.filter(st => onboardingProgressFor(client, st.id)?.completed_at).length;
+            obEl.innerText = done === steps.length ? 'Complete' : `${done} of ${steps.length} done`;
+        }
+    }
+
+    const team = document.getElementById('cp-profile-team');
+    if (!team) return;
+
+    const mine = globalContactsData.filter(c => normalize(c.client_name) === want && c.active !== false);
+    if (!mine.length) {
+        team.innerHTML = '<p class="text-xs text-gray-500 italic">No one added yet. Invite a teammate so they get the weekly check-in too.</p>';
+        return;
+    }
+
+    team.innerHTML = mine.map(c => {
+        const d = String(c.phone || '').replace(/D/g, '');
+        const phone = d.length === 10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : (c.phone || '');
+        return `<div class="flex items-center justify-between gap-3 bg-black/20 border border-white/5 rounded-xl px-3 py-2">
+                    <span class="text-sm font-bold text-white truncate">${escapeAttr(stripSlashEscapes(c.contact_name || 'Unnamed'))}</span>
+                    <span class="text-xs text-gray-400 shrink-0">${escapeAttr(phone)}</span>
+                </div>`;
+    }).join('');
 };
 
 window.renderGetStarted = function() {

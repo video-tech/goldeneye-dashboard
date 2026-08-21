@@ -1305,7 +1305,6 @@
     <select id="admin-client-list" onchange="portalSwitchClient(this.value)" class="bg-transparent text-xs border-none outline-none text-white cursor-pointer">
     </select>
 </div>
-                    <button onclick="openInviteModal()" class="glass-pill text-sm !border-purple-500/50 text-purple-400"><i class="fa-solid fa-user-plus mr-2"></i> Invite Team</button>
                     <div id="portal-date-control" class="relative dropdown-container">
                         <div class="glass-pill" onclick="toggleDropdown('portal-date-menu')">
                             <i class="fa-regular fa-calendar text-yellow-400"></i>
@@ -1326,8 +1325,6 @@
                         </div>
                     </div>
                     <span id="portal-date-home" class="hidden"></span>
-                    <button onclick="toggleTheme()" class="glass-pill !min-w-0 px-4"><i class="theme-icon fa-solid fa-moon"></i></button>
-                    <button onclick="signOut()" class="glass-pill !min-w-0 px-4 text-red-400"><i class="fa-solid fa-sign-out"></i></button>
                 </div>
             </header>
 
@@ -1346,6 +1343,7 @@
                 <button id="cp-tab-seo" onclick="switchCpTab('seo')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-brands fa-google mr-2"></i> Organic SEO</button>
                 <button id="cp-tab-leaderboard" onclick="switchCpTab('leaderboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-trophy mr-2 text-yellow-500"></i> Network Ranks</button>
                 <button id="cp-tab-knowledge" onclick="switchCpTab('knowledge')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-graduation-cap mr-2"></i> Knowledge Base</button>
+                <button id="cp-tab-profile" onclick="switchCpTab('profile')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-circle-user mr-2"></i> Profile</button>
             </div>
 
             <!-- The date control is moved into whichever of these applies to the current
@@ -1558,6 +1556,44 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" id="client-creatives-grid">
                     </div>
+            </div>
+
+            <div id="cp-view-profile" class="space-y-6 hidden max-w-2xl">
+                <div class="glass p-6">
+                    <div class="flex items-center gap-4 mb-6">
+                        <div id="cp-profile-avatar" class="w-14 h-14 rounded-2xl bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-xl font-bold shrink-0">--</div>
+                        <div class="min-w-0">
+                            <h3 id="cp-profile-name" class="text-xl font-bold text-white truncate">Your business</h3>
+                            <p id="cp-profile-email" class="text-sm text-gray-400 truncate">&mdash;</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-black/20 border border-white/5 rounded-xl p-3">
+                            <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-1">Current stage</p>
+                            <p id="cp-profile-stage" class="text-sm font-bold text-white">&mdash;</p>
+                        </div>
+                        <div class="bg-black/20 border border-white/5 rounded-xl p-3">
+                            <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-1">Setup</p>
+                            <p id="cp-profile-onboarding" class="text-sm font-bold text-white">&mdash;</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass p-6">
+                    <div class="flex justify-between items-center gap-3 mb-4">
+                        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Your team</h3>
+                        <button onclick="openInviteModal()" class="glass-pill text-xs !border-purple-500/50 text-purple-400 shrink-0"><i class="fa-solid fa-user-plus mr-2"></i> Invite</button>
+                    </div>
+                    <div id="cp-profile-team" class="space-y-2"></div>
+                </div>
+
+                <div class="glass p-6">
+                    <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Account</h3>
+                    <div class="flex flex-wrap gap-3">
+                        <button onclick="toggleTheme()" class="glass-pill text-sm"><i class="theme-icon fa-solid fa-moon mr-2"></i> Switch theme</button>
+                        <button onclick="signOut()" class="glass-pill text-sm text-red-400 !border-red-500/30"><i class="fa-solid fa-sign-out mr-2"></i> Sign out</button>
+                    </div>
+                </div>
             </div>
 
             <div id="cp-view-settings" class="space-y-8 hidden glass p-6 max-w-2xl">
