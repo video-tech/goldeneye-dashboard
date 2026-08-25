@@ -48,6 +48,11 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
 7. **Report draft to Gmail** — the "Draft" button on a saved report (`sendSavedReportToMake`,
    app.js) POSTs `{client, subject, full_email_html, to_email[]}` to
    `hook.us2.make.com/apq7ghcun1hza8h5ayw1xysy81nddh8v`, which drafts the email
+8. **Ad previews** — `submitAdForApproval` / `refreshAdPreviews` POST
+   `{approval_id, ad_id, client_name, ad_name}` to
+   `hook.us2.make.com/2kan16ro46vkcxsubi90aaobv1ym1fxg` → three HTTP calls to
+   `graph.facebook.com/v21.0/{ad_id}/previews` (one per placement) → upsert
+   `ad_approvals`. See **Ad approvals** below
 
 ## Database objects we added
 
@@ -101,6 +106,37 @@ Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5�
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of
 those. Encode H.264 (**not HEVC** — Chrome/Firefox won't reliably play it), `+faststart`.
 
+## Ad approvals
+
+Clients approve the **finished ad**, not a loose creative. You build the ad in Meta and
+leave it paused, paste its Ad ID into the Creatives page, and Make fetches Meta's own
+preview per placement. Nothing in Golden Eye ever changes an ad's status — launching
+stays in Ads Manager, deliberately.
+
+Why previews rather than a link to the ad: most ads are **dark posts**, unpublished page
+posts with no public URL at all. Where an ad *is* built from a published post, the
+permalink shows the organic post without the headline or CTA — the client would be
+reviewing something that isn't the ad.
+
+- `ad_approvals` columns: `ad_id`, `ad_name`, `preview_facebook_feed`,
+  `preview_instagram_feed`, `preview_instagram_story`, `preview_fetched_at`,
+  `preview_error`, `status`, `feedback`, `reviewed_by`, `reviewed_at`. A legacy
+  `previews` jsonb is still read if populated; `file_url` is a dead column from the
+  abandoned upload design.
+- **One text column per placement, not JSON.** Meta's snippet is full of double quotes,
+  so building JSON inside a Make mapping field means hand-escaping every one — and a
+  single miss makes the whole jsonb value unparseable with nothing to say why.
+- `decodePreviewUrl` accepts a bare URL, Meta's `<iframe src="...">` snippet, or that
+  snippet JSON-encoded (what you get when a Make field maps the whole response instead
+  of `data[1].body`). `adPreviewBox` reads the width/height Meta sends, because
+  placements differ and the iframe's contents don't reflow.
+- The Meta token lives in Make only — same rule as `service_role`. The token in the
+  *preview* URL is a different, weaker one that only renders that preview, but it is
+  visible to a client who opens DevTools.
+- Previews expire; anything over 20 hours shows as stale with a refresh button.
+- `ad_approvals.id` is **bigint**, so rows carry numbers while `onclick` handlers pass
+  strings. Compare with `String()` on both sides.
+
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -136,6 +172,49 @@ which the `team` onboarding step writes to.
   `theme-wrapper` at startup. Anything new that must show on both sides needs the same.
 - Browser autofill can overwrite the email the portal prefills into GHL embeds, which
   makes the webhook resolve to the wrong client or none.
+- **A GHL form question bound to the standard Email field rewrites the contact's
+  identity.** Asking for a "personal email" on form 1-B changed the contact from
+  `info@` to `nick@`, and every webhook after that resolved to a client that didn't
+  exist. Ask for identity **once**, on the first form; later forms carry it in a
+  **hidden** field prefilled from `?email=` — hidden fields are also immune to autofill.
+  Anything else the client types twice can disagree, and GHL resolves that by
+  overwriting rather than flagging.
+- **A hidden field you don't prefill submits empty**, which can blank the contact's
+  stored value. `prefillFormUrl` only sends `email`, so a hidden phone would wipe the
+  number the check-in reminders match on.
+- **Turn GHL "sticky contact" off.** It's a second, cookie-based source of truth for the
+  same fields, it can beat the URL prefill, and third-party iframe partitioning makes it
+  inconsistent across browsers.
+- **`mode: 'no-cors'` silently downgrades Content-Type.** Make's webhooks send no CORS
+  headers so browser posts must be no-cors — which permits only a few Content-Type
+  values. `application/json` becomes `text/plain` and Make delivers the whole body as a
+  single field called `value`. Post `URLSearchParams` instead.
+- **Make's Supabase app has no plain update, only upsert** — which Postgres runs as an
+  insert that falls back to update, so the row must still satisfy `NOT NULL`. Send the
+  identifying columns, not just the id. Leave client-owned columns (`status`, `feedback`)
+  unmapped or a refresh overwrites a decision the client already made.
+- **An id selector beats every Tailwind utility.** `#cp-view-dashboard { display: flex }`
+  outranks `.hidden`, so the portal dashboard rendered on every tab. Keep layout CSS
+  class-based, or guard with `:not(.hidden)`.
+
+## Mobile
+
+Installable to the home screen. The Apple meta tags are injected by the loader in
+`goldeneye.html` because GHL owns that page's `<head>` — **so a change there means
+re-pasting the block into GHL**, unlike `body.html`/`app.js` which are fetched fresh.
+A manifest only counts on its own origin, so Android installs properly from the
+GitHub Pages copy but not from the GHL domain.
+
+- iOS snapshots the icon and title at install time; delete and re-add to see changes.
+- An installed PWA gets its own storage sandbox, so everyone signs in once more there.
+- Status bar is `black-translucent`, hence `env(safe-area-inset-*)` padding on
+  `#theme-wrapper` and on the client-preview banner.
+- GHL's builder wraps the block in `.c-row`, which carries 10px of horizontal padding —
+  that showed as white bars down both edges on a phone. The reset on line 1 of
+  `body.html` was written against `.row`/`.container` and never matched it.
+- Client portal ordering on phones is CSS `order` inside a media query, not DOM order, so
+  desktop is untouched. `display: contents` dissolves the two-column grids so their
+  children can be ordered individually.
 
 ## Known gaps
 
@@ -147,5 +226,11 @@ which the `team` onboarding step writes to.
   Cloudflare error
 - Deleting an onboarding step that has progress rows assumes the FK cascades; untested
 - Pipeline tab hidden pending a rebuild
+- Ad approvals never tested end to end with a client actually approving; pending
+  approvals aren't surfaced in the dashboard notification feed yet
+- The onboarding form chain has broken twice on email identity and hasn't been
+  re-tested since the hidden-field fix
+- `ad_approvals.file_url` is a dead NOT NULL column, dropped to nullable rather than
+  removed
 - `architecture.txt` is the original doc and is substantially out of date — it predates
   onboarding, check-ins, reports, triggers, cron and every Make scenario
