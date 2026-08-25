@@ -1407,6 +1407,8 @@ window.renderClientCreatives = function() {
 };
 
 window.decideAd = async function(approvalId, status) {
+    if (previewBlocksWrite('approving an ad')) return;
+
     const box = document.getElementById('ad-feedback-' + approvalId);
     const feedback = box ? box.value.trim() : '';
 
@@ -1665,6 +1667,9 @@ window.obVideoProgress = function(stepId) {
 };
 
 async function saveOnboardingProgress(stepId, fields) {
+    // Silent rather than an alert — timeupdate fires this repeatedly during playback
+    if (window.isClientPreview) return null;
+
     const row = {
         client_name: currentActiveClient,
         step_id: stepId,
@@ -1700,6 +1705,7 @@ function obHelpAlreadyRequested(stepId) {
 }
 
 window.obRequestHelp = async function(stepId) {
+    if (previewBlocksWrite('booking a call')) return;
     if (obHelpAlreadyRequested(stepId)) return;
 
     const due = new Date();
@@ -1727,6 +1733,10 @@ window.obRequestHelp = async function(stepId) {
 };
 
 window.obCompleteStep = async function(stepId) {
+    // saveOnboardingProgress already refuses in preview, but silently — this is a button,
+    // so it needs to say why nothing happened rather than just not responding.
+    if (previewBlocksWrite('marking a step done')) return;
+
     const step = globalOnboardingSteps.find(s => s.id === stepId);
     if (!step) return;
     if (onboardingProgressFor(currentActiveClient, stepId)?.completed_at) return;
@@ -2166,6 +2176,7 @@ window.renderWeeklyCheckin = function() {
 };
 
 window.submitWeeklyCheckin = async function(suffix) {
+    if (previewBlocksWrite('submitting a check-in')) return;
     const btn = document.getElementById(`wc-submit-${suffix}`);
     const err = document.getElementById(`wc-error-${suffix}`);
     const num = id => {
@@ -6731,9 +6742,23 @@ window.saveClientEdits = async function(e) {
 // out or opening an incognito window. Read-only in spirit: it reuses the real portal
 // code path, so anything submitted here would save for real — it's for looking, not
 // for entering data on a client's behalf.
+// Preview mode was only ever inferred from the banner's display style, so nothing that
+// writes could tell it was looking at someone else's portal. Watching an onboarding video
+// while previewing recorded watch progress against the client, and an auto-completing
+// step would have ticked itself off on their behalf.
+window.isClientPreview = false;
+
+// Guards any write that would be attributed to the client. Returns true when blocked.
+window.previewBlocksWrite = function(what) {
+    if (!window.isClientPreview) return false;
+    alert("You're previewing this client's portal, so " + what + " is disabled — it would be recorded as though they did it.");
+    return true;
+};
+
 window.previewAsClient = async function() {
     if (currentUserRole !== 'admin') return;
     if (cSelectedAccount === "ALL") { alert("Pick a specific client first."); return; }
+    window.isClientPreview = true;
 
     const btn = document.getElementById('btn-preview-client');
     const originalHTML = btn ? btn.innerHTML : '';
@@ -6761,6 +6786,7 @@ window.previewAsClient = async function() {
 };
 
 window.exitClientPreview = async function() {
+    window.isClientPreview = false;
     // Leaving the portal doesn't go through switchCpTab, so stop the poll explicitly
     if (typeof stopOnboardingPoll === 'function') stopOnboardingPoll();
     document.getElementById('client-preview-banner').style.display = 'none';
