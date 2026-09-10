@@ -103,6 +103,30 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   `account_name`, and by an actual client login afterward. The two pre-existing
   email-based policies (`Agency Owner Master Access`, `Users can only see their own
   data`) were left in place as an additional path, untouched.
+- **`weekly_reports` policy, fixed 2026-09-10 — worse than the `daily_reports` gap, not
+  just the same shape of it.** `Allow authenticated users to manage reports` was `cmd =
+  ALL, USING (true)` — covering INSERT/UPDATE/DELETE as well as SELECT, so any
+  authenticated user, client or not, could edit or delete **any** client's saved report,
+  not only read it. The existing `client reads own reports` SELECT policy
+  (`user_has_client_access(client_name)`) was already correct but dead under RLS's OR
+  semantics for the same reason as `daily_reports`' policies were. Fixed by dropping the
+  blanket policy and replacing it with an admin-only `ALL` policy — needed because the
+  dashboard's Generate/Edit/Delete Report buttons run on this same table with no other
+  write path, so removing the blanket policy without this would have broken them for
+  admins too, not only closed the hole for clients:
+  ```sql
+  create policy "Admins manage all reports"
+  on weekly_reports for all
+  using (current_user_is_admin())
+  with check (current_user_is_admin());
+  ```
+  Clients keep read-only access via the pre-existing SELECT policy; no client-side code
+  ever wrote to this table, so no client write policy was added. Both DROP and CREATE
+  run in one transaction, so a failure can't leave the table with the blanket policy
+  gone and nothing yet in its place. Verified the same two ways: a rolled-back
+  transaction simulating a real client's JWT confirmed reads are scoped to their own
+  rows and a write against another client's row affects 0 rows, and the admin
+  Generate/Edit/Delete flow was confirmed still working from the live dashboard.
 
 All outbound HTTP from Postgres uses `pg_net` wrapped in an exception block, so a Make
 outage can never roll back a client's transaction.
