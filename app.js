@@ -4403,18 +4403,35 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             most concrete, specific material this period — do not default to only ad metrics
             every time. A report with nothing specific in it is a sign the data above went unused.
 
+            NO GENERIC FILLER — this is what makes reports blur together week to week:
+            Phrases like "we'll continue to analyze trends," "adjust our strategy accordingly,"
+            "monitor performance closely," or any other sentence that could be pasted into any
+            report regardless of what happened are banned outright. A closing priority or action
+            step must name something SPECIFIC: an actual open task from the list above (with its
+            OVERDUE/DUE SOON/DUE label if it has one), an actual metric that moved and what will
+            be done about it, or a specific manual note. If none of those give you something
+            concrete — no open tasks, no meaningful shift in the numbers, no manual notes — do
+            not manufacture a closing action step at all. A report that ends after stating the
+            numbers plainly is completely fine; it is far better than a sentence that says nothing.
+
             RULES FOR "email_summary":
             - Tone: Casual, completely honest, analytical, and direct. Do not use corporate fluff.
             - Format: Start directly with "Hi team," (Do NOT output a "Subject:" line).
             - Content: State the spend and leads upfront. Explain the "why" behind the numbers
               using the computed change and the work lists above — never a guess. If manual
-              notes were provided, use them. State the immediate priority/action step.
+              notes were provided, use them. Close with a specific priority or action step only
+              when the data actually supports one — see NO GENERIC FILLER above. Otherwise end
+              on the numbers; do not force a closing sentence that isn't there.
 
             RULES FOR "html_report":
             - Output a complete, copy-safe HTML string based on the data and notes.
             - Every trend pill uses the COMPUTED CHANGE percentage given above verbatim (e.g.
               "+12% vs last period"), never a vague label like "Severe Drop" — and reads
               "No prior data" rather than inventing a comparison when none was given.
+            - The "What We're Improving" section is the one exception to "use this exact
+              structure": per NO GENERIC FILLER above, omit that entire <tr>...</tr> block from
+              the HTML if there is no specific action step this period. A report with three
+              sections some weeks and two others is expected, not a mistake.
             - Use this EXACT structure and inline styling, but replace the placeholders, highlights, and improvements to match this week's reality:
 
             <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background-color: #f5f5f7;">
@@ -4435,10 +4452,13 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             [GENERATE 2-3 DIV BLOCKS HERE. Each block format:]
             <div style="padding: 20px 0; border-bottom: 1px solid #e8e8ed;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Explanation]</div></div>
             </td></tr>
+            [OPTIONAL — omit this entire next <tr> block if there is no specific action step this period, per NO GENERIC FILLER above:]
             <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">What We're Improving</h2>
             <div style="padding: 20px 0;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Action Plan Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Action Plan Details]</div></div>
-            </td></tr></table></td></tr></table></body></html>
+            </td></tr>
+            [END OPTIONAL BLOCK]
+            </table></td></tr></table></body></html>
             `;
 
             try { 
