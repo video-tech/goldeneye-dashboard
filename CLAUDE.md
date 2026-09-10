@@ -301,6 +301,61 @@ Consequences of that, worth knowing before editing:
   function, which is on GPT-4o. Only the audit is on `gpt-5.6-sol`, so the four AI
   features share a vendor but not a model.
 
+## Client work summary
+
+A second daily AI feature, separate from the morning audit — `supabase/functions/client-summary/`
+runs once a day per active client, reads their `tasks` (completed in the trailing 7 days, plus
+currently open), and asks the model for a short plain-text recap. That goes into
+`client_work_summaries`, read directly by the client's own browser session, and replaces the old
+"AI Performance Summary" button (GPT-4o, `finalStats`, two sentences about spend and leads) on the
+Dashboard tab, and shows by default at the top of the Tasks tab too.
+
+**This is about the work, not the numbers — the prompt explicitly forbids the model from
+mentioning spend, leads, or CPL.** Those already have KPI tiles of their own; conflating the two
+risked the model restating a number slightly differently than the tile beside it.
+
+**The model only ever sees task title, status, type, and due date — never `notes`.** That field is
+staff-facing and can carry commentary never meant for the client reading it back in their own
+portal. This is the same reasoning as the morning audit's driver logic never touching raw ad
+creative, just at the content-safety end of the spectrum rather than the accuracy end.
+
+**Rendered with `innerText`, not `innerHTML`, deliberately.** The morning audit's HTML goes into an
+admin-only page; this reaches a client's browser directly, so nothing the model writes should ever
+be capable of being interpreted as markup.
+
+**No live model call from the browser, ever.** The cached daily narrative covers the default
+7-day view on both surfaces. When a client picks a different date range on the Tasks tab,
+`buildTasksRecap()` swaps in a plain factual recap computed client-side from data already in
+`globalTasksData` — no network call, no cost, no wait. The daily cron run is the only thing that
+ever spends a token on this feature.
+
+**"Still working on" has no honest date-scoped meaning.** Tasks carry current status only, no
+history — there's no record of what was open on some past date, only what's open right now. A
+custom date range on the Tasks tab therefore relabels that bucket "due in that period" (a real,
+`due`-column fact) rather than fake a historical view the data can't support.
+
+Scheduled at 16:05 UTC, five minutes after the morning audit, Mon–Fri — see
+`client-summary/schedule.sql`. No real dependency on that timing; it just isn't tied to the 08:00
+ads pull the way the audit is, since it reads tasks, not `daily_reports`.
+
+### RLS on `client_work_summaries` — read this before adding a client-facing table
+
+This table is queried **directly by each client's own browser session**, the same way
+`daily_reports` is. Its SELECT policy uses `user_has_client_access(client_name)` — the helper
+CLAUDE.md's Access model section already documents — rather than being copied from `daily_reports`
+itself.
+
+**`daily_reports` currently carries three separate `SELECT ... USING (true)` policies** stacked
+alongside two properly-scoped ones. Postgres RLS policies OR together for the same command, so any
+`true` policy makes the careful ones dead: **today, any authenticated user — client or not — can
+read every client's spend, leads, and account names from `daily_reports`.** Found while building
+this feature, not introduced by it, and not yet fixed — flagged in Known gaps. Do not use that
+table's policy set as a template for anything new.
+
+`tasks` itself has not been checked the same way — the portal filters `globalTasksData`
+client-side (`cpTasksForClient()`), which only proves the *browser* hides other clients' tasks,
+not that the *query* does. Worth the same check before trusting it.
+
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -362,6 +417,15 @@ which the `team` onboarding step writes to.
   headers so browser posts must be no-cors — which permits only a few Content-Type
   values. `application/json` becomes `text/plain` and Make delivers the whole body as a
   single field called `value`. Post `URLSearchParams` instead.
+- **A raw-text Make module does not escape the variables it substitutes.** The
+  `morning-audit` critical-alert POST to GHL builds its body from
+  `{ "message": "{{2.message}}" }` as literal text, not through Make's JSON-building
+  tools — so a value containing a real newline lands as an unescaped control character
+  inside what has to be valid JSON, and the module fails with *"bad control character"*.
+  The fix was upstream: the edge function builds the SMS text on one line (`•`-joined,
+  no `\n`) rather than asking every future editor of the Make scenario to remember an
+  `escapeJSON()` wrapper. The same trap is waiting for any other field pasted into a
+  raw-text body — a client name or note with a stray `"` would trip the same failure.
 - **Make's Supabase app has no plain update, only upsert** — which Postgres runs as an
   insert that falls back to update, so the row must still satisfy `NOT NULL`. Send the
   identifying columns, not just the id. Leave client-owned columns (`status`, `feedback`)
@@ -419,5 +483,13 @@ GitHub Pages copy but not from the GHL domain.
 - No ad-level performance data exists anywhere — `daily_reports` is account-level, so
   "which ad should we turn off" is unanswerable until the Make pull fetches Insights at
   `level=ad`
+- **`daily_reports` has three stacked `SELECT USING (true)` RLS policies** alongside its
+  two real ones — under Postgres's OR semantics this means any authenticated user, not
+  just the right client, can currently read every client's ad performance. Found while
+  building the client work summary; not yet fixed. `tasks`' own RLS hasn't been checked
+  and may have the same problem — the portal only proves its *browser* filters by
+  client, not that its *query* does
+- Reports are meant to start pulling from the client work summary once revamped — not
+  built yet, this is the documented intention only (see Client work summary)
 - `architecture.txt` is the original doc and is substantially out of date — it predates
   onboarding, check-ins, reports, triggers, cron and every Make scenario

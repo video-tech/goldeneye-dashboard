@@ -585,6 +585,7 @@
         // Desktop leaves it in the header, where there's room for it.
         const CP_DATE_SLOTS = {
             dashboard:   'cp-date-slot-dash',
+            tasks:       'cp-date-slot-top',
             seo:         'cp-date-slot-top',
             leaderboard: 'cp-date-slot-top'
         };
@@ -640,6 +641,7 @@
 
     if(tabName === 'getstarted') { renderGetStarted(); startOnboardingPoll(); }
     else stopOnboardingPoll();
+    if(tabName === 'dashboard') ensureWorkSummaryLoaded();
     if(tabName === 'checkin') renderWeeklyCheckin();
     if(tabName === 'reports') renderCpReports();
     if(tabName === 'support') renderCpSupport();
@@ -819,7 +821,93 @@ function renderCpTaskBoard(all) {
     }).join('');
 }
 
+// ---- Work summary: the dashboard blurb, and the Tasks tab's default view ----
+// Generated once a day per client by the client-summary edge function, which looks at
+// what got completed in the trailing week and what's still open, and asks the model for
+// a short plain-text recap — never a live call from here. Fetched once per portal
+// session and reused everywhere it's shown, since it cannot change until tomorrow's run.
+let cachedWorkSummary = null;
+let workSummaryFetchStarted = false;
+
+async function ensureWorkSummaryLoaded() {
+    if (workSummaryFetchStarted) { paintWorkSummaryBoxes(); return; }
+    workSummaryFetchStarted = true;
+    try {
+        const { data, error } = await supabaseClient
+            .from('client_work_summaries')
+            .select('summary')
+            .eq('client_name', currentActiveClient)
+            .order('range_end', { ascending: false })
+            .limit(1);
+        if (error) throw error;
+        cachedWorkSummary = data?.[0]?.summary || null;
+    } catch (e) {
+        console.error('Could not load work summary:', e);
+    }
+    paintWorkSummaryBoxes();
+}
+
+// innerText, never innerHTML — the model is instructed to return plain prose with no
+// markup, and this is the one place in the portal where text the model wrote reaches a
+// client's own screen unmediated by a fixed template. Nothing it writes should ever be
+// capable of being interpreted as HTML here.
+function paintWorkSummaryBoxes() {
+    const text = cachedWorkSummary || "We're still putting this week's update together — check back shortly.";
+    const dash = document.getElementById('work-summary-dash');
+    if (dash) dash.innerText = text;
+
+    // The Tasks tab only shows this cached text while the default range is selected;
+    // renderCpTasks() below decides which text belongs there for any other range.
+    if (selectedDateRange === 'last7') {
+        const box = document.getElementById('work-summary-tasks');
+        if (box) box.innerText = text;
+    }
+}
+
+// The factual counterpart for any range other than the default. No model call — this
+// is a plain filter over data already sitting in globalTasksData, computed instantly.
+// "Still working on" has no honest date-scoped meaning (task status has no history, only
+// a current value — see CLAUDE.md), so a custom range swaps it for "due in that period",
+// a fact the data actually supports.
+function buildTasksRecap() {
+    const { s, e } = getPortalRange();
+    const all = cpTasksForClient();
+
+    const done = all.filter(t => {
+        if (t.status !== 'Complete' || !t.updated_at) return false;
+        const d = new Date(t.updated_at);
+        return d >= s && d <= e;
+    });
+    const dueInRange = all.filter(t => {
+        if (t.status === 'Complete' || !t.due) return false;
+        const d = new Date(t.due + 'T12:00:00');
+        return d >= s && d <= e;
+    });
+
+    const list = (rows) => rows.map(t => stripSlashEscapes(t.title)).join(', ');
+
+    return (done.length
+        ? `${done.length} task${done.length > 1 ? 's' : ''} completed in this period: ${list(done)}.`
+        : 'No tasks were completed in this period.')
+        + ' '
+        + (dueInRange.length
+        ? `${dueInRange.length} due in this period: ${list(dueInRange)}.`
+        : 'Nothing due in this period.');
+}
+
 window.renderCpTasks = function() {
+    // Top-of-tab summary: the cached daily narrative on the default range, a plain
+    // computed recap for anything the client has picked by hand.
+    const summaryHeading = document.getElementById('cp-tasks-summary-heading');
+    if (selectedDateRange === 'last7') {
+        if (summaryHeading) summaryHeading.innerText = 'This Week';
+        ensureWorkSummaryLoaded();
+    } else {
+        if (summaryHeading) summaryHeading.innerText = document.getElementById('selected-date-label')?.innerText || 'Selected range';
+        const box = document.getElementById('work-summary-tasks');
+        if (box) box.innerText = buildTasksRecap();
+    }
+
     const all = cpTasksForClient();
     const open = all.filter(t => t.status !== 'Complete');
 
@@ -2288,6 +2376,10 @@ window.maybeShowWeeklyCheckin = function() {
             const normTarget = normalize(accountName);
             filteredReportData = reportsForClient(accountName, allRawReports);
             clientLeadsData = globalClientLeadsData.filter(l => normalize(l.client_name) === normTarget).map(l => ({ id: l.id, name: l.lead_name, stage: l.stage || 'New Lead', email: l.lead_email || '', phone: l.lead_phone || '' }));
+            // The cached work summary is per-client. Without this an admin switching
+            // between clients would keep showing whichever client's summary loaded first.
+            cachedWorkSummary = null;
+            workSummaryFetchStarted = false;
             filterPortalData();
             if(!document.getElementById('cp-view-pipeline').classList.contains('hidden')) renderCpPipeline();
             if(!document.getElementById('cp-view-creatives').classList.contains('hidden')) renderClientCreatives();
@@ -2385,7 +2477,10 @@ window.maybeShowWeeklyCheckin = function() {
             // The leaderboard is period-scoped too, so it has to redraw when the range
             // changes — previously only switchCpTab drew it, leaving it stale.
             if(!document.getElementById('cp-view-leaderboard').classList.contains('hidden')) renderAnonymizedLeaderboard();
-            document.getElementById('ai-summary').innerText = "Click \"Run Analysis\" to generate an AI overview of this timeframe.";
+            // Tasks is period-scoped now too: the default range shows the cached daily
+            // narrative, anything else swaps to a deterministic recap of that window —
+            // see renderCpTasks(). Only worth redrawing while the tab is actually open.
+            if(!document.getElementById('cp-view-tasks').classList.contains('hidden')) renderCpTasks();
 updateAgencyPowerTicker();
         }
 
@@ -2593,9 +2688,14 @@ window.submitClientRequest = async function() {
         subjectEl.value = '';
         detailsEl.value = '';
         
-        if (data && data.length > 0) { 
-            globalTasksData.push(data[0]); 
+        if (data && data.length > 0) {
+            globalTasksData.push(data[0]);
+            // renderPortalTasks() only redraws the Dashboard's small widget. The card is
+            // now duplicated onto the Tasks tab too, whose own three lists are a
+            // different function — refresh both, however got used, so a request sent
+            // from either place shows up immediately rather than after a reload.
             if (typeof renderPortalTasks === 'function') renderPortalTasks();
+            if (typeof renderCpTasks === 'function') renderCpTasks();
         }
 
     } catch(err) { 
@@ -2620,42 +2720,10 @@ window.submitClientRequest = async function() {
             roiChart = new Chart(document.getElementById('roiChart'), { type: 'bar', data: { labels: ['Ad Spend', 'Revenue'], datasets: [{ data: [finalStats.spend, finalStats.revenue], backgroundColor: [isLight ? '#cbd5e1' : 'rgba(255,255,255,0.1)', '#fbbf24'], borderRadius: 8 }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } } } });
         }
 
-        async function triggerPortalAI() {
-    const btn = document.getElementById('portal-run-ai-btn'); 
-    const box = document.getElementById('ai-summary'); 
-    const rangeText = document.getElementById('selected-date-label').innerText;
-    
-    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Analyzing...`; 
-    btn.disabled = true; 
-    box.innerText = "Generating insights...";
-    
-    const prompt = `Client: ${document.getElementById('client-name-display').innerText}. Range: ${rangeText}. Data: $${finalStats.spend.toFixed(2)} spent, ${finalStats.leads} leads. 2 sentences. No fluff. Reassuring growth context. No advice.`;
-    
-    try {
-        const res = await fetch("https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ai-chat", { 
-            method: 'POST', 
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${wrapper.dataset.supaKey}` 
-            }, 
-            body: JSON.stringify({ 
-                messages: [{ role: "user", content: prompt }] 
-            }) 
-        });
-        
-        const json = await res.json(); 
-        if(json.error) throw new Error(json.error);
-        
-        box.innerText = json.choices[0].message.content;
-        
-    } catch(e) { 
-        box.innerText = "Summary unavailable at this time."; 
-        console.error("Secure API Error:", e.message);
-    } finally { 
-        btn.innerHTML = `<i class="fa-solid fa-bolt"></i> Run Analysis`; 
-        btn.disabled = false; 
-    }
-} // <--- THIS IS THE BRACKET THAT WAS MISSING!
+        // triggerPortalAI() used to live here — a manual "Run Analysis" button that sent
+        // spend/leads to GPT-4o for two sentences. Replaced by the cached, always-on work
+        // summary below (ensureWorkSummaryLoaded / paintWorkSummaryBoxes), which narrates
+        // what got *done* rather than restating numbers already on the KPI tiles above it.
 
         function selectPresetDate(v, l) { selectedDateRange = v; document.getElementById('selected-date-label').innerText = l; toggleDropdown('portal-date-menu'); filterPortalData(); }
         function applyCustomRange() { customStart = document.getElementById('start-date').value; customEnd = document.getElementById('end-date').value; if(customStart && customEnd) { selectedDateRange = 'custom'; document.getElementById('selected-date-label').innerText = `${customStart} to ${customEnd}`; toggleDropdown('portal-date-menu'); filterPortalData(); } }

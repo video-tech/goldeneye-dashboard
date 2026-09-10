@@ -29,6 +29,14 @@ const HISTORY_DAYS = 45;
 const normalize = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const normalizeAccountId = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 
+// Same webhook and recipient shape as notify_admins_client_request() in Postgres
+// (see CLAUDE.md, Database objects), so whatever Make scenario handles that trigger's
+// SMS sending also handles this one — a Router on `event` is the only thing Make needs
+// to add. Deliberately duplicated here rather than shared: this fires from Deno, that
+// trigger fires from a Postgres function, and there is no code path connecting the two
+// runtimes worth building for one constant and one query.
+const ADMIN_ALERT_WEBHOOK = "https://hook.us2.make.com/c8l92w09rw5jrncifjxif0b8r1yf89ha";
+
 function reportsForClient(client: any, rows: any[]) {
     const wantId = normalizeAccountId(client.ad_account_id);
     const wantName = normalize(client.name);
@@ -135,7 +143,115 @@ async function loadSignals(db: any) {
     return clients.map((c: any, i: number) => computeClientSignal(c, rowsPerClient[i], anchor, AUDIT_CONFIG));
 }
 
+// Text the two admins when the audit finds a CRITICAL account. Built entirely from
+// `signals` — never from the model's HTML — for the same reason the dashboard cards
+// are: the model is a writer here, not a source of truth, and an SMS is exactly the
+// kind of thing that must never carry a hallucinated number. A parsing step over the
+// model's prose to find "who's critical" would reintroduce the risk this whole rebuild
+// was about removing.
+//
+// Only CRITICAL fires this, by design — SPEND_STOPPED is a real problem too, but it is
+// an operational one (a paused campaign, an expired card) rather than a performance
+// one, and folding it in was left for later so a text stays rare enough to open.
+// Silent on a quiet morning: no CRITICAL clients means no POST at all.
+async function sendCriticalAlert(db: any, signals: any[]) {
+    const critical = signals.filter((s) => s.verdict === "CRITICAL");
+    if (!critical.length) return;
+
+    const { data: recipientRows, error: recErr } = await db
+        .from("admin_alert_recipients")
+        .select("name, phone")
+        .eq("active", true);
+    if (recErr) throw recErr;
+
+    // Same normalization as notify_admins_client_request(): strip to digits, take the
+    // last 10, prefix +1. Anything that still isn't 10 digits after that is dropped
+    // rather than sent to GHL malformed.
+    const recipients = (recipientRows ?? [])
+        .map((r: any) => ({ name: r.name, phone: "+1" + String(r.phone ?? "").replace(/\D/g, "").slice(-10) }))
+        .filter((r: any) => r.phone.length === 12);
+    if (!recipients.length) return;
+
+    const lines = critical.map((s) => {
+        const cpl = s.recent.cpl === null ? "no leads" : `$${Math.round(s.recent.cpl)} CPL`;
+        const pct = (s.cplDelta === Infinity || s.cplDelta === null)
+            ? "" : ` (${s.cplDelta >= 0 ? "+" : ""}${Math.round(s.cplDelta * 100)}%)`;
+        const driver = s.drivers?.dominant ? `, ${s.drivers.dominant.toUpperCase()} driven` : "";
+        return `${s.name}: ${cpl}${pct} on $${Math.round(s.recent.spend)} spend${driver}`;
+    });
+
+    // No \n here. Make's HTTPS module builds its GHL request body from raw text with
+    // {{2.message}} substituted straight in — it does not escape variables dropped into
+    // a raw-text field, so a literal newline lands as an unescaped control character
+    // inside what has to be valid JSON and breaks the request downstream. A single
+    // line sidesteps the whole class of problem rather than asking every future editor
+    // of the Make scenario to remember an escapeJSON() wrapper.
+    const message = `🚨 Morning Audit — ${critical.length} critical account${critical.length > 1 ? "s" : ""}: `
+        + lines.join(" • ")
+        + ` • Full audit: https://goldeneye.midasmediafirm.com`;
+
+    // Never let a failed webhook lose the audit card already saved by the caller — log
+    // and move on, exactly like the exception block in notify_admins_client_request().
+    try {
+        const res = await fetch(ADMIN_ALERT_WEBHOOK, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                event: "morning_audit_critical",
+                kind: "morning_audit_critical",
+                message,
+                critical_count: critical.length,
+                clients: critical.map((s) => ({
+                    name: s.name,
+                    spend: Math.round(s.recent.spend),
+                    leads: s.recent.leads,
+                    expected_leads: s.expectedLeads,
+                    cpl: s.recent.cpl,
+                    baseline_cpl: s.baseline.cpl,
+                    cpl_delta: s.cplDelta === Infinity ? null : s.cplDelta,
+                    driver: s.drivers?.dominant ?? null,
+                })),
+                recipients,
+            }),
+        });
+        if (!res.ok) console.error(`critical alert webhook returned ${res.status}`);
+    } catch (err) {
+        console.error("critical alert webhook failed:", err);
+    }
+}
+
+// The dashboard is served from GoHighLevel's domain and the PWA copy from GitHub
+// Pages, so the browser sends a preflight before every POST and refuses the real
+// request unless it comes back approved.
+//
+// This is not an access control — curl ignores CORS entirely, and the anon key is
+// public — but there is no reason to let an arbitrary site's JavaScript spend our model
+// budget on a visitor's behalf, so the allowed origins are named rather than starred.
+const ALLOWED_ORIGINS = [
+    "https://goldeneye.midasmediafirm.com",
+    "https://video-tech.github.io",
+];
+
+function corsHeaders(req: Request): Record<string, string> {
+    const origin = req.headers.get("Origin") ?? "";
+    return {
+        "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        // The response varies by request origin, so caches must not serve one origin's
+        // approval to another.
+        "Vary": "Origin",
+    };
+}
+
 Deno.serve(async (req: Request) => {
+    const cors = corsHeaders(req);
+
+    // Preflight carries no Authorization header and no body — answer it and stop.
+    if (req.method === "OPTIONS") {
+        return new Response("ok", { headers: cors });
+    }
+
     try {
         const body = await req.json().catch(() => ({}));
         const force = body?.force === true;
@@ -151,7 +267,7 @@ Deno.serve(async (req: Request) => {
 
         // The dashboard's AI chat wants the matrix without spending a model call on it.
         if (contextOnly) {
-            return Response.json({ context, signals });
+            return Response.json({ context, signals }, { headers: cors });
         }
 
         // Idempotent by default: cron fires once, but a retry, a manual click, or a
@@ -173,7 +289,7 @@ Deno.serve(async (req: Request) => {
                     id: existing[0].id,
                     created_at: existing[0].created_at,
                     html: existing[0].html_body,
-                });
+                }, { headers: cors });
             }
         }
 
@@ -211,6 +327,12 @@ Deno.serve(async (req: Request) => {
             .select();
         if (error) throw error;
 
+        // Only for a card actually created just now — the skipped-because-it-already-
+        // exists branch above returns before this point, so a retry or a second
+        // scheduled attempt never sends a second text for the same morning.
+        await sendCriticalAlert(db, signals).catch((err) =>
+            console.error("sendCriticalAlert failed:", err));
+
         return Response.json({
             id: data?.[0]?.id ?? null,
             created_at: data?.[0]?.created_at ?? null,
@@ -221,9 +343,9 @@ Deno.serve(async (req: Request) => {
             }, {}),
             usage: response.usage,
             html,
-        });
+        }, { headers: cors });
     } catch (err) {
         console.error("morning-audit failed:", err);
-        return Response.json({ error: String((err as Error)?.message ?? err) }, { status: 500 });
+        return Response.json({ error: String((err as Error)?.message ?? err) }, { status: 500, headers: cors });
     }
 });
