@@ -900,7 +900,7 @@ window.renderCpTasks = function() {
     // computed recap for anything the client has picked by hand.
     const summaryHeading = document.getElementById('cp-tasks-summary-heading');
     if (selectedDateRange === 'last7') {
-        if (summaryHeading) summaryHeading.innerText = 'This Week';
+        if (summaryHeading) summaryHeading.innerText = "What We've Done This Week";
         ensureWorkSummaryLoaded();
     } else {
         if (summaryHeading) summaryHeading.innerText = document.getElementById('selected-date-label')?.innerText || 'Selected range';
