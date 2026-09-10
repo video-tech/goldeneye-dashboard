@@ -3369,8 +3369,10 @@ function switchClientView(view) {
             if (view === 'chat') {
                 const lbl = document.getElementById('chat-client-lbl');
                 if(lbl) lbl.innerText = cSelectedAccount;
-                const savedKey = localStorage.getItem('midas_openai_key');
-                if(savedKey) document.getElementById('openai-api-key').value = savedKey;
+                // The API-key box that used to live here was never read by anything —
+                // the key is a secret inside the ai-chat edge function. Clear any value
+                // an earlier version talked someone into pasting.
+                localStorage.removeItem('midas_openai_key');
             }
         }
         function cSelectAccount(val, label) { 
@@ -4502,7 +4504,7 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
             // 2. Determine Context Based on Selection
             if (cSelectedAccount === "ALL") {
                 // GLOBAL AGENCY MODE
-                const globalMatrix = window.prepareAIBrainContext();
+                const globalMatrix = await window.prepareAIBrainContext();
                 systemPrompt = `You are an elite Agency Data Scientist and AI Agent for Midas Media.
                 You are currently in GLOBAL AGENCY MODE. The user may ask questions about any client, compare performance across the network, or ask for high-level strategic advice.
                 
@@ -5651,67 +5653,44 @@ window.logQuickPayment = async function() {
             }
         };
 // ============================================================================
-        // AI BRAIN: PHASE 1 - LOCAL DATA COMPRESSOR
+        // AI BRAIN: PHASE 1 - SIGNAL CONTEXT
         // ============================================================================
+        // The signal engine used to live here. It now lives once, server-side, in
+        // supabase/functions/morning-audit/engine.js — the same code the 16:00 UTC cron
+        // run uses, so the card the dashboard shows and the card that arrives on its own
+        // can never disagree. Two copies could drift without crashing, which would have
+        // meant the button quietly reporting a different verdict from the schedule.
+        //
+        // 'mode: context' returns the computed matrix without spending a model call, so
+        // the chat agent below costs nothing extra to keep supplied.
 
-        window.prepareAIBrainContext = function() {
-            const today = new Date();
-            const date7DaysAgo = new Date(today);
-            date7DaysAgo.setDate(today.getDate() - 7);
-            const date30DaysAgo = new Date(today);
-            date30DaysAgo.setDate(today.getDate() - 30);
+        const AUDIT_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/morning-audit';
 
-            let md = `[CONTEXT TIME: ${today.toISOString().split('T')[0]}]\n\n`;
-            md += `## SYSTEM MANIFESTO\n`;
-            md += `You are the Midas Media AI Brain. Analyze the tracking matrix. Identify anomalies, creative fatigue, budget pacing errors, and horizontal wins across accounts. Keep insights brief, punchy, and highly actionable for media buyers. Do NOT hallucinate data.\n\n`;
-            
-            md += `## ACTIVE ACCOUNTS MATRIX\n`;
-            md += `Client | 7D Spend | 7D Leads | 7D CPL | 30D CPL (Baseline) | Trend | Health Score\n`;
-            md += `---|---|---|---|---|---|---\n`;
-
-            const activeClients = globalClientsData.filter(c => isActiveClient(c) && normalize(c.name) !== normalize('Midas Media'));
-
-            activeClients.forEach(client => {
-                // 1. Isolate Ads Data for this client
-                const clientAds = reportsForClient(client);
-
-                // 2. Tally up 7-Day and 30-Day Windows
-                let spend7d = 0, leads7d = 0;
-                let spend30d = 0, leads30d = 0;
-
-                clientAds.forEach(r => {
-                    if (!r.date) return;
-                    const rd = new Date(r.date.split('T')[0] + 'T12:00:00');
-                    const spend = parseFloat(r.spend || 0);
-                    const leads = parseInt(r.leads || 0);
-
-                    if (rd >= date30DaysAgo && rd <= today) {
-                        spend30d += spend;
-                        leads30d += leads;
-                        if (rd >= date7DaysAgo) {
-                            spend7d += spend;
-                            leads7d += leads;
-                        }
-                    }
-                });
-
-                const cpl7d = leads7d > 0 ? (spend7d / leads7d) : 0;
-                const cpl30d = leads30d > 0 ? (spend30d / leads30d) : 0;
-
-                // 3. JAVASCRIPT MATH (Foolproof Trend Labeling)
-                let trend = "STABLE";
-                // Only flag critical if 7D CPL is strictly higher than 30D CPL (with a 5% tolerance so minor bumps don't trigger it)
-                if (cpl30d > 0 && cpl7d > (cpl30d * 1.05)) trend = "CRITICAL (Spiking)"; 
-                else if (cpl30d > 0 && cpl7d < cpl30d) trend = "HEALTHY (Improving)";
-
-                // 4. Health Score Failsafe 
-                let healthDisplay = client.current_score > 0 ? `${client.current_score}/100` : "STALE / UNKNOWN";
-
-                // 5. Build the Highly Compressed Markdown Row
-                md += `${client.name} | $${spend7d.toFixed(0)} | ${leads7d} | $${cpl7d.toFixed(0)} | $${cpl30d.toFixed(0)} | ${trend} | ${healthDisplay}\n`;
+        async function callAuditFunction(payload) {
+            const res = await fetch(AUDIT_FN, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${wrapper.dataset.supaKey}`
+                },
+                body: JSON.stringify(payload || {})
             });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.error) throw new Error(data.error || `audit service returned ${res.status}`);
+            return data;
+        }
 
-            return md;
+        // Degrades rather than throws: a chat that answers "I can't see the numbers" is
+        // more use than one that dies on send. The system prompt already tells the model
+        // to answer strictly from this matrix, so it will say so rather than invent.
+        window.prepareAIBrainContext = async function() {
+            try {
+                const data = await callAuditFunction({ mode: 'context' });
+                return data.context || '[MATRIX UNAVAILABLE: the audit service returned nothing.]';
+            } catch (e) {
+                console.error('Could not fetch the performance matrix:', e);
+                return `[MATRIX UNAVAILABLE: ${e.message}. Tell the user you cannot see performance data right now, and do not guess at any numbers.]`;
+            }
         };
 // ============================================================================
         // AI BRAIN: PHASE 2 & 3 - API GATEWAY & UI INJECTION
@@ -5720,77 +5699,33 @@ window.logQuickPayment = async function() {
         window.runGlobalAIAudit = async function() {
             const btn = document.getElementById('btn-run-global-ai');
             const outputBox = document.getElementById('global-ai-output');
-            const todayStr = new Date().toISOString().split('T')[0];
-            
-            // UI Loading State
+
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Analyzing Network...';
             btn.disabled = true;
             outputBox.classList.remove('hidden');
             outputBox.innerHTML = '<p class="text-yellow-400 animate-pulse text-center py-4"><i class="fa-solid fa-satellite-dish mr-2"></i> Crunching high-density matrix...</p>';
 
-            const payloadContext = window.prepareAIBrainContext();
-            
-            const prompt = `
-            ${payloadContext}
-            
-            INSTRUCTIONS:
-            You are looking at a snapshot of our entire agency ad performance. 
-            Format your response entirely in ready-to-render HTML. Do NOT use markdown code blocks like \`\`\`html. Just return the raw HTML string.
-            
-            Use this exact styling format for your insights:
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-               <div class="bg-red-500/10 p-4 rounded-xl border border-red-500/20">
-                  <h4 class="text-red-400 font-bold mb-2 uppercase text-[10px] tracking-widest"><i class="fa-solid fa-fire mr-1"></i> Critical Alerts</h4>
-                  [CRITICAL RULE: Look at the 'Trend' column in the matrix. ONLY list clients whose Trend explicitly says "CRITICAL (Spiking)". DO NOT guess or do math. Keep it to 1 concise sentence per client.]
-               </div>
-               <div class="bg-green-500/10 p-4 rounded-xl border border-green-500/20">
-                  <h4 class="text-green-400 font-bold mb-2 uppercase text-[10px] tracking-widest"><i class="fa-solid fa-arrow-trend-up mr-1"></i> Scale Opportunities</h4>
-                  [CRITICAL RULE: Look at the 'Trend' column in the matrix. ONLY list clients whose Trend explicitly says "HEALTHY (Improving)". Suggest scaling.]
-               </div>
-               <div class="bg-purple-500/10 p-4 rounded-xl border border-purple-500/20">
-                  <h4 class="text-purple-400 font-bold mb-2 uppercase text-[10px] tracking-widest"><i class="fa-solid fa-eye mr-1"></i> Account Watchlist</h4>
-                  [Call out clients with $0 spend, zero leads, or STALE health scores. Tell the team to check on them.]
-               </div>
-            </div>
-            
-            Keep the actual text extremely concise, direct, and aggressive. You are a senior media buyer diagnosing problems.`;
-
             try {
-                const res = await fetch("https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ai-chat", {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json', 
-                        'Authorization': `Bearer ${wrapper.dataset.supaKey}` 
-                    },
-                    body: JSON.stringify({ 
-                        messages: [{ role: "user", content: prompt }]
-                    })
-                });
-                
-                const data = await res.json();
-                if(data.error) throw new Error(data.error.message);
-                
-                const aiHTML = data.choices[0].message.content;
-                outputBox.innerHTML = aiHTML;
+                // Everything happens server-side now: the rows are read, the verdicts
+                // computed, the model called and the row saved in one request. force
+                // because a person pressing this button after the 16:00 cron run has
+                // already filed today's card is asking for a fresh one.
+                const data = await callAuditFunction({ force: true });
 
-                // SAVE TO STORAGE FOR THE REST OF THE DAY
-                try {
-    const { data, error } = await supabaseClient.from('morning_audits').insert([{ html_body: aiHTML }]).select();
-    if (error) throw error;
-    
-    // Add it to our local array so it shows up instantly in the new tab
-    if (data && data.length > 0) {
-        globalAuditsData.unshift(data[0]);
-        if (!document.getElementById('page-audits').classList.contains('hidden')) {
-            renderMorningAudits();
-        }
-    }
-} catch (err) {
-    console.error("Failed to save audit to database:", err);
-}
-                
-            } catch(e) {
-                outputBox.innerHTML = `<div class="bg-red-500/10 p-4 rounded-xl border border-red-500/20 text-red-400 text-center"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Connection Error: ${e.message}</div>`;
+                outputBox.innerHTML = data.html;
+
+                // Keep the Audits tab and checkSavedAudit() in step without a reload.
+                if (data.id) {
+                    globalAuditsData.unshift({
+                        id: data.id,
+                        created_at: data.created_at || new Date().toISOString(),
+                        html_body: data.html
+                    });
+                    const auditsPage = document.getElementById('page-audits');
+                    if (auditsPage && !auditsPage.classList.contains('hidden')) renderMorningAudits();
+                }
+            } catch (e) {
+                outputBox.innerHTML = `<div class="bg-red-500/10 p-4 rounded-xl border border-red-500/20 text-red-400 text-center"><i class="fa-solid fa-triangle-exclamation mr-2"></i> ${escapeAttr(e.message)}</div>`;
             } finally {
                 btn.innerHTML = '<i class="fa-solid fa-bolt mr-2"></i> Run Morning Audit';
                 btn.disabled = false;

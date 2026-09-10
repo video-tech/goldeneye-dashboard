@@ -137,6 +137,170 @@ reviewing something that isn't the ad.
 - `ad_approvals.id` is **bigint**, so rows carry numbers while `onclick` handlers pass
   strings. Compare with `String()` on both sides.
 
+## Morning audit
+
+The "Run Morning Audit" button on the dashboard writes a saved HTML card into
+`morning_audits`; `checkSavedAudit()` reloads today's row on page load rather than
+re-running, and the Audits tab lists, edits and deletes past ones.
+
+**The verdicts are computed in JavaScript, never by the model.** `computeClientSignal()`
+in app.js decides each client's label; `prepareAIBrainContext()` groups clients under
+those labels and the model only explains and prioritises them. Keep it that way — the
+model is asked never to recalculate, and a wrong figure in a morning alert costs far
+more than a clumsy sentence.
+
+Every threshold is in `AUDIT_CONFIG` at the top of the engine. The four that matter:
+
+- **`lagDays: 1`** — never read a day still in progress; it carries full spend against a
+  fraction of its leads. Beyond that one day the window is **not** a fixed offset from
+  today:
+  `resolveAuditAnchor()` ends it on the freshest day the Make pull actually delivered.
+  The pull writes yesterday each morning, so a fixed offset either threw away the newest
+  day or, when the audit ran before the pull, invented a gap for every client at once.
+  The anchor is **agency-wide**, not per client — the pull runs for everyone together,
+  so a client whose rows stop early is genuinely behind and gets `DATA_STALE` instead of
+  being quietly measured over its own older window.
+- **`recentDays: 7` / `baselineDays: 28`** — disjoint, and whole weeks so both windows
+  hold the same mix of weekdays. The old baseline was 30 days *including* the 7 it was
+  being compared against.
+- **`minExpectedLeads` / `minBaselineLeads` / `minCoverage`** — below these no CPL
+  verdict is issued. The honest output is `INSUFFICIENT_VOLUME`, not a coin flip.
+  The gate is **expected leads, not dollars**: what gives the z-test power is the
+  expected count. A raw spend floor silenced an account that spent $246 and got *zero*
+  leads for being $4 short of it, while saying nothing about whether its numbers were
+  readable. **The creative flag is evaluated before this gate** — CTR is measured over
+  impressions, not conversions, so it stays valid on accounts far too thin to judge CPL,
+  and those are exactly the ones likely to be quietly running one tired ad. A thin
+  account whose creative is dying still reaches `WATCH`; its `z` and driver are nulled
+  so no unreliable figure gets printed next to the caveat.
+- **`criticalZ`** — significance, not a percentage. `z = (leads − expected) / √expected`,
+  where `expected = recentSpend / baselineCPL`. Leads are count data, so a normal week's
+  spread scales with √n: a client expecting 3 leads cannot trip the wire on a one-lead
+  miss, which is what the old flat ±5% rule did daily.
+
+Data problems get their own verdicts (`DATA_STALE`, `DATA_GAPS`, `SPEND_STOPPED`) so a
+broken Make pull stops being reported as a client emergency — in the totals alone those
+two are identical.
+
+**`decomposeCplChange()` is what makes account-level data worth having.** CPL is an
+identity — `CPL = CPM/1000 ÷ CTR ÷ CVR` — so in logs the three contributions add up
+exactly to the CPL change and the largest one is the driver. Three clients can show the
+same CPL rise for three unrelated reasons, and the fix differs every time:
+
+| Driver | What actually happened | Where to send someone |
+|---|---|---|
+| `CPM` | impressions got more expensive | auction, targeting too narrow, or a budget jump |
+| `CTR` | fewer people clicking | creative fatigue or a saturated audience |
+| `CVR` | clicks stopped becoming leads | **landing page or form — not the ads** |
+
+`DRIVER_MEANING` carries a `worse` and a `better` phrasing for each, because the same
+driver reads very differently in each direction; `dominantWorsened` picks between them.
+Below `minCplDeltaForDriver` the headline driver is withheld — decomposing a CPL that
+did not move produces a confident-sounding diagnosis of a non-event — but the component
+deltas stay, because the creative flag reads CTR out of them.
+
+**`SCALE_CANDIDATE` needs spend steady in *both* directions** (`scaleSpendCeiling` /
+`scaleSpendFloor`). Cheaper leads on triple the budget is just more budget; cheaper leads
+on 40% less budget is usually the cut itself, since a smaller budget stops buying the
+expensive end of the inventory. Both fall through to `IMPROVING` with the reason in a
+note — recommending a scale-up on the second kind would undo the thing that helped.
+
+**`signal.flags` sits alongside the verdict rather than replacing it** — an account can be
+losing its creative *and* blowing its CPL, and one label cannot hold both. Today there is
+one flag, `CREATIVE`, raised whenever CTR falls 15%+ on a meaningful impression base.
+Frequency (`impressions / summed daily reach` — reach is unique people so summing days is
+not window reach, but the ratio is average *daily* frequency, comparable between windows)
+only decides the wording:
+
+- frequency rising or already high → *the same people are seeing it too often*
+- frequency flat → *the creative is losing people, not the audience running out*
+
+Either way someone opens the account and looks at the ads, which is why the flag does not
+depend on telling the two apart. **A flag promotes an otherwise `STABLE` client to
+`WATCH`** — CTR turns days before CPL does, and catching it while CPL still looks fine is
+the entire value. By the time CPL moves, a week of budget has gone through it.
+
+This is the ceiling of what the current data supports: it can say **whether to go into
+an account and what to look at first**, never which ad to switch off. That needs
+ad-level rows (see Known gaps).
+
+Two traps worth knowing:
+
+- **A week with spend and no leads has no CPL, not a CPL of zero.** The old engine
+  computed `$0`, read `0 < baseline` as an improvement, and filed those accounts under
+  Scale Opportunities. `recent.cpl` is `null` in that case and `cplDelta` is `Infinity`.
+- **The prompt must permit an empty section.** Forcing three populated columns every
+  morning guarantees invention on a quiet day.
+
+`clients.target_cpl` is read if present and degrades to "no CPL target set". Without it
+the model can only compare a client to their own past, so it cannot tell a good $60 CPL
+from a terrible one.
+
+### Meta restates the past — checked, and it does not bite us
+
+Meta keeps revising a day's figures after it ends: conversions attribute back to the
+**click** that caused them, so with a 7-day click window a lead can land in Tuesday's row
+on Saturday. Reach and frequency are estimated metrics that finalise later, and spend
+gets retroactive credits for invalid activity.
+
+**Measured 2026-09-03 across 7 sample days: our stored rows matched Ads Manager closely.
+Treat this as a non-issue at our spend.** It would start to matter at thousands a day, or
+if a client moved from instant lead forms (which fire at click time) to a landing-page
+form (where the click and the submit can be days apart).
+
+Two properties worth keeping in mind anyway, because they are what make the audit safe:
+
+- The pull runs at 08:00, asks for `yesterday`, and writes the row **once, never
+  revisiting it** — so every row is frozen at the same age and both audit windows are
+  under-counted by the same small factor. The comparison is unbiased *because* nothing
+  is restated.
+- Absolute lead counts are therefore very slightly low, so CPLs are very slightly high.
+  Immaterial at our volumes, but set `target_cpl` against Golden Eye's numbers rather
+  than Ads Manager's so the two never drift apart.
+
+If the pull is ever changed to re-fetch a rolling range, this inverts: older days settle
+while fresh ones have not, fresh days read worse than they are, and `lagDays` must rise
+to 3.
+
+### Running it unattended
+
+`supabase/functions/morning-audit/` runs the whole thing server-side: reads the rows with
+`service_role`, computes the signals, asks the model to write them up, inserts the
+`morning_audits` row. **No Make scenario** — pg_cron holds the schedule and pg_net makes
+the call, the same pair already behind `checkin-reminder-am/pm`. `schedule.sql` in that
+folder sets it up and lists the queries for checking on it.
+
+- Fires **16:00 UTC, Mon–Fri**. That is 10:00 MDT / 09:00 MST — pg_cron does not follow
+  daylight saving, and 16:00 was chosen so *both* sides of that drift stay clear of the
+  08:00 ads pull. 15:00 UTC would be 08:00 MST in winter, landing on top of it.
+- **Idempotent.** Returns `{"skipped": ...}` if a card already exists for today, so a
+  retry, a manual click, or a second scheduled attempt cannot stack up duplicates.
+- Model is **`gpt-5.6-sol`** through the **Responses API** (not Chat Completions — that
+  is what OpenAI documents for the reasoning models), at `reasoning.effort: "medium"`.
+  The judgment is already made by the engine, so this call is interpretation and prose;
+  effort is the cost dial and reasoning tokens bill as output. Reads `OPENAI_API_KEY`,
+  the same project-wide secret `ai-chat` uses — so all four AI features sit on one
+  vendor and one key.
+- **pg_net is asynchronous**: `cron.job_run_details` goes green when the request is
+  *queued*, not when it succeeded. `net._http_response` is where the real result is.
+
+**The engine lives in exactly one place** — `morning-audit/engine.js`. `app.js` holds no
+copy: `prepareAIBrainContext()` is now an async fetch to `{"mode": "context"}`, which
+returns the computed matrix without spending a model call, and the dashboard button posts
+`{"force": true}` and renders whatever comes back. That matters because two copies would
+not crash when they drifted — the button would just quietly report a different verdict
+from the one the schedule filed an hour earlier.
+
+Consequences of that, worth knowing before editing:
+
+- **The button needs the function deployed.** Deploy before pushing `app.js`, or the
+  button and the "ALL" mode of the AI chat break until you do.
+- The chat degrades rather than dies: a failed context fetch returns a
+  `[MATRIX UNAVAILABLE: ...]` string and the model is told to say so rather than guess.
+- The chat, the weekly report and the portal summary still call the old `ai-chat`
+  function, which is on GPT-4o. Only the audit is on `gpt-5.6-sol`, so the four AI
+  features share a vendor but not a model.
+
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -160,6 +324,15 @@ which the `team` onboarding step writes to.
 
 - **PGRST204 "column not found"** — PostgREST caches the schema. After any `alter table`:
   `notify pgrst, 'reload schema';`
+- **`daily_reports."Leads"` has a capital L.** Make built the table from a Google Sheet,
+  so the header casing became a quoted — and therefore case-sensitive — Postgres
+  identifier. Every other column is lowercase. Two consequences: naming it in a
+  PostgREST `select` list fails with *column daily_reports.leads does not exist*, and
+  `row.leads` in JavaScript is `undefined`, not a lead count. **Both readers lowercase
+  every key on the way in** — `app.js` where it fills `globalAdsData`, and `loadSignals`
+  in the morning-audit function — so downstream code sees `leads` and neither has to
+  care. Select `*` from that table rather than a column list, or the query 400s before
+  the lowercasing ever runs.
 - **Make bundles run end-to-end, one at a time.** An error on the *last* module aborts the
   whole scenario, silently skipping everything queued behind it. Add error handlers set to
   Resume on modules that write.
@@ -232,5 +405,19 @@ GitHub Pages copy but not from the GHL domain.
   re-tested since the hidden-field fix
 - `ad_approvals.file_url` is a dead NOT NULL column, dropped to nullable rather than
   removed
+- Morning audit thresholds in `AUDIT_CONFIG` are reasoned defaults, not tuned against
+  real history — worth a backtest over a few months of `daily_reports`
+- `clients.target_cpl` is read by the audit but the column does not exist yet
+- `ai-chat` still accepts an arbitrary prompt from the browser using the anon key, which
+  is visible to every portal user — an open proxy to our OpenAI account. The audit no
+  longer uses it, but the weekly report and the per-client chat still do
+- `preview/app.js` and `preview/body.html` are a stale snapshot that predates the signal
+  engine and still carries the dead OpenAI key box. The deploy serves the repo root, so
+  they affect nothing — but they will mislead anyone who greps
+- The audit returns raw HTML injected with `innerHTML`; JSON plus client-side rendering
+  would be cheaper, safer, and restyleable without re-running the model
+- No ad-level performance data exists anywhere — `daily_reports` is account-level, so
+  "which ad should we turn off" is unanswerable until the Make pull fetches Insights at
+  `level=ad`
 - `architecture.txt` is the original doc and is substantially out of date — it predates
   onboarding, check-ins, reports, triggers, cron and every Make scenario
