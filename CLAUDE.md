@@ -194,8 +194,9 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   succeeding, and an insert impersonating a different client failing, on both.
   `Admin and Investor Task Access` (`ALL`, grants `video@midasmediafirm.com`,
   `info@midasmediafirm.com`, and one client contact full read/write/delete on every
-  client's tasks) was left completely untouched — intentionally not evaluated or acted
-  on as part of this fix.
+  client's tasks) was left completely untouched. The third grant is a deliberate,
+  confirmed-intentional exception — that contact is treated as an investor, not an
+  ordinary client — not an oversight to clean up.
 
 All outbound HTTP from Postgres uses `pg_net` wrapped in an exception block, so a Make
 outage can never roll back a client's transaction.
