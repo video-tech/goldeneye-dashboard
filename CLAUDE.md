@@ -127,6 +127,75 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   transaction simulating a real client's JWT confirmed reads are scoped to their own
   rows and a write against another client's row affects 0 rows, and the admin
   Generate/Edit/Delete flow was confirmed still working from the live dashboard.
+- **`tasks` policy, fixed 2026-09-10 — same read leak as the other two
+  (`Allow authenticated users to read tasks`, `Auth Read Ads` both `USING (true)`;
+  `Allow authenticated users to insert tasks` had `WITH CHECK (true)`, so any
+  authenticated user could also insert a row under any client's name, as any assignee,
+  status, or type), but fixing it surfaced something bigger than the policy itself.**
+  `user_has_client_access()` — the helper every fix on this page relies on — depends on
+  `user_client_access`, and **that table had rows for only 4 of the ~10+ active
+  clients.** `daily_reports` and `weekly_reports` both still carry an older policy that
+  matches `client_email` directly and never touches `user_client_access` at all, so most
+  clients had been reading those two tables through that legacy path this whole
+  time without anyone noticing the gap. `tasks` had no such fallback — applying the
+  policy shape used on the other two tables here would have correctly closed the leak
+  and *also* correctly locked out most clients from their own Tasks tab, which is worse
+  than the bug it fixes. (This also means the first version of this policy, applied
+  without the fallback below, was briefly live and did exactly that — caught by testing
+  before it had been live long.)
+
+  Fixed by giving the new policy the same `client_email` fallback the older tables
+  already lean on, rather than trusting `user_has_client_access()` alone:
+  ```sql
+  create policy "Clients read their own client's tasks"
+  on tasks for select
+  using (
+      user_has_client_access(client)
+      or exists (
+          select 1 from clients c
+          where c.client_email is not null and c.client_email <> ''
+            and lower(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g'))
+              = lower(regexp_replace(coalesce(tasks.client, ''), '[^a-zA-Z0-9]', '', 'g'))
+            and lower(auth.email()) = ANY (string_to_array(lower(regexp_replace(c.client_email, '\s', '', 'g')), ','))
+      )
+      or current_user_is_admin()
+  );
+
+  create policy "Clients submit their own client requests"
+  on tasks for insert
+  with check (
+      current_user_is_admin()
+      or (type = 'Client Request' and (
+          user_has_client_access(client)
+          or exists (
+              select 1 from clients c
+              where c.client_email is not null and c.client_email <> ''
+                and lower(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g'))
+                  = lower(regexp_replace(coalesce(tasks.client, ''), '[^a-zA-Z0-9]', '', 'g'))
+                and lower(auth.email()) = ANY (string_to_array(lower(regexp_replace(c.client_email, '\s', '', 'g')), ','))
+          )
+      ))
+  );
+  ```
+  The INSERT policy is also narrower than the old one on purpose: a client can only ever
+  insert a `Client Request` row under their own client, matching exactly what
+  `submitPortalRequest()`/`submitClientRequest()` already do — not an arbitrary row
+  under any assignee or status the way the old `WITH CHECK (true)` allowed.
+
+  `regexp_replace(c.client_email, '\s', '', 'g')` rather than a plain space-strip: the
+  first attempt used `replace(c.client_email, ' ', '')` and the fallback silently failed
+  for a real client until `length(client_email)` showed 2 bytes more than the visible
+  address — hidden `\r\n` that a space-only strip never touched. `\s` catches it
+  regardless of which whitespace character is actually there. See the Known gaps entry
+  on this for why that's worth a wider check across `client_email`.
+
+  Verified with two accounts: one with a real `user_client_access` row (confirms the
+  primary path), one without (confirms the fallback) — scoped read, own-client insert
+  succeeding, and an insert impersonating a different client failing, on both.
+  `Admin and Investor Task Access` (`ALL`, grants `video@midasmediafirm.com`,
+  `info@midasmediafirm.com`, and one client contact full read/write/delete on every
+  client's tasks) was left completely untouched — intentionally not evaluated or acted
+  on as part of this fix.
 
 All outbound HTTP from Postgres uses `pg_net` wrapped in an exception block, so a Make
 outage can never roll back a client's transaction.
@@ -507,6 +576,15 @@ GitHub Pages copy but not from the GHL domain.
 
 ## Known gaps
 
+- **`user_client_access` has rows for only 4 of the ~10+ active clients**, discovered
+  while fixing `tasks`' RLS (see Database objects). Per the Access model section, a row
+  is supposed to be created automatically when a client is created, and again when a
+  `pre_approved_users` invite is applied at sign-in — one or both of those isn't firing
+  reliably, or these clients predate whichever one is supposed to do it. Not urgent
+  right now, since every RLS policy that matters also falls back to matching
+  `clients.client_email` directly — but that fallback is a patch, not a fix, and every
+  future client-facing table will need the same fallback bolted on until the real
+  auto-grant path is repaired.
 - Admin alert Make scenario unfinished
 - Reminder "goes quiet once submitted" never verified
 - `client_contacts` mostly empty, so reminders reach almost nobody yet
@@ -535,9 +613,16 @@ GitHub Pages copy but not from the GHL domain.
 - No ad-level performance data exists anywhere — `daily_reports` is account-level, so
   "which ad should we turn off" is unanswerable until the Make pull fetches Insights at
   `level=ad`
-- **`tasks`' own RLS hasn't been checked** and may have the same shape of problem
-  `daily_reports` did (see below) — the portal only proves its *browser* filters by
-  client (`cpTasksForClient()`), not that its *query* does
+- **A `client_email` value had 2 bytes of hidden trailing whitespace** (length 23 for a
+  21-character address — almost certainly `\r\n`), discovered while testing the `tasks`
+  RLS fix below. Only confirmed on that one row, but `client_email` is what several
+  legacy RLS policies on `daily_reports`/`weekly_reports` match against via plain string
+  equality — if this is a wider data-quality issue rather than a one-off, other clients
+  could have been silently losing access through those tables' legacy path too, not
+  just the new `tasks` fallback. Worth a sweep: `select name, client_email from clients
+  where client_email ~ '\s' or client_email != btrim(client_email);` — none of the
+  policies that already existed before this session normalize for it, only the two new
+  `tasks` policies documented below do (`regexp_replace(c.client_email, '\s', '', 'g')`)
 - Reports are meant to start pulling from the client work summary once revamped — not
   built yet, this is the documented intention only (see Client work summary)
 - `architecture.txt` is the original doc and is substantially out of date — it predates
