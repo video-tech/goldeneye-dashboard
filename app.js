@@ -4249,31 +4249,90 @@ window.renderClientReports = async function() {
 }
 
         async function generateReport() {
-            const n = document.getElementById('rpt-improving').value.trim(); 
-            const b = document.getElementById('rpt-gen-btn'); 
-            b.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Generating AI Report...'; 
+            const n = document.getElementById('rpt-improving').value.trim();
+            const b = document.getElementById('rpt-gen-btn');
+            b.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Generating AI Report...';
             b.disabled = true;
 
             const dateRangeLabel = document.getElementById('c-date-label') ? document.getElementById('c-date-label').innerText : 'Selected Range';
 
-            let memory = "No previous report history found.";
+            // ---- Real trend, computed here — never the model's own past prose.
+            // The old "memory" mechanism handed the model LAST WEEK'S GENERATED EMAIL
+            // and told it to "reference the historical context to show trends." Every
+            // report was written by riffing on its own prior output, which is exactly
+            // the mechanism that made these converge on the same phrasing week after
+            // week. A real percentage against last period's actual numbers, computed
+            // in code rather than left for the model to guess at, fixes that at the
+            // root — same principle as everywhere else in this app: the model narrates
+            // a fact, it never calculates one.
+            const { s, e } = dateRangeFor(cDateRange, cCustomStart, cCustomEnd);
+            const spanDays = Math.round((e - s) / 86400000) + 1;
+            const priorEnd = new Date(s); priorEnd.setDate(priorEnd.getDate() - 1);
+            const priorStart = new Date(priorEnd); priorStart.setDate(priorStart.getDate() - spanDays + 1);
+
+            const priorRows = reportsForClient(cSelectedAccount).filter(r => {
+                if (!r.date) return false;
+                const rd = new Date(r.date.split('T')[0] + 'T12:00:00');
+                return rd >= priorStart && rd <= priorEnd;
+            });
+            let priorSpend = 0, priorLeads = 0;
+            priorRows.forEach(r => { priorSpend += parseFloat(r.spend || 0); priorLeads += parseInt(r.leads || 0); });
+            const priorCpl = priorLeads > 0 ? priorSpend / priorLeads : null;
+            const hasPriorData = priorRows.length > 0;
+
+            const pctChange = (now, was) => (!was) ? null : ((now - was) / was) * 100;
+            const fmtPct = (v) => v === null ? 'n/a' : `${v > 0 ? '+' : ''}${v.toFixed(0)}%`;
+            const spendDelta = hasPriorData ? pctChange(currentAdsStats.s || 0, priorSpend) : null;
+            const leadsDelta = hasPriorData ? pctChange(currentAdsStats.l || 0, priorLeads) : null;
+            const cplDelta   = (hasPriorData && priorCpl !== null) ? pctChange(currentAdsStats.cpl || 0, priorCpl) : null;
+
+            const trendBlock = hasPriorData
+                ? `PREVIOUS PERIOD (the ${spanDays} day${spanDays === 1 ? '' : 's'} immediately before this range):
+- Spend: $${priorSpend.toFixed(2)} | Leads: ${priorLeads} | CPL: ${priorCpl !== null ? '$' + priorCpl.toFixed(2) : 'n/a (no leads)'}
+
+COMPUTED CHANGE vs previous period — use these exact figures for any trend you state, never calculate your own:
+- Spend: ${fmtPct(spendDelta)} | Leads: ${fmtPct(leadsDelta)} | CPL: ${fmtPct(cplDelta)}`
+                : `PREVIOUS PERIOD: no data for the period immediately before this range — likely a new account or early in tracking. Do not invent a trend; say plainly there isn't yet a prior period to compare against.`;
+
+            // ---- This week's work, straight from the same daily summary already
+            // shown in the client's own portal (see client-summary edge function) —
+            // so the report and the portal never disagree about what happened.
+            let workBlock = 'WORK SUMMARY: not available for this period.';
             try {
-                const { data: previousReports, error } = await supabaseClient
-                    .from('weekly_reports')
-                    .select('report_body')
+                const { data: workRows } = await supabaseClient
+                    .from('client_work_summaries')
+                    .select('summary, tasks_completed, tasks_open, range_start, range_end')
                     .eq('client_name', cSelectedAccount)
-                    .order('created_at', { ascending: false })
+                    .order('range_end', { ascending: false })
                     .limit(1);
-                
-                if (previousReports && previousReports.length > 0) {
-                    memory = previousReports[0].report_body;
+                if (workRows && workRows.length) {
+                    const w = workRows[0];
+                    workBlock = `WORK SUMMARY (already written for the client's portal, covering ${w.range_start} to ${w.range_end} — ${w.tasks_completed} task${w.tasks_completed === 1 ? '' : 's'} completed, ${w.tasks_open} currently open):
+"${w.summary}"`;
                 }
-            } catch(err) {
-                console.warn("Could not fetch memory:", err);
+            } catch (err) {
+                console.warn('Could not load work summary for report:', err);
             }
 
-            const p = `You are an expert, highly transparent Senior Media Buyer writing a weekly update for a client. 
-            
+            // ---- SEO, only when this client actually has organic tracking. An empty
+            // block plus the instruction below keeps the model from inventing SEO
+            // performance for a client who has none set up.
+            const normC = normalize(cSelectedAccount);
+            const seoRows = globalSeoData.filter(r => {
+                if (!r.date || !normalize(r.client_name).includes(normC)) return false;
+                const rd = new Date(r.date.split('T')[0] + 'T12:00:00');
+                return rd >= s && rd <= e;
+            });
+            let seoBlock = '';
+            if (seoRows.length) {
+                let seoClicks = 0, seoImpressions = 0, sumPos = 0;
+                seoRows.forEach(r => { seoClicks += parseInt(r.clicks) || 0; seoImpressions += parseInt(r.impressions) || 0; sumPos += parseFloat(r.avg_position || 0); });
+                seoBlock = `\n\nORGANIC SEO (this period — omit entirely from the report if this section is blank):
+- Clicks: ${seoClicks.toLocaleString()} | Impressions: ${seoImpressions.toLocaleString()} | Avg. position: ${(sumPos / seoRows.length).toFixed(1)}`;
+            }
+
+            const p = `You are an expert, highly transparent Senior Media Buyer writing a weekly update for a client.
+
             CLIENT DATA:
             - Client Name: ${cSelectedAccount}
             - Date Range: ${dateRangeLabel}
@@ -4283,24 +4342,46 @@ window.renderClientReports = async function() {
             - CPC: $${(currentAdsStats.cpc || 0).toFixed(2)}
             - CTR: ${(currentAdsStats.ctr || 0).toFixed(2)}%
 
-            HISTORICAL CONTEXT (LAST WEEK'S EMAIL):
-            "${memory}"
-            
-            MEDIA BUYER'S NOTES: 
-            "${n || 'No manual notes provided this week. Please analyze the raw data above and compare it to the historical context to write the highlights and action plan automatically.'}"
+            ${trendBlock}
+
+            ${workBlock}${seoBlock}
+
+            MEDIA BUYER'S NOTES:
+            "${n || 'No manual notes provided this week. Draw the highlights and action plan from the data and work summary above rather than waiting for more.'}"
 
             YOUR TASK:
             Return ONLY a JSON object with two keys: "email_summary" and "html_report".
 
+            HOW TO BE HONEST WITHOUT BEING NEGATIVE:
+            State every number plainly regardless of which way it moved — never soften a decline
+            into something it isn't, and never manufacture a "win" that isn't in the data above.
+            If something got worse, say so plainly, then say what's being done about it — in
+            that order. If a number barely moved, say it was a steady, uneventful period; that is
+            a completely normal thing to report and needs no dressing up as either a triumph or a
+            problem. Ground every specific claim in the numbers, the work summary, or the SEO data
+            you were given above — never invent a cause you were not given.
+
+            WHAT MAKES THIS REPORT DIFFERENT FROM LAST WEEK'S:
+            Pull the SPECIFIC things that make this period what it was — a task that got
+            finished, one that's overdue, a real computed percentage, an SEO number if given.
+            Draw highlights from whichever of ad performance, the work summary, or SEO has the
+            most concrete, specific material this period — do not default to only ad metrics
+            every time. A report with nothing specific in it is a sign the data above went unused.
+
             RULES FOR "email_summary":
             - Tone: Casual, completely honest, analytical, and direct. Do not use corporate fluff.
             - Format: Start directly with "Hi team," (Do NOT output a "Subject:" line).
-            - Content: State the spend and leads upfront. Explain the "why" behind the numbers (good or bad). Reference the historical context to show trends (e.g., "we recovered from last week's CPM spike"). If manual notes were provided, use them. State the immediate priority/action step.
+            - Content: State the spend and leads upfront. Explain the "why" behind the numbers
+              using the computed change and the work summary above — never a guess. If manual
+              notes were provided, use them. State the immediate priority/action step.
 
             RULES FOR "html_report":
             - Output a complete, copy-safe HTML string based on the data and notes.
+            - Every trend pill uses the COMPUTED CHANGE percentage given above verbatim (e.g.
+              "+12% vs last period"), never a vague label like "Severe Drop" — and reads
+              "No prior data" rather than inventing a comparison when none was given.
             - Use this EXACT structure and inline styling, but replace the placeholders, highlights, and improvements to match this week's reality:
-            
+
             <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background-color: #f5f5f7;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f5f5f7; padding: 40px 20px;"><tr><td align="center"><table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;">
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; margin-bottom: 24px; border: 1px solid #e5e5ea;"><div style="font-size: 14px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">${cSelectedAccount}</div><h1 style="font-size: 42px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 16px 0; color: #1d1d1f;">Weekly Performance</h1><div style="font-size: 17px; color: #86868b; font-weight: 500;">${dateRangeLabel}</div></td></tr>
