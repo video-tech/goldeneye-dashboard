@@ -74,6 +74,35 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
 - `user_has_client_access()`, `current_user_is_admin()` — SECURITY DEFINER helpers used by
   RLS policies.
 - `admin_alert_recipients` — who gets texted, toggleable in Settings → Notifications.
+- **`daily_reports` SELECT policy, fixed 2026-09-10.** Three `USING (true)` policies —
+  `Allow authenticated users to read daily reports`, `Allow Auth Read Reports`,
+  `Auth Read Ads` — were dropped; under RLS's OR semantics they had made every
+  authenticated user able to read every client's ad performance regardless of the two
+  properly-scoped policies sitting right next to them. Replaced with one policy keyed on
+  `ad_account_id` rather than `client_email` — only 91% of rows had a populated email,
+  so an email-only policy would have made the other 9% invisible to *everyone*, a
+  regression rather than a fix:
+  ```sql
+  create policy "Clients read their own account by ad_account_id"
+  on daily_reports for select
+  using (
+      exists (
+          select 1 from clients c
+          where c.ad_account_id is not null and c.ad_account_id <> ''
+            and regexp_replace(c.ad_account_id, '\D', '', 'g')
+              = regexp_replace(coalesce(daily_reports.ad_account_id, ''), '\D', '', 'g')
+            and user_has_client_access(c.name)
+      )
+      or current_user_is_admin()
+  );
+  ```
+  Mirrors `reportsForClient()` in app.js exactly — strip both sides to bare digits and
+  compare — so it doesn't depend on `client_email` ever having been backfilled. Verified
+  by simulating a real client's JWT in a rolled-back transaction
+  (`set local request.jwt.claims`) and confirming it returned only that client's own
+  `account_name`, and by an actual client login afterward. The two pre-existing
+  email-based policies (`Agency Owner Master Access`, `Users can only see their own
+  data`) were left in place as an additional path, untouched.
 
 All outbound HTTP from Postgres uses `pg_net` wrapped in an exception block, so a Make
 outage can never roll back a client's transaction.
@@ -342,15 +371,14 @@ ads pull the way the audit is, since it reads tasks, not `daily_reports`.
 
 This table is queried **directly by each client's own browser session**, the same way
 `daily_reports` is. Its SELECT policy uses `user_has_client_access(client_name)` — the helper
-CLAUDE.md's Access model section already documents — rather than being copied from `daily_reports`
-itself.
+CLAUDE.md's Access model section already documents.
 
-**`daily_reports` currently carries three separate `SELECT ... USING (true)` policies** stacked
-alongside two properly-scoped ones. Postgres RLS policies OR together for the same command, so any
-`true` policy makes the careful ones dead: **today, any authenticated user — client or not — can
-read every client's spend, leads, and account names from `daily_reports`.** Found while building
-this feature, not introduced by it, and not yet fixed — flagged in Known gaps. Do not use that
-table's policy set as a template for anything new.
+**It was deliberately not modeled on `daily_reports`'s policy set at the time**, because that
+table then carried three separate `SELECT ... USING (true)` policies stacked alongside two
+properly-scoped ones. Postgres RLS policies OR together for the same command, so any `true` policy
+makes the careful ones dead — any authenticated user, client or not, could read every client's
+spend, leads, and account names. Found while building this feature. **Fixed 2026-09-10** — see
+`daily_reports` in Database objects below for the exact policy now in place.
 
 `tasks` itself has not been checked the same way — the portal filters `globalTasksData`
 client-side (`cpTasksForClient()`), which only proves the *browser* hides other clients' tasks,
@@ -483,12 +511,9 @@ GitHub Pages copy but not from the GHL domain.
 - No ad-level performance data exists anywhere — `daily_reports` is account-level, so
   "which ad should we turn off" is unanswerable until the Make pull fetches Insights at
   `level=ad`
-- **`daily_reports` has three stacked `SELECT USING (true)` RLS policies** alongside its
-  two real ones — under Postgres's OR semantics this means any authenticated user, not
-  just the right client, can currently read every client's ad performance. Found while
-  building the client work summary; not yet fixed. `tasks`' own RLS hasn't been checked
-  and may have the same problem — the portal only proves its *browser* filters by
-  client, not that its *query* does
+- **`tasks`' own RLS hasn't been checked** and may have the same shape of problem
+  `daily_reports` did (see below) — the portal only proves its *browser* filters by
+  client (`cpTasksForClient()`), not that its *query* does
 - Reports are meant to start pulling from the client work summary once revamped — not
   built yet, this is the documented intention only (see Client work summary)
 - `architecture.txt` is the original doc and is substantially out of date — it predates
