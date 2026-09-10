@@ -4294,24 +4294,45 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
 - Spend: ${fmtPct(spendDelta)} | Leads: ${fmtPct(leadsDelta)} | CPL: ${fmtPct(cplDelta)}`
                 : `PREVIOUS PERIOD: no data for the period immediately before this range — likely a new account or early in tracking. Do not invent a trend; say plainly there isn't yet a prior period to compare against.`;
 
-            // ---- This week's work, straight from the same daily summary already
-            // shown in the client's own portal (see client-summary edge function) —
-            // so the report and the portal never disagree about what happened.
-            let workBlock = 'WORK SUMMARY: not available for this period.';
-            try {
-                const { data: workRows } = await supabaseClient
-                    .from('client_work_summaries')
-                    .select('summary, tasks_completed, tasks_open, range_start, range_end')
-                    .eq('client_name', cSelectedAccount)
-                    .order('range_end', { ascending: false })
-                    .limit(1);
-                if (workRows && workRows.length) {
-                    const w = workRows[0];
-                    workBlock = `WORK SUMMARY (already written for the client's portal, covering ${w.range_start} to ${w.range_end} — ${w.tasks_completed} task${w.tasks_completed === 1 ? '' : 's'} completed, ${w.tasks_open} currently open):
-"${w.summary}"`;
-                }
-            } catch (err) {
-                console.warn('Could not load work summary for report:', err);
+            // ---- This week's work, computed directly from tasks — the same source
+            // client-summary reads, not its finished paragraph. A pre-written summary
+            // is one fused blob of prose and can't be selectively trimmed; the client
+            // wants exact control ("if we did nothing, don't say what we did — but
+            // still say what's next" / "if there's truly nothing, say nothing"), which
+            // only works by deciding in code what facts the model is even given, then
+            // telling it plainly what each combination means. Same principle as every
+            // other AI feature in this app: never hand the model something to
+            // reinterpret or negate, just withhold the fact it shouldn't mention.
+            const wantClient = normalize(cSelectedAccount);
+            const clientTasks = globalTasksData.filter(t =>
+                normalize(t.client || '') === wantClient && t.type !== 'Client Request');
+
+            const completedTasks = clientTasks.filter(t => {
+                if (t.status !== 'Complete' || !t.updated_at) return false;
+                const d = new Date(t.updated_at);
+                return d >= s && d <= e;
+            });
+            const openTasks = clientTasks.filter(t => t.status !== 'Complete');
+
+            // Never let the model imply an overdue task is still ahead of us — same
+            // fix as client-summary's edge function, for the same reason: the model is
+            // never told what "today" is, so it must never be asked to judge a date.
+            const dueTag = (due) => {
+                if (!due) return '';
+                const d = new Date(due + 'T12:00:00');
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const diffDays = Math.round((d - today) / 86400000);
+                if (diffDays < 0) return ` (OVERDUE — was due ${due})`;
+                if (diffDays <= 3) return ` (DUE SOON — ${due})`;
+                return ` (DUE ${due})`;
+            };
+
+            let workBlock = '';
+            if (completedTasks.length) {
+                workBlock += `\n\nCOMPLETED THIS PERIOD:\n${completedTasks.map(t => `- ${stripSlashEscapes(t.title)}`).join('\n')}`;
+            }
+            if (openTasks.length) {
+                workBlock += `\n\nCURRENTLY OPEN / STILL TO DO:\n${openTasks.map(t => `- ${stripSlashEscapes(t.title)}${dueTag(t.due)}`).join('\n')}`;
             }
 
             // ---- SEO, only when this client actually has organic tracking. An empty
@@ -4347,10 +4368,24 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             ${workBlock}${seoBlock}
 
             MEDIA BUYER'S NOTES:
-            "${n || 'No manual notes provided this week. Draw the highlights and action plan from the data and work summary above rather than waiting for more.'}"
+            "${n || 'No manual notes provided this week. Draw the highlights and action plan from the data above rather than waiting for more.'}"
 
             YOUR TASK:
             Return ONLY a JSON object with two keys: "email_summary" and "html_report".
+
+            WORK STATUS — follow this exactly, it is not optional:
+            - A "COMPLETED THIS PERIOD" list above means real work was finished — name it.
+            - No "COMPLETED THIS PERIOD" list above means nothing was completed. Do NOT say so.
+              Never write anything like "nothing was completed" or "a quiet week on tasks" — just
+              skip the topic of completed work entirely and move straight to what's still to do
+              or to ad performance. Silence on a topic is not the same as bad news, so do not
+              apologize for it or draw attention to its absence.
+            - A "CURRENTLY OPEN / STILL TO DO" list above means say what's still in motion,
+              repeating any OVERDUE / DUE SOON / DUE label exactly as given — never as "scheduled"
+              or "on track" for anything marked OVERDUE.
+            - If NEITHER list appears above, there is nothing to report on work or tasks at all
+              this period. Do not mention tasks, work, or projects anywhere in the report — go
+              straight from ad performance into the notes or action plan.
 
             HOW TO BE HONEST WITHOUT BEING NEGATIVE:
             State every number plainly regardless of which way it moved — never soften a decline
@@ -4358,13 +4393,13 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             If something got worse, say so plainly, then say what's being done about it — in
             that order. If a number barely moved, say it was a steady, uneventful period; that is
             a completely normal thing to report and needs no dressing up as either a triumph or a
-            problem. Ground every specific claim in the numbers, the work summary, or the SEO data
+            problem. Ground every specific claim in the numbers, the work lists, or the SEO data
             you were given above — never invent a cause you were not given.
 
             WHAT MAKES THIS REPORT DIFFERENT FROM LAST WEEK'S:
             Pull the SPECIFIC things that make this period what it was — a task that got
             finished, one that's overdue, a real computed percentage, an SEO number if given.
-            Draw highlights from whichever of ad performance, the work summary, or SEO has the
+            Draw highlights from whichever of ad performance, the work lists, or SEO has the
             most concrete, specific material this period — do not default to only ad metrics
             every time. A report with nothing specific in it is a sign the data above went unused.
 
@@ -4372,7 +4407,7 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             - Tone: Casual, completely honest, analytical, and direct. Do not use corporate fluff.
             - Format: Start directly with "Hi team," (Do NOT output a "Subject:" line).
             - Content: State the spend and leads upfront. Explain the "why" behind the numbers
-              using the computed change and the work summary above — never a guess. If manual
+              using the computed change and the work lists above — never a guess. If manual
               notes were provided, use them. State the immediate priority/action step.
 
             RULES FOR "html_report":
