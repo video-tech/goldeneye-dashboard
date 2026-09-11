@@ -659,7 +659,7 @@ name fails silently: every lead lands as "unknown" and the organic count reads z
   and so on) and by value (anything shaped like an email, or a phone number of 10+ digits),
   while keeping IDs, dates and every attribution field. Header **names** are logged but never
   their values, and the `k` query parameter is never logged.
-- 51 local checks cover the gate and the redaction. **A refused request logs why**
+- 55 local checks cover the gate and the redaction, including a secret pasted into the body by mistake, which is redacted by key name and by value. **A refused request logs why**
   (`ghl-lead-webhook REFUSED`): whether no secret was sent or it didn't match, plus both
   lengths and the header names, but never either secret or any of the body. Refusals used to
   log nothing, which is why the first real GHL test came back 401 with no explanation. Both

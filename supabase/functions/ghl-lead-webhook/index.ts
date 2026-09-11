@@ -28,20 +28,30 @@ const PERSONAL_KEY = /(^|_)(email|phone|name|first|last|full|address|street|city
 const LOOKS_LIKE_EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const LOOKS_LIKE_PHONE = /^\+?[\d\s().-]{7,}$/;
 
-function redact(value: unknown, key = "", depth = 0): unknown {
+// Credentials never belong in a log, whatever GHL calls the field. This matters more than
+// it looks: GHL's standard Webhook action can't send custom headers, so whoever sets it up
+// may paste the secret into its "custom data" instead — which puts it in the BODY, where a
+// 64-char hex string looks like neither an email nor a phone number and would otherwise be
+// printed verbatim.
+const SECRET_KEY = /(secret|token|password|passwd|api[_-]?key|authori[sz]ation)/i;
+
+function redact(value: unknown, key = "", depth = 0, secret = ""): unknown {
     if (depth > 8) return "[too deep]";
     if (value === null || value === undefined) return value;
 
-    if (Array.isArray(value)) return value.slice(0, 20).map((v) => redact(v, key, depth + 1));
+    if (Array.isArray(value)) return value.slice(0, 20).map((v) => redact(v, key, depth + 1, secret));
 
     if (typeof value === "object") {
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-            out[k] = redact(v, k, depth + 1);
+            out[k] = redact(v, k, depth + 1, secret);
         }
         return out;
     }
 
+    if (SECRET_KEY.test(key)) return "[redacted-secret]";
+    // ...and by value, for a secret pasted under a key nobody would think to guess.
+    if (typeof value === "string" && secret && normaliseSecret(value) === secret) return "[redacted-secret]";
     if (PERSONAL_KEY.test(key)) return "[redacted]";
 
     if (typeof value === "string") {
@@ -135,7 +145,7 @@ Deno.serve(async (req: Request) => {
         auth_via: req.headers.get("x-webhook-secret") ? "header" : "query",
         header_names: headerNames,
         query_keys: queryKeys,
-        payload: redact(body),
+        payload: redact(body, "", 0, expected),
     }, null, 2));
 
     return Response.json({ ok: true, captured: true });
