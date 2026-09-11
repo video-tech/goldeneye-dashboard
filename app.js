@@ -6730,10 +6730,95 @@ window.openEditClientModal = function() {
     renderContactRows(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
     document.getElementById('edit-client-business-id').value  = c.business_id || '';
+
+    document.getElementById('edit-client-gsc-property').value = c.gsc_property || '';
+    document.getElementById('edit-client-ga4-property').value = c.ga4_property_id || '';
+    document.getElementById('edit-client-gbp-location').value = c.gbp_location_id || '';
+    document.getElementById('edit-client-ghl-location').value = c.ghl_location_id || '';
+    // Cleared on open, not left showing the previous client's verdict — a stale green
+    // "Connected" against a different client is worse than no answer at all.
+    document.getElementById('seo-connection-result').innerHTML = '';
+
     document.getElementById('edit-client-retainer').value     = c.monthly_retainer || '';
     if (c.contract_type) document.getElementById('edit-client-contract').value = c.contract_type;
 
     modal.style.display = 'flex';
+};
+
+// ---- Search Console connection test ----
+// Answers "is this wired up?" at the moment the property is typed, rather than three
+// days later when the chart is still empty and nobody can tell whether that means no
+// traffic, a typo, or a permission that was never granted. Those three look identical
+// from the outside and are the reason SEO integrations rot quietly.
+//
+// It deliberately tests the string currently IN the box, not the one already saved —
+// otherwise a correct old value would pass while the new typo sat there unsaved.
+const SEO_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/seo-sync';
+
+window.testSeoConnection = async function() {
+    const out = document.getElementById('seo-connection-result');
+    const btn = document.getElementById('btn-test-seo-connection');
+    if (!out || !btn) return;
+
+    // The saved name, not the typed one: the lookup is by exact clients.name, and a
+    // rename that hasn't been saved yet doesn't exist in the database to be found.
+    const clientName = document.getElementById('edit-client-original-name').value;
+    const property = document.getElementById('edit-client-gsc-property').value.trim();
+
+    if (!property) {
+        out.innerHTML = '<span class="text-gray-500">Enter a Search Console property first.</span>';
+        return;
+    }
+
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Checking...';
+    btn.disabled = true;
+    out.innerHTML = '';
+
+    try {
+        // The user's own session token, not the anon key: this mode spends Google quota
+        // and reveals which properties our service account can read, so the function
+        // requires a real signed-in admin rather than anyone holding the public key.
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+
+        const res = await fetch(SEO_FN, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({ mode: 'check', client: clientName, property })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `the sync service returned ${res.status}`);
+
+        let html = data.ok
+            ? `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>${escapeAttr(data.message)}</span>`
+            : `<span class="text-amber-400 font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${escapeAttr(data.message)}</span>`;
+
+        // A near-miss is the common case — trailing slash, http vs https, or a
+        // URL-prefix property typed where the account holds a domain one. Offering the
+        // exact string as a button beats asking someone to spot the difference by eye.
+        if (data.suggestion) {
+            // escapeHTML, not escapeAttr, and only here: this value lands inside a JS
+            // string literal within an onclick, which is the one place escapeHTML is
+            // the correct escaper. escapeAttr's &#39; would be read back literally.
+            html += `<br><button type="button" class="mt-1 text-blue-400 hover:text-blue-300 font-bold" onclick="document.getElementById('edit-client-gsc-property').value='${escapeHTML(data.suggestion)}'; testSeoConnection();">Use &quot;${escapeAttr(data.suggestion)}&quot;</button>`;
+        }
+        if (data.service_account) {
+            html += `<br><span class="text-gray-500">Service account: ${escapeAttr(data.service_account)}</span>`;
+        }
+        if (Array.isArray(data.available) && data.available.length) {
+            html += `<br><span class="text-gray-500">Readable properties: ${data.available.map(s => escapeAttr(s)).join(', ')}</span>`;
+        }
+        out.innerHTML = html;
+    } catch (err) {
+        out.innerHTML = `<span class="text-red-400">${escapeAttr(err.message)}</span>`;
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
 };
 
 // ---- Check-in contacts editor ----
@@ -6851,7 +6936,20 @@ window.saveClientEdits = async function(e) {
             ad_account_id: adAccountId || null,
             business_id: document.getElementById('edit-client-business-id').value.trim() || null,
             contract_type: document.getElementById('edit-client-contract').value,
-            monthly_retainer: document.getElementById('edit-client-retainer').value || null
+            monthly_retainer: document.getElementById('edit-client-retainer').value || null,
+
+            // Stored verbatim, deliberately not normalized: Search Console treats
+            // 'https://example.com/' and 'https://example.com' as different properties
+            // and a domain property is 'sc-domain:example.com'. "Helpfully" tidying a
+            // trailing slash away here would silently break the pull. Test connection
+            // is what catches a wrong one, and it names the close match.
+            gsc_property: document.getElementById('edit-client-gsc-property').value.trim() || null,
+            // These two are numeric ids that get pasted out of URLs, so strip anything
+            // that isn't a digit — same treatment the Meta ad account id gets.
+            ga4_property_id: document.getElementById('edit-client-ga4-property').value.replace(/\D/g, '') || null,
+            gbp_location_id: document.getElementById('edit-client-gbp-location').value.replace(/\D/g, '') || null,
+            // GHL ids are alphanumeric, so this one is trimmed only.
+            ghl_location_id: document.getElementById('edit-client-ghl-location').value.trim() || null
         };
 
         const { error } = await supabaseClient.from('clients').update(payload).eq('id', id);

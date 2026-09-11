@@ -36,7 +36,10 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
 
 1. **Daily ads pull** — schedule → Supabase Search Rows (active clients) → Facebook
    Insights per client → Google Sheets → write `daily_reports`
-2. **SEO data to Golden Eye** — writes `seo_metrics`, feeds the portal's Organic SEO tab
+2. **SEO data to Golden Eye** — writes `seo_metrics`, feeds the portal's Organic SEO tab.
+   **Being retired**: the `seo-sync` edge function now pulls Search Console directly and far
+   more deeply (by page and by query). Leave this running until the two are compared over the
+   same dates, then unschedule it — see SEO measurement
 3. **Onboarding form completion** — GHL form submitted → look up client → write
    `client_onboarding_progress` so the step ticks off in the portal
 4. **Onboarding complete SMS** — Supabase trigger → webhook → tag GHL contact → GHL
@@ -197,6 +200,39 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   client's tasks) was left completely untouched. The third grant is a deliberate,
   confirmed-intentional exception — that contact is treated as an investor, not an
   ordinary client — not an oversight to clean up.
+
+- **`client_row_visible(text)`, added 2026-09-10** — the RLS helper every client-facing table
+  added from here on should use. Wraps admin / `user_has_client_access()` / `client_email`
+  fallback into one call so the fallback cannot be forgotten. See SEO measurement for why that
+  matters more than it looks.
+- **`seo_daily`, `seo_pages_daily`, `seo_queries_daily`, `seo_sync_state`, added 2026-09-10** —
+  Search Console history, written only by the `seo-sync` edge function via `service_role`,
+  readable through `client_row_visible(client_name)`. Full reasoning in SEO measurement.
+  `clients` also gained `gsc_property`, `ga4_property_id`, `gbp_location_id`, `ghl_location_id`.
+- **`rename_client()`, replaced 2026-09-11 — it had no caller check.** It was `SECURITY
+  DEFINER` (runs with the owner's rights, bypasses RLS) and **checked nothing about who called
+  it**. `has_function_privilege` confirmed both `anon` and `authenticated` could execute it, so
+  anyone holding the public anon key — which is in the page source — could rename any client.
+  That is worse than vandalism: renaming a victim's client onto your own client's name merges
+  their tasks, reports and check-ins into yours, where your own RLS then shows them to you. The
+  only guard was app.js hiding the button.
+
+  The replacement is at the end of `seo-sync/schema.sql`:
+  - requires `current_user_is_admin()`
+  - pins `search_path = public`
+  - refuses a new name that normalizes to an existing client. That stops two histories merging,
+    and it's also what keeps the `seo_*` primary keys and `client_work_summaries`' unique key
+    from colliding mid-rename.
+  - revokes EXECUTE from `public` and `anon`. This has to be explicit, because
+    `create or replace` keeps the old function's grants.
+
+  It also moves six tables the old version skipped: the four `seo_*` tables, `client_contacts`
+  and `client_work_summaries`. Its error messages deliberately avoid the word "function",
+  because `saveClientEdits()` reads any error containing it as "rename_client isn't installed"
+  and would show the wrong explanation.
+
+  Verified in rolled-back transactions: `anon` can no longer execute it, a client JWT is
+  refused, an admin JWT renames, and a rename onto an existing client is refused.
 
 All outbound HTTP from Postgres uses `pg_net` wrapped in an exception block, so a Make
 outage can never roll back a client's transaction.
@@ -474,9 +510,132 @@ makes the careful ones dead — any authenticated user, client or not, could rea
 spend, leads, and account names. Found while building this feature. **Fixed 2026-09-10** — see
 `daily_reports` in Database objects below for the exact policy now in place.
 
-`tasks` itself has not been checked the same way — the portal filters `globalTasksData`
-client-side (`cpTasksForClient()`), which only proves the *browser* hides other clients' tasks,
-not that the *query* does. Worth the same check before trusting it.
+`tasks` was checked the same way afterwards and had the same leak, plus a write one —
+**fixed 2026-09-10**, see `tasks` in Database objects. The general lesson stands: the portal
+filtering `globalTasksData` client-side (`cpTasksForClient()`) only ever proved the *browser*
+hides other clients' rows, never that the *query* does.
+
+Every client-facing table added since then uses `client_row_visible()` instead of hand-writing
+the policy — see the SEO section below.
+
+## SEO measurement
+
+Four sources, one destination. Everything a client sees about organic search comes out of
+Postgres tables that a scheduled edge function fills; nothing is fetched live from Google by a
+browser, and nothing about SEO goes through Make.
+
+**Phase 1 (built 2026-09-10) is Search Console ingestion only.** No UI beyond four fields on the
+client record. That order is deliberate: Search Console keeps roughly **16 months** and then
+drops the oldest month for good, so every week the pull is not running is a week that can never
+be reported on or built into a case study. Charts can be written any time; history cannot be
+recovered. The remaining phases — organic leads, GA4, the keyword/changelog UI, the portal tab
+and report block, baselines, GBP — are in the plan file and land on top of this.
+
+### How a client is connected
+
+Four nullable columns on `clients`, and **the presence of a value is the switch**. There is no
+separate "SEO enabled" flag, because a flag can say yes while the data cannot actually be
+fetched, and then nobody can tell an empty chart from a broken one.
+
+| Column | What it holds | Where it comes from |
+|---|---|---|
+| `gsc_property` | `sc-domain:example.com` **or** `https://www.example.com/` | Search Console, verbatim |
+| `ga4_property_id` | digits only | GA4 Admin → Property details |
+| `gbp_location_id` | digits only | Business Profile Manager URL |
+| `ghl_location_id` | GHL sub-account id | resolves inbound lead webhooks (phase 2) |
+
+`gsc_property` is stored **exactly as typed and never normalized**. Search Console treats
+`https://example.com/` and `https://example.com` as different properties, and a domain property
+is a third string again. Tidying a trailing slash away here would silently break the pull, so
+the Edit Client modal has a **Test connection** button instead: it asks the function whether the
+service account can actually read the string *currently in the box* — not the saved one, or a
+correct old value would pass while the new typo sat there unsaved — and when it can't, it names
+the close match it *can* read as a one-click fix. That covers the whole failure class: typo,
+wrong property type, or the service account never added.
+
+Access is granted per property by adding **one service-account email** as a user in Search
+Console (Restricted is enough), GA4 (property Viewer), and later GBP (Manager). No OAuth, no
+refresh token to expire quietly — the failure mode is always "that email isn't on this
+property", which is visible and fixable.
+
+### The pull
+
+`supabase/functions/seo-sync/` — `schema.sql`, then deploy, then `schedule.sql`. Two cron jobs:
+
+- **`seo-sync-daily`, `0 18 * * *`, every day.** A rolling window over the **last 10 days**, not
+  "fetch yesterday". **Search Console does not have yesterday yet** — it finalises a day two to
+  three days late and keeps revising after that. A fixed offset would either fetch nothing or
+  freeze a half-counted day forever. The window re-fetches and upserts, so late data lands on
+  the next run with nobody noticing. This is the exact opposite of the Meta pull, whose rows are
+  frozen at a constant age — and that difference is load-bearing in both directions: it is what
+  makes the morning audit's comparisons unbiased, and it is why nothing here feeds that engine.
+  18:00 UTC clears the 16:00 audit, 16:05 summary, and the 08:00-local ads pull on both sides of
+  the daylight-saving drift pg_cron doesn't follow. Every day, not weekdays: weekend traffic is
+  still traffic.
+- **`seo-sync-backfill`, `*/15 * * * *`, permanently.** Walks backwards one calendar month at a
+  time until 16 months exist, then stops for that client for good. It stays scheduled precisely
+  so nobody has to remember it — type a property into a client's record and their history starts
+  arriving on its own, four months per run, about an hour end to end. Once every client is done
+  each run is two cheap queries returning in well under a second, and the Google token is signed
+  **lazily** so an idle run never touches Google at all.
+
+Three tables because `[date]`, `[date,page]` and `[date,query]` are three separate API calls:
+`seo_daily`, `seo_pages_daily`, `seo_queries_daily`. Deliberately **not** one `[date,page,query]`
+table — it multiplies rows for nothing, and its page-level impressions don't sum back to property
+totals anyway (one query showing two of your pages is one property impression but two page
+impressions). `seo_daily` is the only honest source of account totals.
+
+**`position` is impression-weighted, and aggregating it needs
+`sum(position * impressions) / sum(impressions)` — never `avg(position)`.** Google returns an
+already-weighted figure per row. The existing `renderAdminSeo`/`renderCpSeo` take a flat mean of
+daily averages, which weights a 3-impression day the same as a 3,000-impression one and does not
+match what Google shows for the same range. Phase 4 replaces them.
+
+`seo_sync_state` holds a per client + source cursor, because a 16-month backfill cannot finish
+inside one invocation's 150s wall clock. The cursor is saved **after every month**, so a run
+killed by the clock never re-fetches what it already wrote, and a per-client cap of four months
+per run stops one new client eating an entire invocation while another waits at zero. Any
+client's error lands in `last_error` rather than only in a log — one client's revoked access
+must never stop the other nine, and a silently empty chart is the failure this avoids.
+
+Modes: `daily`, `backfill`, and `check` (the Test connection button). `check` and `force` require
+a **real signed-in admin**, verified inside the function — the gateway only proves the caller
+holds the anon key, which is public, and both of those spend Google quota on demand.
+
+### `client_row_visible()` — use this on every new client-facing table
+
+One `SECURITY DEFINER` helper wrapping the three-way check the `tasks` policy spells out inline:
+admin, **or** `user_has_client_access()`, **or** the `client_email` fallback. It exists because
+this build adds seven client-readable tables and **the fallback is not optional** —
+`user_client_access` has rows for only about four of the ten-plus active clients, so a policy
+trusting `user_has_client_access()` alone locks most clients out of their own data while looking
+perfectly correct in review. That already happened once, on `tasks`. A one-line policy that
+cannot forget it is the fix:
+
+```sql
+create policy "..." on <table> for select using (client_row_visible(client_name));
+```
+
+No insert/update/delete policies on any of these tables. Only the edge function writes, via
+`service_role`, which bypasses RLS.
+
+**New tables key on the exact `clients.name`**, not a normalized form. The fuzzy
+`normalize().includes()` matching stays confined to the Meta tables, where it exists because Meta
+renames ad accounts under us. Here we control the writer, so an exact key is both possible and
+safer — and it means **`rename_client()` must be extended for every new table**, or a rename
+orphans a client's entire SEO history with nothing to say what happened.
+
+### The 1000-row cap, which already bites
+
+PostgREST caps any response at **1000 rows** (`max_rows`) and **nothing in app.js pages past it**
+— there is no `.range()` call anywhere. `select('*')` on `seo_metrics` has therefore been
+silently truncated for months, and which rows come back is arbitrary. The page and query tables
+are a hundred times larger.
+
+So: **these tables are never bulk-loaded.** The browser reads `seo_daily` for one client (≤ ~490
+rows for 16 months) and everything else through `security invoker` SQL functions that return a
+few hundred rows by construction. Any `select` on `seo_pages_daily`, `seo_queries_daily` or
+`organic_leads` without a client *and* date filter is a bug.
 
 ## Weekly check-in
 
@@ -628,3 +787,28 @@ GitHub Pages copy but not from the GHL domain.
   built yet, this is the documented intention only (see Client work summary)
 - `architecture.txt` is the original doc and is substantially out of date — it predates
   onboarding, check-ins, reports, triggers, cron and every Make scenario
+- **`rename_client()` still doesn't move `client_onboarding_progress`**, so renaming a client
+  partway through onboarding shows every step as undone in their portal. It was held back in
+  case `trg_onboarding_handoff` fires on UPDATE and re-sends the "onboarding complete" text.
+  The check (2026-09-11) found **no triggers at all on `client_onboarding_progress`**, so
+  adding the table is safe.
+- **`trg_onboarding_handoff` is not where Database objects says it is.** It's documented as
+  living on `client_onboarding_progress`, but that table has no triggers. Either it's on a
+  different table or it no longer exists. The handoff *task* is safe either way, because
+  app.js raises it too (on completion, and again through `reconcileOnboardingHandoffTasks()`
+  on admin load). What depends on the trigger is the "onboarding complete" **text** to the
+  client, which goes via Make. If the trigger is gone, that text hasn't been going out.
+  Find it with
+  `select tgname, tgrelid::regclass, pg_get_triggerdef(oid) from pg_trigger where tgname = 'trg_onboarding_handoff';`
+- **SEO phase 1 needs its Google prerequisites before it does anything**: a GCP project with
+  the Search Console and Analytics Data APIs enabled, a service account whose JSON key is set
+  as the `GOOGLE_SA_JSON` secret, and that service account added as a user on each client's
+  property. Until then every client's `last_error` will say so. The Business Profile API also
+  needs Google's manual approval — days to weeks — which is why GBP is the last phase and
+  nothing else waits on it
+- `renderAdminSeo` / `renderCpSeo` still read `seo_metrics` and still average `avg_position`
+  unweighted, so the Avg Position tile does not match what Google reports for the same range.
+  Both are replaced in phase 4; until then the new `seo_*` tables accumulate unread
+- The SEO plan beyond phase 1 (organic leads via a GHL webhook, GA4, keywords + changelog,
+  the rebuilt portal tab and report block, baselines and case study, GBP) lives in
+  `~/.claude/plans/fluttering-gliding-pebble.md`

@@ -1909,6 +1909,10 @@
                                 <i class="fa-solid fa-comment-sms mr-1 text-emerald-400"></i>
                                 Add the people who should receive the weekly check-in text via <strong class="text-gray-300">Edit</strong> once this client is created &mdash; you can list several.
                             </p>
+                            <p class="text-[10px] text-gray-500 bg-white/5 border border-white/10 rounded-lg px-3 py-2 mt-2">
+                                <i class="fa-brands fa-google mr-1 text-emerald-400"></i>
+                                Search Console, GA4 and GoHighLevel ids also live under <strong class="text-gray-300">Edit</strong>. They need our service account added on their end first, so they're never ready at the moment a client is created.
+                            </p>
                         </div>
                         <div>
                             <label class="modal-label">Meta Ad Account ID</label>
@@ -1990,6 +1994,44 @@
                             <label class="modal-label">Business ID</label>
                             <input type="text" id="edit-client-business-id" class="glass-input" placeholder="1234567890">
                         </div>
+
+                        <!-- Organic search. Each field is its own on/off switch: fill one in and
+                             that source starts collecting for this client, leave it blank and
+                             nothing about it appears anywhere. No separate "SEO enabled" toggle
+                             to drift out of step with whether the data can actually be fetched. -->
+                        <div class="col-span-2 pt-4 mt-2 border-t border-white/10">
+                            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">
+                                <i class="fa-brands fa-google mr-1 text-emerald-400"></i> Organic Search &amp; Lead Tracking
+                            </h4>
+                            <p class="text-[10px] text-gray-500">Leave blank for clients we don't do SEO for. Each one needs our service account added as a user on that property first &mdash; Test connection tells you if it worked.</p>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Search Console Property</label>
+                            <input type="text" id="edit-client-gsc-property" class="glass-input" placeholder="sc-domain:example.com">
+                            <p class="text-[10px] text-gray-500 mt-1">Copy it <strong class="text-gray-300">exactly</strong> as Search Console shows it &mdash; a domain property looks like <code class="text-gray-400">sc-domain:example.com</code>, a URL-prefix one like <code class="text-gray-400">https://www.example.com/</code>, trailing slash included. Setting this starts a 16-month backfill on its own.</p>
+                        </div>
+                        <div>
+                            <label class="modal-label">GA4 Property ID</label>
+                            <input type="text" id="edit-client-ga4-property" class="glass-input" placeholder="123456789">
+                            <p class="text-[10px] text-gray-500 mt-1">Digits only, from GA4 Admin &rarr; Property details.</p>
+                        </div>
+                        <div>
+                            <label class="modal-label">Business Profile Location ID</label>
+                            <input type="text" id="edit-client-gbp-location" class="glass-input" placeholder="1234567890">
+                            <p class="text-[10px] text-gray-500 mt-1">Digits only. Not live yet &mdash; Google has to approve our project first.</p>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">GHL Location ID</label>
+                            <input type="text" id="edit-client-ghl-location" class="glass-input" placeholder="ve9EPM428h8vShlRW1KT">
+                            <p class="text-[10px] text-gray-500 mt-1">Their GoHighLevel sub-account id. This is how an incoming lead webhook knows the lead is theirs.</p>
+                        </div>
+                        <div class="col-span-2">
+                            <button type="button" id="btn-test-seo-connection" onclick="testSeoConnection()" class="glass-pill px-4 py-2 text-xs font-bold">
+                                <i class="fa-solid fa-plug-circle-check mr-1"></i> Test connection
+                            </button>
+                            <div id="seo-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
+                        </div>
+
                         <div>
                             <label class="modal-label">Contract Type</label>
                             <select id="edit-client-contract" class="glass-input">
