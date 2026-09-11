@@ -91,6 +91,39 @@ function normaliseSecret(s: string | null | undefined): string {
     return t;
 }
 
+// Also keep each capture in a table. The first real capture could not be found in the
+// dashboard's log views at all, while the SQL Editor is where every other check in this
+// build has been read. Written with the service-role key straight to PostgREST — no
+// supabase-js import, so this file stays dependency-free and testable. The table has RLS
+// on and no policies: invisible to the public API, readable from the SQL Editor (which runs
+// as postgres). Only the same REDACTED object the log gets is stored, and only for requests
+// that passed the secret check — an unauthenticated request never causes a write, so nobody
+// can fill this table by hitting the URL.
+async function saveCapture(capture: unknown): Promise<void> {
+    const base = Deno.env.get("SUPABASE_URL");
+    const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!base || !key) return;
+    try {
+        const res = await fetch(`${base}/rest/v1/ghl_webhook_captures`, {
+            method: "POST",
+            headers: {
+                "apikey": key,
+                "Authorization": `Bearer ${key}`,
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            body: JSON.stringify({ capture }),
+        });
+        if (!res.ok) {
+            console.error("ghl-lead-webhook: capture not saved", res.status, (await res.text()).slice(0, 200));
+        }
+    } catch (err) {
+        // Never fail the webhook over this. A 200 to GHL is still correct, and the capture
+        // is in the function log regardless.
+        console.error("ghl-lead-webhook: capture not saved", String(err));
+    }
+}
+
 Deno.serve(async (req: Request) => {
     if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
 
@@ -138,15 +171,17 @@ Deno.serve(async (req: Request) => {
     const headerNames = [...req.headers.keys()].sort();
     const queryKeys = [...url.searchParams.keys()].filter((k) => k !== "k");
 
-    console.log("ghl-lead-webhook CAPTURE", JSON.stringify({
+    const capture = {
         received_at: new Date().toISOString(),
         format,
         bytes: raw.length,
-        auth_via: req.headers.get("x-webhook-secret") ? "header" : "query",
+        auth_via: via,
         header_names: headerNames,
         query_keys: queryKeys,
         payload: redact(body, "", 0, expected),
-    }, null, 2));
+    };
+    console.log("ghl-lead-webhook CAPTURE", JSON.stringify(capture, null, 2));
+    await saveCapture(capture);
 
     return Response.json({ ok: true, captured: true });
 });

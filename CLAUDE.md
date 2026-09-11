@@ -659,17 +659,26 @@ name fails silently: every lead lands as "unknown" and the organic count reads z
   and so on) and by value (anything shaped like an email, or a phone number of 10+ digits),
   while keeping IDs, dates and every attribution field. Header **names** are logged but never
   their values, and the `k` query parameter is never logged.
-- 55 local checks cover the gate and the redaction, including a secret pasted into the body by mistake, which is redacted by key name and by value. **A refused request logs why**
+- 80 local checks cover the gate and the redaction, including a secret pasted into the body by mistake, which is redacted by key name and by value. **A refused request logs why**
   (`ghl-lead-webhook REFUSED`): whether no secret was sent or it didn't match, plus both
   lengths and the header names, but never either secret or any of the body. Refusals used to
   log nothing, which is why the first real GHL test came back 401 with no explanation. Both
   sides are trimmed and stripped of surrounding quotes before comparing. A 64-character hex
   secret can't contain whitespace or quotes, and paste errors are the likeliest failure.
-- **Midas's own GHL sub-account is shared with client Sunset Design Build**, and Midas is not
-  a client in Golden Eye, so that sub-account's location ID belongs on Sunset's record. A test
-  contact submitted there lands in Sunset's CRM and fires any of their Contact Created
-  workflows. Test only on Midas's own forms (midasmediafirm.com), label test contacts
-  clearly, and delete them afterwards.
+- **Midas's own GHL sub-account is shared with client Sunset Design Build.** Midas isn't a
+  client in Golden Eye and Sunset isn't an SEO client, so leads from this sub-account count
+  for no one: with no `gsc_property` on either, there's no domain to match against. That
+  makes it the test bench. A test contact there still lands in Sunset's CRM and fires any of
+  their Contact Created workflows, so test only through Midas's own site (its calendar, since
+  midasmediafirm.com has no form), label test contacts clearly, delete them afterwards, and
+  turn the workflow off once testing is done. If Sunset ever becomes an SEO client, that
+  sub-account's location ID goes on their record.
+- **Captures also go into a temporary `ghl_webhook_captures` table** (`capture-table.sql`),
+  because the first real capture couldn't be found in the dashboard's log views. Only the
+  redacted object is stored, and only for requests that passed the secret check, so an
+  unauthenticated request never causes a write. RLS is on with no policies: the public API
+  can't see the table, and the SQL Editor (which runs as postgres) can. Drop it once the
+  classifier ships.
 - **The classifier will count a lead as a client's organic lead only if its landing page is on
   that client's own domain**, taken from `gsc_property`. Organic means someone searched and
   landed on the client's site, so this is part of the definition rather than an extra filter.
