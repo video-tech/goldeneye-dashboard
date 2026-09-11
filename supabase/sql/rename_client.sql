@@ -98,6 +98,11 @@ begin
     update client_onboarding_progress set client_name = new_name where client_name = old_name;
     -- Added 2026-09-11 with the lead classifier (ghl-lead-webhook/schema.sql):
     update lead_sources               set client_name = new_name where client_name = old_name;
+    -- Added 2026-09-11 with SE Ranking + the SEO changelog (seranking-sync/schema.sql):
+    update seo_rank_locations         set client_name = new_name where client_name = old_name;
+    update seo_keywords               set client_name = new_name where client_name = old_name;
+    update seo_rank_checks            set client_name = new_name where client_name = old_name;
+    update seo_changelog              set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users

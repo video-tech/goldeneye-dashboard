@@ -768,6 +768,56 @@ that folder, then `supabase/sql/rename_client.sql`, then deploy.
 - **98 local checks** cover the gate, every classification rule, the four real captures, the
   shared-sub-account rule, idempotency, failure handling, and capture-mode redaction.
 
+### Rank tracking, keywords, and the SEO changelog (schema built 2026-09-11)
+
+`supabase/functions/seranking-sync/schema.sql` adds the tables real tracked rank lives in,
+alongside the Search Console data `seo-sync` already collects. **GSC and SE Ranking aren't
+redundant — GSC only reports a query once it earns impressions**, so a client sitting at
+position 40 for a "[service] [city]" term is invisible to it. SE Ranking checks a keyword
+whether or not the client shows up yet, which is the entire reason to pay for it. Built
+admin-first, on purpose — the client portal SEO tab and report block come after, once the
+data has been sanity-checked.
+
+- **`clients.seranking_site_id`** — SE Ranking's numeric project id. Same "presence is the
+  switch" pattern as `gsc_property`.
+- **`seo_rank_locations`, admin-only.** SE Ranking checks every tracked keyword against
+  every search engine configured on a project, and a "search engine" there means a specific
+  city (and possibly device), not just "Google" — a client serving three towns gets three
+  rows here, one per `site_engine_id`, and every keyword's rank is checked in all three
+  automatically. There's no per-keyword location assignment on SE Ranking's side to mirror;
+  the full matrix is how their system works. This table is operational wiring, not something
+  the portal reads directly yet — a second SELECT policy can be added later if a phase wants
+  to show "tracked from: Draper, Sandy, Provo" to the client.
+- **`seo_keywords`, managed IN SE Ranking, never typed twice here.** The sync pulls the list;
+  nothing writes back to SE Ranking. `keyword` is stored `lower(trim())` so it matches
+  exactly against `seo_queries_daily.query` (GSC already lower-cases its own query text) —
+  that's what lets the admin tab show "SE Ranking says #4 — here's what GSC says that page's
+  clicks and impressions actually did" as one row, not two disconnected numbers.
+- **`seo_rank_checks` stores organic AND map-pack rank in one row**, because SE Ranking
+  returns both from the same call for a given keyword/location/date (`pos`, `is_map`,
+  `map_position` together). Splitting them into two rows keyed by an "engine" column would
+  invent a distinction their API doesn't make, and double the row count for nothing.
+  `ranking_url` is the landing page SE Ranking found ranking — cross-check it against
+  `seo_pages_daily` to catch two pages competing for the same term.
+- **`seo_changelog` is the annotation source for the trend chart and, later, the case-study
+  view.** A chart can be redrawn any time history exists; the story of *why* a line moved
+  can't be reconstructed after the fact if nobody wrote down when a page went live or a fix
+  shipped. `notes` is written as client-visible from the start — it's case-study material
+  once the portal tab exists, not staff-only commentary like `tasks.notes`.
+- **`seo_keywords` and `seo_changelog` get an admin write policy**, unlike every other SEO
+  table in this build. The admin tab lets someone add or retire a tracked keyword, or log a
+  changelog entry, by hand — `seo_rank_checks` and `seo_rank_locations` stay
+  service_role-only, since nothing legitimate ever writes a rank check directly.
+- **`seo_sync_state.source` now also accepts `'seranking'`**, alongside `gsc`/`ga4`/`gbp`, so
+  the coming ingestion function can track its own sync state the same way `seo-sync` does.
+- All four new tables were added to `supabase/sql/rename_client.sql` in the same change.
+- **Not yet built:** the ingestion function itself. Still open before writing it: SE
+  Ranking's exact auth header format (`Authorization: Token <key>` is likely but unconfirmed
+  from their public docs), and whether "device" is a field their API actually exposes on a
+  search engine or is implied by which `search_engine_id` was chosen — `seo_rank_locations`
+  leaves `device` nullable rather than assert a shape not yet checked against a real
+  response.
+
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
