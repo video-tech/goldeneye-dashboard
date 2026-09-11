@@ -867,6 +867,58 @@ string does.
 - `clients.seranking_site_id` and the Test SE Ranking connection button live in Edit
   Client, same section as the other SEO fields.
 
+### The admin SEO tab (rebuilt 2026-09-11)
+
+`window.renderAdminSeo()` is the first surface reading GSC, SE Ranking and organic leads
+together — `seo_daily` for the chart and KPI tiles, `seo_page_summary` / `seo_keyword_summary`
+/ `seo_movers` (RPCs in `supabase/sql/seo_admin_rpcs.sql`) for the two tables and "What
+Moved", `lead_sources` for the leads tile. **Admin-only, on purpose** — the portal tab
+(`renderCpSeo`) still reads the old `seo_metrics` source until this is checked out against
+real client data; see the Known gaps entry on that.
+
+- **An "ALL" rollup is refused outright**, not computed. The old tab produced one anyway,
+  because `normalize().includes()` happened to let every client's rows through — but
+  averaging position across accounts was never meaningful, so `cSelectedAccount === 'ALL'`
+  now shows a "select a client" notice instead of a number nobody should read.
+- **No client-side caching.** `seo_daily` tops out around 490 rows per client for a full
+  16-month history (see the 1000-row cap above), and every RPC already returns a handful of
+  rows — refetching on every account or date-range change costs nothing worth a cache, and
+  it means there's no invalidation bug to have.
+- **Three states inside `#c-view-seo`, never `.innerHTML` swapped wholesale.** ALL-selected
+  (`#seo-select-client-notice`), no `gsc_property`/`seranking_site_id` set for this client
+  (`#seo-no-data-notice`), and real data (`#seo-data-body`) toggle visibility as siblings.
+  An earlier draft overwrote `#seo-client-content.innerHTML` for the no-data case, which
+  would have permanently destroyed the KPI/chart/table markup for the rest of the admin's
+  session — the next client with real data would have rendered into elements that no
+  longer existed. Caught before it shipped.
+- **Position is impression-weighted everywhere**, finally matching what Google's own
+  Performance report shows for the same range — `seo_daily.position` is already
+  Google's per-day weighted figure; combining days needs
+  `sum(position*impressions)/sum(impressions)` applied again across days, not
+  `avg(position)`. 19 local checks on this and the delta-pill math, including the case that
+  would have silently shipped the exact bug being fixed (a flat average of two very
+  different single-day positions).
+- **`seoDeltaPill(cur, prior, {invert})`** — the one KPI where a *decrease* is the
+  improvement is position, so it's the only tile passing `invert: true`. Tested with the
+  identical numeric move both ways to confirm the color genuinely flips, not just the
+  arrow.
+- **The keyword table blends SE Ranking's tracked rank with GSC's own numbers for the same
+  phrase** — `seo_keyword_summary` joins `seo_keywords` to the caller's most recent
+  in-window `seo_rank_checks` row (best position across every tracked location that day,
+  not an average across the window — "where do we stand right now") and to
+  `seo_queries_daily` matched by exact keyword text. A keyword with GSC clicks and no SE
+  Ranking rank yet means it isn't being checked, or is ranking below SE Ranking's tracked
+  depth — both worth seeing rather than left to cross-reference by eye.
+- **The dead "AI SEO Specialist Analysis" box is gone** — `triggerAdminSeoAI` never existed,
+  so its Run Analysis button always threw. Replaced with "What Moved"
+  (`seo_movers`): the top page/query gainers and losers by click delta, gated on
+  impressions ≥ 50 in either window so a 3-impression page can't read as a 300% swing —
+  same noise guard as the weekly report's ban on narrating small-count swings as trends. No
+  model call.
+- **Not yet built:** the changelog UI (add/edit entries, chart annotations) and the keyword
+  manager — `seo_keywords` is currently populated only by `seranking-sync`'s sync, with no
+  admin-side add/retire form yet, even though its RLS already allows admin writes.
+
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -1027,9 +1079,11 @@ GitHub Pages copy but not from the GHL domain.
   property. Until then every client's `last_error` will say so. The Business Profile API also
   needs Google's manual approval — days to weeks — which is why GBP is the last phase and
   nothing else waits on it
-- `renderAdminSeo` / `renderCpSeo` still read `seo_metrics` and still average `avg_position`
-  unweighted, so the Avg Position tile does not match what Google reports for the same range.
-  Both are replaced in phase 4; until then the new `seo_*` tables accumulate unread
+- **`renderAdminSeo` rebuilt 2026-09-11 — `renderCpSeo` (the client portal tab) has not
+  been.** It still reads `seo_metrics` and averages `avg_position` unweighted, so its tile
+  won't match Google's own figure for the same range. That's deliberate: this build is
+  admin-first on purpose, so the portal keeps working on the old data source until the
+  admin tab is checked out against real numbers.
 - `lead_sources` is written but not yet shown anywhere. The portal SEO tab and the weekly report
   (phases 4–5) will read it. Until then, check it from the SQL Editor with the queries at the end
   of `ghl-lead-webhook/schema.sql`

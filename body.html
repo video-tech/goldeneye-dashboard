@@ -733,26 +733,54 @@
                     </div>
 
                     <div id="c-view-seo" class="space-y-6 hidden">
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Clicks</p><h4 class="text-xl font-bold text-blue-400" id="seo-kpi-clicks">0</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Impressions</p><h4 class="text-xl font-bold text-purple-400" id="seo-kpi-imp">0</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CTR</p><h4 class="text-xl font-bold text-green-400" id="seo-kpi-ctr">0%</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg Position</p><h4 class="text-xl font-bold text-yellow-400" id="seo-kpi-pos">0.0</h4></div>
+                        <!-- ALL rollup can't average position meaningfully across accounts -->
+                        <div id="seo-select-client-notice" class="glass p-8 text-center text-gray-400 hidden">
+                            <i class="fa-solid fa-arrow-pointer text-2xl mb-3 text-gray-600"></i>
+                            <p>Select a specific client to see their SEO data.</p>
                         </div>
-                        <div class="glass p-6 min-h-[400px]">
-                            <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-6 text-center">Organic Traffic Trend</h3>
-                            <div class="relative w-full h-[350px]"><canvas id="adminSeoChart"></canvas></div>
-                        </div>
-                        
-                        <div id="seo-ai-box-container" class="glass p-6 border-l-4 border-green-500 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-6">
-                            <div class="flex-1">
-                                <div class="flex items-center gap-2 mb-3">
-                                    <i class="fa-solid fa-sparkles text-green-400"></i>
-                                    <h3 class="font-bold text-lg">AI SEO Specialist Analysis <span id="seo-ai-client-lbl" class="text-gray-400 text-sm font-normal ml-2"></span></h3>
+
+                        <div id="seo-client-content" class="space-y-6">
+                            <div id="seo-no-data-notice" class="glass p-8 text-center text-gray-500 hidden"></div>
+
+                            <div id="seo-data-body" class="space-y-6 hidden">
+                                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                    <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Clicks</p><h4 class="text-xl font-bold text-blue-400" id="seo-kpi-clicks">0</h4></div>
+                                    <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Impressions</p><h4 class="text-xl font-bold text-purple-400" id="seo-kpi-imp">0</h4></div>
+                                    <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CTR</p><h4 class="text-xl font-bold text-green-400" id="seo-kpi-ctr">0%</h4></div>
+                                    <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg Position</p><h4 class="text-xl font-bold text-yellow-400" id="seo-kpi-pos">0.0</h4></div>
+                                    <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Organic Leads</p><h4 class="text-xl font-bold text-emerald-400" id="seo-kpi-leads">0</h4></div>
                                 </div>
-                                <div id="seo-ai-summary-content" class="text-sm leading-relaxed opacity-80">Ready to analyze organic data for this client.</div>
+                                <div class="glass p-6 min-h-[400px]">
+                                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-6 text-center">Organic Traffic Trend</h3>
+                                    <div class="relative w-full h-[350px]"><canvas id="adminSeoChart"></canvas></div>
+                                </div>
+
+                                <div class="glass p-6">
+                                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">What Moved</h3>
+                                    <div id="seo-movers-list"></div>
+                                </div>
+
+                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    <div class="glass p-6 overflow-x-auto">
+                                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Top Pages</h3>
+                                        <table class="w-full text-sm">
+                                            <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                <th class="text-left pb-2">Page</th><th class="text-right pb-2">Clicks</th><th class="text-right pb-2">Impr.</th><th class="text-right pb-2">Pos.</th>
+                                            </tr></thead>
+                                            <tbody id="seo-pages-tbody"></tbody>
+                                        </table>
+                                    </div>
+                                    <div class="glass p-6 overflow-x-auto">
+                                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Tracked Keywords <span class="text-gray-600 font-normal normal-case">(managed in SE Ranking)</span></h3>
+                                        <table class="w-full text-sm">
+                                            <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                <th class="text-left pb-2">Keyword</th><th class="text-right pb-2">Rank</th><th class="text-right pb-2">GSC Clicks</th><th class="text-right pb-2">GSC Impr.</th>
+                                            </tr></thead>
+                                            <tbody id="seo-keywords-tbody"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
                             </div>
-                            <button id="run-seo-ai-btn" onclick="triggerAdminSeoAI()" class="bg-green-600 text-white font-bold px-6 py-2 rounded-full hover:bg-green-500 shadow-lg shrink-0 transition"><i class="fa-solid fa-bolt"></i> Run Analysis</button>
                         </div>
                     </div>
 <div id="c-view-payments" class="space-y-6 hidden">

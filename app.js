@@ -4581,59 +4581,233 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
         // SEO LOGIC & RENDERING
         // ============================================================================
 
- window.renderAdminSeo = function() {
-            const { s, e } = dateRangeFor(cDateRange, cCustomStart, cCustomEnd);
+ // ---- Admin SEO tab (rebuilt 2026-09-11) ----
+ // Reads seo_daily / seo_pages_daily / seo_queries_daily (Search Console, via seo-sync),
+ // seo_keywords / seo_rank_checks (SE Ranking, via seranking-sync), and lead_sources
+ // (organic leads, via ghl-lead-webhook) together for one client at a time. This is
+ // deliberately admin-first: the portal tab still reads the legacy seo_metrics table
+ // until this is checked out and the client-facing version is built on top of it.
+ //
+ // No client-side caching, unlike the work-summary/audit patterns elsewhere — seo_daily
+ // is at most ~490 rows for a client's full 16-month history (see CLAUDE.md, the
+ // 1000-row cap), and the four aggregate calls below already return a handful of rows
+ // each, so refetching on every account or date-range change costs nothing worth
+ // avoiding, and it means there's no cache-invalidation bug to have.
+ //
+ // Position is always impression-weighted — sum(position*impressions)/sum(impressions) —
+ // never the flat average the old version of this tab computed. seo_daily.position is
+ // already Google's own weighted figure for that day, so combining days just needs the
+ // same weighting applied again across days.
 
-            const f = globalSeoData.filter(r => {
-                if (!r.date) return false;
-                const dateStr = r.date.includes('T') ? r.date.split('T')[0] : r.date;
-                const rd = new Date(dateStr + 'T12:00:00');
-                if (rd < s || rd > e) return false;
-                
-                if (cSelectedAccount === "ALL") return true;
-                return normalize(r.client_name).includes(normalize(cSelectedAccount));
-            });
+ function seoIso(d) { return d.toISOString().split('T')[0]; }
 
-            let clk=0, imp=0, sumPos=0;
-            f.forEach(r => { clk += parseInt(r.clicks)||0; imp += parseInt(r.impressions)||0; sumPos += parseFloat(r.avg_position||0); });
-            
-            const avgCtr = imp > 0 ? (clk / imp) * 100 : 0;
-            const avgPos = f.length > 0 ? (sumPos / f.length) : 0;
+ // A day with spend-equivalent zero impressions has no position, not a position of zero
+ // — same trap CLAUDE.md documents for the morning audit's CPL math. Carrying a null
+ // through here rather than treating it as 0 is what keeps a quiet day from reading as a
+ // page-one ranking.
+ function seoWindowTotals(daily, s, e) {
+     let clicks = 0, impressions = 0, posWeighted = 0;
+     daily.forEach(r => {
+         const rd = new Date(r.date + 'T12:00:00');
+         if (rd < s || rd > e) return;
+         clicks += r.clicks || 0;
+         impressions += r.impressions || 0;
+         if (r.position != null) posWeighted += r.position * (r.impressions || 0);
+     });
+     return {
+         clicks, impressions,
+         ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+         position: impressions > 0 ? posWeighted / impressions : null
+     };
+ }
 
-            document.getElementById('seo-kpi-clicks').innerText = clk.toLocaleString();
-            document.getElementById('seo-kpi-imp').innerText = imp.toLocaleString();
-            document.getElementById('seo-kpi-ctr').innerText = avgCtr.toFixed(2) + '%';
-            document.getElementById('seo-kpi-pos').innerText = avgPos.toFixed(1);
+ function seoLeadsInWindow(leads, s, e) {
+     return leads.filter(l => { const d = new Date(l.created_at); return d >= s && d <= e; }).length;
+ }
 
-            const dailyMap = {}; 
-            f.forEach(r => { 
-                const dt = r.date.includes('T') ? r.date.split('T')[0] : r.date; 
-                dailyMap[dt] = dailyMap[dt] || {c:0, i:0}; 
-                dailyMap[dt].c += parseInt(r.clicks)||0; 
-                dailyMap[dt].i += parseInt(r.impressions)||0; 
-            });
-            const labels = Object.keys(dailyMap).sort();
+ // opts.invert: true means a DECREASE is the improvement — position, where a smaller
+ // number is better, is the one metric on this tab that needs it.
+ function seoDeltaPill(cur, prior, opts) {
+     opts = opts || {};
+     if (prior === null || prior === undefined || prior === 0 || cur === null) {
+         return '<span class="text-gray-500 text-[10px] font-bold">—</span>';
+     }
+     const delta = ((cur - prior) / prior) * 100;
+     if (!isFinite(delta)) return '<span class="text-gray-500 text-[10px] font-bold">—</span>';
+     const improved = opts.invert ? delta < 0 : delta > 0;
+     const worsened = opts.invert ? delta > 0 : delta < 0;
+     const color = Math.abs(delta) < 0.5 ? 'text-gray-500' : (improved ? 'text-emerald-400' : (worsened ? 'text-red-400' : 'text-gray-500'));
+     const arrow = delta > 0 ? '▲' : (delta < 0 ? '▼' : '—');
+     return `<span class="${color} text-[10px] font-bold">${arrow} ${Math.abs(delta).toFixed(0)}%</span>`;
+ }
 
-            if(adminSeoChart) adminSeoChart.destroy();
-            const ctx = document.getElementById('adminSeoChart');
-            if(ctx) {
-                adminSeoChart = new Chart(ctx.getContext('2d'), { 
-                    type: 'line', 
-                    data: { 
-                        labels: labels, 
-                        datasets: [ 
-                            { label: 'Clicks', data: labels.map(x=>dailyMap[x].c), borderColor: '#60a5fa', tension: 0.3, fill: true, backgroundColor: 'rgba(96,165,250,0.1)', yAxisID: 'y' }, 
-                            { label: 'Impressions', data: labels.map(x=>dailyMap[x].i), borderColor: '#c084fc', tension: 0.3, yAxisID: 'y1' } 
-                        ] 
-                    }, 
-                    options: { 
-                        maintainAspectRatio: false, 
-                        scales: { y: { position: 'left' }, y1: { position: 'right', grid: { display: false } } },
-                        plugins: { zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } } }
-                    } 
-                });
-            }
-        };
+ async function loadSeoAdminData(clientName) {
+     const [dailyRes, leadsRes] = await Promise.all([
+         supabaseClient.from('seo_daily').select('date, clicks, impressions, position').eq('client_name', clientName).order('date'),
+         supabaseClient.from('lead_sources').select('created_at, source').eq('client_name', clientName)
+     ]);
+     if (dailyRes.error) console.error('seo_daily load failed:', dailyRes.error);
+     if (leadsRes.error) console.error('lead_sources load failed:', leadsRes.error);
+     return { daily: dailyRes.data || [], leads: leadsRes.data || [] };
+ }
+
+ function renderSeoPagesTable(rows) {
+     const tbody = document.getElementById('seo-pages-tbody');
+     if (!tbody) return;
+     if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No page data for this range.</td></tr>'; return; }
+     tbody.innerHTML = rows.map(r => `
+         <tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[220px]" title="${escapeAttr(r.page)}">${escapeAttr(r.page)}</td>
+             <td class="py-2 text-right font-bold text-white">${Number(r.clicks).toLocaleString()}</td>
+             <td class="py-2 text-right text-gray-400">${Number(r.impressions).toLocaleString()}</td>
+             <td class="py-2 text-right text-yellow-400">${r.position != null ? Number(r.position).toFixed(1) : '—'}</td>
+         </tr>`).join('');
+ }
+
+ function renderSeoKeywordsTable(rows) {
+     const tbody = document.getElementById('seo-keywords-tbody');
+     if (!tbody) return;
+     if (!rows.length) {
+         tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No keywords tracked yet — add some in SE Ranking, they show up here on the next sync.</td></tr>';
+         return;
+     }
+     tbody.innerHTML = rows.map(r => {
+         const rankCell = r.rank != null
+             ? `${r.rank}${r.map_rank != null ? ` <span class="text-purple-400 text-[10px]" title="Map pack position">(map #${r.map_rank})</span>` : ''}`
+             : '<span class="text-gray-500">not ranking</span>';
+         const rankDelta = (r.rank != null && r.prior_rank != null)
+             ? seoDeltaPill(r.rank, r.prior_rank, { invert: true }) : '';
+         return `
+         <tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[200px]" title="${escapeAttr(r.keyword)}">${escapeAttr(r.keyword)}</td>
+             <td class="py-2 text-right text-yellow-400">${rankCell} ${rankDelta}</td>
+             <td class="py-2 text-right text-white">${Number(r.gsc_clicks || 0).toLocaleString()}</td>
+             <td class="py-2 text-right text-gray-400">${Number(r.gsc_impressions || 0).toLocaleString()}</td>
+         </tr>`;
+     }).join('');
+ }
+
+ function renderSeoMoversPanel(rows) {
+     const el = document.getElementById('seo-movers-list');
+     if (!el) return;
+     if (!rows.length) {
+         el.innerHTML = '<p class="text-sm text-gray-500">Nothing moved enough this period to call out — every page and query stayed within a normal range.</p>';
+         return;
+     }
+     el.innerHTML = rows.map(r => {
+         const up = r.click_delta > 0;
+         const icon = up ? 'fa-arrow-trend-up text-emerald-400' : (r.click_delta < 0 ? 'fa-arrow-trend-down text-red-400' : 'fa-minus text-gray-500');
+         const kindLabel = r.kind === 'page' ? 'Page' : 'Query';
+         return `<div class="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+             <div class="flex items-center gap-2 min-w-0">
+                 <i class="fa-solid ${icon} shrink-0"></i>
+                 <span class="text-[10px] uppercase tracking-widest text-gray-500 shrink-0">${kindLabel}</span>
+                 <span class="text-sm text-gray-300 truncate" title="${escapeAttr(r.name)}">${escapeAttr(r.name)}</span>
+             </div>
+             <span class="text-sm font-bold shrink-0 ${up ? 'text-emerald-400' : (r.click_delta < 0 ? 'text-red-400' : 'text-gray-400')}">
+                 ${r.prior_clicks} → ${r.clicks} clicks
+             </span>
+         </div>`;
+     }).join('');
+ }
+
+ function renderSeoChart(daily, s, e) {
+     const inRange = daily.filter(r => { const rd = new Date(r.date + 'T12:00:00'); return rd >= s && rd <= e; });
+     const labels = inRange.map(r => r.date);
+     if (adminSeoChart) adminSeoChart.destroy();
+     const ctx = document.getElementById('adminSeoChart');
+     if (!ctx) return;
+     adminSeoChart = new Chart(ctx.getContext('2d'), {
+         type: 'line',
+         data: {
+             labels,
+             datasets: [
+                 { label: 'Clicks', data: inRange.map(r => r.clicks || 0), borderColor: '#60a5fa', tension: 0.3, fill: true, backgroundColor: 'rgba(96,165,250,0.1)', yAxisID: 'y' },
+                 { label: 'Impressions', data: inRange.map(r => r.impressions || 0), borderColor: '#c084fc', tension: 0.3, yAxisID: 'y1' }
+             ]
+         },
+         options: {
+             maintainAspectRatio: false,
+             scales: { y: { position: 'left' }, y1: { position: 'right', grid: { display: false } } },
+             plugins: { zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } } }
+         }
+     });
+ }
+
+ window.renderAdminSeo = async function() {
+     const notice = document.getElementById('seo-select-client-notice');
+     const content = document.getElementById('seo-client-content');
+     if (!notice || !content) return;
+
+     // An "ALL" rollup can't average position across accounts meaningfully — the old tab
+     // only produced one because normalize().includes() happened to let every row through.
+     if (cSelectedAccount === 'ALL') {
+         notice.classList.remove('hidden');
+         content.classList.add('hidden');
+         return;
+     }
+     notice.classList.add('hidden');
+     content.classList.remove('hidden');
+
+     const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+     if (!clientObj) return;
+     const clientName = clientObj.name; // exact stored name — every new SEO table keys on this, not the fuzzy match
+
+     const { s, e } = dateRangeFor(cDateRange, cCustomStart, cCustomEnd);
+     const spanDays = Math.round((e - s) / 86400000) + 1;
+     const priorEnd = new Date(s); priorEnd.setDate(priorEnd.getDate() - 1);
+     const priorStart = new Date(priorEnd); priorStart.setDate(priorStart.getDate() - spanDays + 1);
+
+     // Two inner states inside `content` itself, rather than replacing content.innerHTML
+     // wholesale — overwriting it would permanently destroy the KPI/chart/table markup
+     // for the rest of the session, breaking every later client who DOES have data.
+     const noDataNotice = document.getElementById('seo-no-data-notice');
+     const dataBody = document.getElementById('seo-data-body');
+     if (!clientObj.gsc_property && !clientObj.seranking_site_id) {
+         if (noDataNotice) { noDataNotice.classList.remove('hidden'); noDataNotice.innerText = `No Search Console property or SE Ranking project set for ${clientName} yet — add one under Edit.`; }
+         if (dataBody) dataBody.classList.add('hidden');
+         return;
+     }
+     if (noDataNotice) noDataNotice.classList.add('hidden');
+     if (dataBody) dataBody.classList.remove('hidden');
+
+     try {
+         const { daily, leads } = await loadSeoAdminData(clientName);
+
+         const cur = seoWindowTotals(daily, s, e);
+         const pri = seoWindowTotals(daily, priorStart, priorEnd);
+         const curLeads = seoLeadsInWindow(leads, s, e);
+         const priLeads = seoLeadsInWindow(leads, priorStart, priorEnd);
+
+         const setTile = (id, val, deltaHtml) => {
+             const el = document.getElementById(id);
+             if (el) el.innerHTML = `${val} ${deltaHtml || ''}`;
+         };
+         setTile('seo-kpi-clicks', cur.clicks.toLocaleString(), seoDeltaPill(cur.clicks, pri.clicks));
+         setTile('seo-kpi-imp', cur.impressions.toLocaleString(), seoDeltaPill(cur.impressions, pri.impressions));
+         setTile('seo-kpi-ctr', cur.ctr.toFixed(2) + '%', seoDeltaPill(cur.ctr, pri.ctr));
+         setTile('seo-kpi-pos', cur.position != null ? cur.position.toFixed(1) : '—', seoDeltaPill(cur.position, pri.position, { invert: true }));
+         setTile('seo-kpi-leads', curLeads.toLocaleString(), seoDeltaPill(curLeads, priLeads));
+
+         renderSeoChart(daily, s, e);
+
+         const iso = seoIso;
+         const [pagesRes, keywordsRes, moversRes] = await Promise.all([
+             supabaseClient.rpc('seo_page_summary', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) }),
+             supabaseClient.rpc('seo_keyword_summary', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) }),
+             supabaseClient.rpc('seo_movers', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
+         ]);
+         if (pagesRes.error) console.error('seo_page_summary failed:', pagesRes.error);
+         if (keywordsRes.error) console.error('seo_keyword_summary failed:', keywordsRes.error);
+         if (moversRes.error) console.error('seo_movers failed:', moversRes.error);
+
+         renderSeoPagesTable(pagesRes.data || []);
+         renderSeoKeywordsTable(keywordsRes.data || []);
+         renderSeoMoversPanel(moversRes.data || []);
+     } catch (err) {
+         console.error('renderAdminSeo failed:', err);
+     }
+ };
 
  window.renderCpSeo = function() {
             const { s, e } = getPortalRange();
