@@ -411,3 +411,10 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+# GHL's workflow webhook cannot send the Supabase gateway JWT, so the gateway check is off
+# for this one function and the shared GHL_WEBHOOK_SECRET (checked inside the function,
+# failing closed if unset) is the only gate. Every other function keeps the default,
+# verify_jwt = true.
+[functions.ghl-lead-webhook]
+verify_jwt = false

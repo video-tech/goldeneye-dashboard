@@ -249,12 +249,12 @@ begin
     update seo_queries_daily     set client_name = new_name where client_name = old_name;
     update seo_sync_state        set client_name = new_name where client_name = old_name;
 
-    -- NOT YET: client_onboarding_progress. It needs moving too, but trg_onboarding_handoff
-    -- sits on that table and texts the client "onboarding complete" when every step is
-    -- done. If that trigger fires on UPDATE rather than only INSERT, renaming a client
-    -- who has finished onboarding would re-send that text. Add the line below only once
-    -- the trigger has been checked:
-    --   update client_onboarding_progress set client_name = new_name where client_name = old_name;
+    -- Held back until 2026-09-11 for fear that trg_onboarding_handoff sat on this table
+    -- and would re-send the "onboarding complete" text on UPDATE. Checked: this table has
+    -- NO triggers at all, so moving its rows fires nothing. If a trigger is ever added
+    -- here, make it INSERT-only or give it a WHEN clause that ignores a client_name-only
+    -- change — otherwise every rename re-texts every finished client.
+    update client_onboarding_progress set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users

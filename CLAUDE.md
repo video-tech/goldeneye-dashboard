@@ -62,7 +62,9 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
 - `raise_onboarding_handoff_task()` + `trg_onboarding_handoff` on
   `client_onboarding_progress` — when every client step is done, create the handoff task
   "Onboarding complete — ready for campaign build" and POST to Make. Skips rows whose
-  `completed_by = 'backfilled'`.
+  `completed_by = 'backfilled'`. **Missing as of 2026-09-11.** `pg_trigger` has no trigger
+  by that name on any table, so the POST to Make, and with it the client's "onboarding
+  complete" text, is not firing. The handoff task is still raised by app.js. See Known gaps.
 - `notify_admins_client_request()` + `trg_notify_client_request` on `tasks` — classifies
   `Client Request` inserts into onboarding_complete / help_request / task_request, builds
   the SMS text, POSTs to Make with the recipient list.
@@ -226,10 +228,13 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   - revokes EXECUTE from `public` and `anon`. This has to be explicit, because
     `create or replace` keeps the old function's grants.
 
-  It also moves six tables the old version skipped: the four `seo_*` tables, `client_contacts`
-  and `client_work_summaries`. Its error messages deliberately avoid the word "function",
-  because `saveClientEdits()` reads any error containing it as "rename_client isn't installed"
-  and would show the wrong explanation.
+  It also moves seven tables the old version skipped: the four `seo_*` tables,
+  `client_contacts`, `client_work_summaries` and `client_onboarding_progress`. The last one was
+  held back until a check showed that table has no triggers. If a trigger is ever added there,
+  make it INSERT-only or give it a WHEN clause that ignores a client_name-only change, or every
+  rename will re-text every client who has finished onboarding. Its error messages
+  deliberately avoid the word "function", because `saveClientEdits()` reads any error
+  containing it as "rename_client isn't installed" and would show the wrong explanation.
 
   Verified in rolled-back transactions: `anon` can no longer execute it, a client JWT is
   refused, an admin JWT renames, and a rename onto an existing client is refused.
@@ -637,6 +642,29 @@ rows for 16 months) and everything else through `security invoker` SQL functions
 few hundred rows by construction. Any `select` on `seo_pages_daily`, `seo_queries_daily` or
 `organic_leads` without a client *and* date filter is a bug.
 
+### Organic leads — capture mode (phase 2, started 2026-09-11)
+
+`supabase/functions/ghl-lead-webhook/` receives a GHL workflow webhook (**Contact Created** →
+Webhook) and will decide whether each new lead came from organic search. It is currently in
+**capture mode**: it checks the shared secret, logs a redacted copy of the payload, returns
+200, and **stores nothing**. That's deliberate. The classifier has to be written against what
+GHL actually sends, because attribution field names vary by form type and plan, and a guessed
+name fails silently: every lead lands as "unknown" and the organic count reads zero forever.
+
+- `verify_jwt = false` for this one function (in `supabase/config.toml`), because GHL can't
+  send the gateway JWT. The `GHL_WEBHOOK_SECRET` secret is the only gate: sent as an
+  `x-webhook-secret` header, or as `?k=` on the URL for webhook actions without custom
+  headers. With the secret unset it refuses everything (500), so it never falls open.
+- The logged copy strips personal details by key (name, email, phone, address, date of birth
+  and so on) and by value (anything shaped like an email, or a phone number of 10+ digits),
+  while keeping IDs, dates and every attribution field. Header **names** are logged but never
+  their values, and the `k` query parameter is never logged.
+- 39 local checks cover the gate and the redaction. Test with fake contacts in Midas's own
+  GHL sub-account, never a client's.
+- **Real organic visitors carry no UTM tags**, so the classifier has to recognise Google from
+  what GHL records about the referrer on its own. The capture that matters most is a real
+  Google click-through.
+
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -787,19 +815,14 @@ GitHub Pages copy but not from the GHL domain.
   built yet, this is the documented intention only (see Client work summary)
 - `architecture.txt` is the original doc and is substantially out of date — it predates
   onboarding, check-ins, reports, triggers, cron and every Make scenario
-- **`rename_client()` still doesn't move `client_onboarding_progress`**, so renaming a client
-  partway through onboarding shows every step as undone in their portal. It was held back in
-  case `trg_onboarding_handoff` fires on UPDATE and re-sends the "onboarding complete" text.
-  The check (2026-09-11) found **no triggers at all on `client_onboarding_progress`**, so
-  adding the table is safe.
-- **`trg_onboarding_handoff` is not where Database objects says it is.** It's documented as
-  living on `client_onboarding_progress`, but that table has no triggers. Either it's on a
-  different table or it no longer exists. The handoff *task* is safe either way, because
-  app.js raises it too (on completion, and again through `reconcileOnboardingHandoffTasks()`
-  on admin load). What depends on the trigger is the "onboarding complete" **text** to the
-  client, which goes via Make. If the trigger is gone, that text hasn't been going out.
-  Find it with
-  `select tgname, tgrelid::regclass, pg_get_triggerdef(oid) from pg_trigger where tgname = 'trg_onboarding_handoff';`
+- **`trg_onboarding_handoff` no longer exists** (confirmed 2026-09-11: `pg_trigger` has no
+  trigger by that name on any table, and `client_onboarding_progress` has none at all). The
+  handoff *task* is unaffected, because app.js raises it too (on completion, and again
+  through `reconcileOnboardingHandoffTasks()` on admin load). What's lost is the POST to
+  Make, so clients finishing onboarding haven't been getting the "onboarding complete" text.
+  Recreating it needs care on two counts: `rename_client()` now updates that table on every
+  rename, so the trigger must ignore a client_name-only change, and it must not text clients
+  who finished while it was missing.
 - **SEO phase 1 needs its Google prerequisites before it does anything**: a GCP project with
   the Search Console and Analytics Data APIs enabled, a service account whose JSON key is set
   as the `GOOGLE_SA_JSON` secret, and that service account added as a user on each client's
