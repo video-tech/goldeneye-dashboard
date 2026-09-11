@@ -659,8 +659,22 @@ name fails silently: every lead lands as "unknown" and the organic count reads z
   and so on) and by value (anything shaped like an email, or a phone number of 10+ digits),
   while keeping IDs, dates and every attribution field. Header **names** are logged but never
   their values, and the `k` query parameter is never logged.
-- 39 local checks cover the gate and the redaction. Test with fake contacts in Midas's own
-  GHL sub-account, never a client's.
+- 51 local checks cover the gate and the redaction. **A refused request logs why**
+  (`ghl-lead-webhook REFUSED`): whether no secret was sent or it didn't match, plus both
+  lengths and the header names, but never either secret or any of the body. Refusals used to
+  log nothing, which is why the first real GHL test came back 401 with no explanation. Both
+  sides are trimmed and stripped of surrounding quotes before comparing. A 64-character hex
+  secret can't contain whitespace or quotes, and paste errors are the likeliest failure.
+- **Midas's own GHL sub-account is shared with client Sunset Design Build**, and Midas is not
+  a client in Golden Eye, so that sub-account's location ID belongs on Sunset's record. A test
+  contact submitted there lands in Sunset's CRM and fires any of their Contact Created
+  workflows. Test only on Midas's own forms (midasmediafirm.com), label test contacts
+  clearly, and delete them afterwards.
+- **The classifier will count a lead as a client's organic lead only if its landing page is on
+  that client's own domain**, taken from `gsc_property`. Organic means someone searched and
+  landed on the client's site, so this is part of the definition rather than an extra filter.
+  It's also what keeps Midas's own leads, which land on midasmediafirm.com, out of Sunset's
+  numbers.
 - **Real organic visitors carry no UTM tags**, so the classifier has to recognise Google from
   what GHL records about the referrer on its own. The capture that matters most is a real
   Google click-through.

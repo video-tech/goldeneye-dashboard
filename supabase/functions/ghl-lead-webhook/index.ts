@@ -70,17 +70,46 @@ function safeEqual(a: string, b: string): boolean {
     return diff === 0;
 }
 
+// Paste errors are the usual reason a correct secret fails: a trailing newline picked up
+// pasting the value into the Supabase dashboard, a space, or a pair of quotes in the GHL
+// field. The secret is 64 hex characters and can never legitimately contain any of those,
+// so normalising BOTH sides removes the most common failure without weakening anything.
+function normaliseSecret(s: string | null | undefined): string {
+    let t = String(s ?? "").trim();
+    const quoted = t.length >= 2 && ((t[0] === '"' && t.at(-1) === '"') || (t[0] === "'" && t.at(-1) === "'"));
+    if (quoted) t = t.slice(1, -1).trim();
+    return t;
+}
+
 Deno.serve(async (req: Request) => {
     if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
 
     // Fail closed: with no secret configured, verify_jwt = false would otherwise leave
     // this endpoint open to anyone who guesses the URL.
-    const expected = Deno.env.get("GHL_WEBHOOK_SECRET");
+    const expected = normaliseSecret(Deno.env.get("GHL_WEBHOOK_SECRET"));
     if (!expected) return new Response("not configured", { status: 500 });
 
     const url = new URL(req.url);
-    const given = req.headers.get("x-webhook-secret") ?? url.searchParams.get("k") ?? "";
-    if (!safeEqual(given, expected)) return new Response("unauthorized", { status: 401 });
+    const headerVal = req.headers.get("x-webhook-secret");
+    const queryVal = url.searchParams.get("k");
+    const via = headerVal !== null ? "header" : queryVal !== null ? "query" : "none";
+    const given = normaliseSecret(headerVal ?? queryVal);
+
+    if (!safeEqual(given, expected)) {
+        // A refused request used to log nothing, which made a wrong secret invisible: the
+        // first real GHL test came back 401 with no clue as to why. This names WHICH
+        // failure it was — nothing sent at all (GHL's standard Webhook action cannot send
+        // custom headers) or a value that doesn't match — without ever writing either
+        // secret, or any of the body, into the logs. Header NAMES catch a misspelt header.
+        console.warn("ghl-lead-webhook REFUSED", JSON.stringify({
+            reason: via === "none" ? "no secret sent (no x-webhook-secret header and no ?k=)" : "secret does not match",
+            via,
+            given_length: given.length,
+            expected_length: expected.length,
+            header_names: [...req.headers.keys()].sort(),
+        }));
+        return new Response("unauthorized", { status: 401 });
+    }
 
     const raw = await req.text();
     let body: unknown;
