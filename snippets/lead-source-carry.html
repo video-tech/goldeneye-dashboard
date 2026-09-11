@@ -1,0 +1,140 @@
+<!--
+  Lead source carry: keeps "where did this visitor come from" across the click to a booking
+  or form page on another host.
+
+  WHY. GHL records only the last hop. A visitor who searches Google, lands on this site, and
+  then clicks "Book" through to a calendar on another host (for Midas,
+  goldeneye.midasmediafirm.com/book-page) is recorded as "Referral from this site", and the
+  Google origin is gone. Proven with real captures on 2026-09-11. This script remembers the
+  real source on the page the visitor lands on, and adds it as UTM tags to links that point at
+  the booking/form host. GHL records UTM tags faithfully (also proven), and Golden Eye's lead
+  classifier reads them.
+
+  INSTALL. Paste all of it into the site-wide HEAD tracking code of the MAIN website (GHL:
+  Settings → Tracking Code, or the site's head in the repo). No configuration is needed when
+  the booking page is on a sibling subdomain (book.example.com next to example.com) or on
+  GHL's own domains. For any other booking host, add it to EXTRA_HOSTS.
+
+  WHAT IT WILL NEVER DO
+  - Mark an ad click as organic. UTM tags and click IDs (gclid, fbclid, ...) already on the
+    landing URL are passed through untouched, and they take priority over the referrer.
+  - Touch a link that already has utm_source on it. A deliberately tagged link wins.
+  - Tag links within this same host. GA4 starts a new session when it sees campaign tags
+    mid-visit, so tagging internal links would break GA4's own attribution, which is the
+    cross-check for all of this.
+  - Send anything anywhere. It sets one first-party cookie holding only the source (never
+    anything personal) and rewrites links. There are no network calls.
+
+  ATTRIBUTION MODEL. Last non-direct click, the same default as GA4: a new external source
+  replaces the stored one, and a direct return visit keeps it, for 30 days.
+
+  LIMIT. It decorates <a href> links, including ones rendered after the page loads, because it
+  acts at click time. A button that navigates with JavaScript instead of a link won't carry
+  the source. Make the booking button a plain link, and confirm with one real Google-search
+  test lead.
+-->
+<script>
+(function (w, d) {
+  // Booking/form hosts to carry the source to, on top of sibling subdomains of this site
+  // and GHL's own domains. e.g. ["book.somewhere-else.com"]
+  var EXTRA_HOSTS = [];
+
+  var COOKIE = "lead_src";
+  var MAX_AGE = 30 * 24 * 60 * 60;
+  var PASS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+              "gclid", "gbraid", "wbraid", "fbclid", "msclkid"];
+  // Search result pages only. Deliberately NOT any *.google.* host: a link clicked in
+  // Gmail arrives from mail.google.com, and that is not a search.
+  var ENGINES = [
+    [/^(www\.)?google\.[a-z.]+$/, "google"],
+    [/^(www\.)?bing\.com$/, "bing"],
+    [/^(www\.|html\.)?duckduckgo\.com$/, "duckduckgo"],
+    [/^search\.yahoo\.com$/, "yahoo"],
+    [/^(www\.)?ecosia\.org$/, "ecosia"],
+    [/^search\.brave\.com$/, "brave"]
+  ];
+  var GHL_HOSTS = [/(^|\.)msgsndr\.com$/, /(^|\.)leadconnectorhq\.com$/];
+
+  // The last two labels. Good for .com/.net/.org sites; not for .co.uk-style suffixes,
+  // which no client uses.
+  function root(host) { return host.split(".").slice(-2).join("."); }
+
+  function engineOf(host) {
+    for (var i = 0; i < ENGINES.length; i++) if (ENGINES[i][0].test(host)) return ENGINES[i][1];
+    return null;
+  }
+
+  // What this page view says about the visitor's source, or null when it says nothing
+  // new (direct visit, internal navigation).
+  function incoming(search, referrer, here) {
+    var q = new URLSearchParams(search), out = {}, any = false;
+    for (var i = 0; i < PASS.length; i++) {
+      var v = q.get(PASS[i]);
+      if (v) { out[PASS[i]] = v; any = true; }
+    }
+    if (any) return out;                        // explicit tags or click IDs win outright
+    if (!referrer) return null;                 // direct: keep whatever is stored
+    var r;
+    try { r = new URL(referrer); } catch (e) { return null; }
+    var rh = r.hostname.toLowerCase();
+    // The Google app on Android sends an android-app:// referrer, not a web one.
+    if (r.protocol === "android-app:") rh = /^com\.google\./.test(rh) ? "google.com" : rh;
+    if (root(rh) === root(here)) return null;   // internal navigation is not a source
+    var engine = engineOf(rh);
+    if (engine) return { utm_source: engine, utm_medium: "organic", src_restored: "1" };
+    return { utm_source: rh.replace(/^www\./, ""), utm_medium: "referral", src_restored: "1" };
+  }
+
+  function read() {
+    var parts = (d.cookie || "").split(/;\s*/);
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].indexOf(COOKIE + "=") === 0) {
+        try { return decodeURIComponent(parts[i].slice(COOKIE.length + 1)); } catch (e) { return null; }
+      }
+    }
+    return null;
+  }
+
+  function write(src) {
+    var qs = new URLSearchParams(src).toString();
+    var secure = w.location.protocol === "https:" ? "; Secure" : "";
+    d.cookie = COOKIE + "=" + encodeURIComponent(qs) + "; Max-Age=" + MAX_AGE + "; Path=/; SameSite=Lax" + secure;
+  }
+
+  function shouldCarry(target, here) {
+    if (target === here) return false;                        // same host: see GA4 note above
+    if (root(target) === root(here)) return true;             // sibling subdomain, e.g. the booking page
+    for (var i = 0; i < GHL_HOSTS.length; i++) if (GHL_HOSTS[i].test(target)) return true;
+    return EXTRA_HOSTS.indexOf(target) >= 0;
+  }
+
+  function decorate(a) {
+    var u;
+    try { u = new URL(a.href, w.location.href); } catch (e) { return; }
+    if (!/^https?:$/.test(u.protocol)) return;
+    if (!shouldCarry(u.hostname.toLowerCase(), w.location.hostname.toLowerCase())) return;
+    if (u.searchParams.has("utm_source")) return;             // a deliberately tagged link wins
+    var stored = read();
+    if (!stored) return;
+    var q = new URLSearchParams(stored), changed = false;
+    q.forEach(function (v, k) {
+      if (!u.searchParams.has(k)) { u.searchParams.set(k, v); changed = true; }
+    });
+    if (changed) a.href = u.toString();
+  }
+
+  var src = incoming(w.location.search, d.referrer, w.location.hostname.toLowerCase());
+  if (src) write(src);
+
+  // At click time rather than on load, so links rendered later by the page builder are
+  // covered too. Capture phase, so it runs before any other handler navigates away.
+  // auxclick covers middle-click / open in new tab.
+  function onClick(e) {
+    var t = e.target;
+    var a = t && t.closest ? t.closest("a[href]") : null;
+    if (a) decorate(a);
+  }
+  d.addEventListener("click", onClick, true);
+  d.addEventListener("auxclick", onClick, true);
+})(window, document);
+</script>

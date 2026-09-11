@@ -684,9 +684,24 @@ name fails silently: every lead lands as "unknown" and the organic count reads z
   landed on the client's site, so this is part of the definition rather than an extra filter.
   It's also what keeps Midas's own leads, which land on midasmediafirm.com, out of Sunset's
   numbers.
-- **Real organic visitors carry no UTM tags**, so the classifier has to recognise Google from
-  what GHL records about the referrer on its own. The capture that matters most is a real
-  Google click-through.
+- **What the first real captures showed (2026-09-11).** GHL's own `sessionSource` label is
+  referrer-only and ignores UTM tags, so a UTM-tagged test still read "Direct traffic". The
+  classifier reads UTMs from the landing URL itself. Worse, a real Google click-through lost
+  Google entirely: the calendar lives on `goldeneye.midasmediafirm.com/book-page`, so the
+  visitor arrives there from midasmediafirm.com, and GHL records a "Referral" from the site
+  itself. Any client whose form or calendar sits on a different host from the page Google
+  sends people to has the same break. Also, every capture carried the same Meta `fbc` cookie
+  from an ad click months earlier. That cookie lasts 90 days, so it is never treated as a
+  paid signal; only a click ID in the URL of the current visit is. The full field map and
+  the rules are in the plan file.
+- **`snippets/lead-source-carry.html` fixes the cross-host break.** Pasted into the main
+  site's head, it records the real source on the page a visitor lands on: a search engine
+  becomes `utm_medium=organic`, another site becomes `referral`, and ad tags pass through
+  untouched. At click time it adds that source to links pointing at the booking host. It
+  never tags same-host links (GA4 would start a new session mid-visit) or third-party links,
+  never overwrites a link that already has `utm_source`, and marks restored sources with
+  `src_restored=1`. It covers `<a href>` links only, so a button that navigates with
+  JavaScript won't carry the source. Verify each site with one real Google-search test lead.
 
 ## Weekly check-in
 
