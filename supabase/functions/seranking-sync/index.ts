@@ -54,11 +54,15 @@ async function loadSeRankingClients(db: any, only?: string) {
     const normalize = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     return (data ?? []).filter((c: any) => {
         if (!c.seranking_site_id) return false;
-        if ((c.status || "active") !== "active") return false;
         if (only && normalize(c.name) !== normalize(only)) return false;
         return true;
     });
 }
+// No status check here — same fix as seo-sync's loadSeoClients, found the same day. This
+// is exactly what surfaced the bug: Midas Media's seranking_site_id was set and saved, but
+// "Test SE Ranking" (which calls this same function) refused it with "no client... has a
+// seranking_site_id set" because its status is 'paused'. Presence of seranking_site_id is
+// meant to be the only switch, matching gsc_property's own rule.
 
 async function upsertChunked(db: any, table: string, rows: any[], onConflict: string, chunk = 1000) {
     for (let i = 0; i < rows.length; i += chunk) {

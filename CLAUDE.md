@@ -582,6 +582,19 @@ Four nullable columns on `clients`, and **the presence of a value is the switch*
 separate "SEO enabled" flag, because a flag can say yes while the data cannot actually be
 fetched, and then nobody can tell an empty chart from a broken one.
 
+**This has to mean the ONLY switch — nothing else may gate it, `clients.status` included.**
+Both `seo-sync` and `seranking-sync` originally also required `status = 'active'`, and it
+silently contradicted the rule above: Midas Media's `gsc_property` and `seranking_site_id`
+were both set and both tested as "Connected" (`check` mode never filtered by status), but the
+actual scheduled pull skipped it every single run, because its status is `'paused'`. Found
+2026-09-11 when Test SE Ranking refused it outright with "no client... has a seranking_site_id
+set," which is what made the inconsistency visible — `seo-sync`'s equivalent bug was silent,
+since its own `check` mode gave no reason to doubt the connection. **Fixed by removing the
+status check from both.** A paused client can have a real reason to keep their organic history
+collecting — a paused retainer for billing reasons is not the same thing as "stop tracking
+their SEO" — and if syncing should stop for someone, clearing `gsc_property` /
+`seranking_site_id` is the one place that decision belongs.
+
 | Column | What it holds | Where it comes from |
 |---|---|---|
 | `gsc_property` | `sc-domain:example.com` **or** `https://www.example.com/` | Search Console, verbatim |

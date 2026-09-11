@@ -181,11 +181,18 @@ async function loadSeoClients(db: any, only?: string) {
     if (error) throw new Error(`clients: ${error.message}`);
     return (data ?? []).filter((c: any) => {
         if (!c.gsc_property || !String(c.gsc_property).trim()) return false;
-        if ((c.status || "active") !== "active") return false;
         if (only && normalize(c.name) !== normalize(only)) return false;
         return true;
     });
 }
+// No status check here, on purpose — found and removed 2026-09-11. "Presence of
+// gsc_property is the switch" (see the comment on that column in schema.sql) means exactly
+// that: nothing else gates whether a client's Search Console history gets collected.
+// A status !== 'active' filter silently contradicted it — Midas Media's own record tested
+// as "Connected" (runCheck below never filtered by status) while its scheduled pull was
+// quietly skipped the whole time, because its status is 'paused'. A client can be paused
+// for billing reasons and still want organic history collected; if syncing should stop for
+// someone, clear their gsc_property — that's the one place this decision belongs.
 // No "Midas Media" exclusion here, on purpose. client-summary/index.ts skips it for a
 // real reason — Midas isn't a client, so it shouldn't get an AI-generated client work
 // summary written about it — and an earlier version of this function copied that pattern
