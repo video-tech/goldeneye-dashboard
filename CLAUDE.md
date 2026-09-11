@@ -219,7 +219,9 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   their tasks, reports and check-ins into yours, where your own RLS then shows them to you. The
   only guard was app.js hiding the button.
 
-  The replacement is at the end of `seo-sync/schema.sql`:
+  The replacement lives in `supabase/sql/rename_client.sql`, moved there from `seo-sync/schema.sql`
+  on 2026-09-11 once a second feature needed it. That file is now the single list of every table
+  keyed on `clients.name`. The replacement:
   - requires `current_user_is_admin()`
   - pins `search_path = public`
   - refuses a new name that normalizes to an existing client. That stops two histories merging,
@@ -228,7 +230,8 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   - revokes EXECUTE from `public` and `anon`. This has to be explicit, because
     `create or replace` keeps the old function's grants.
 
-  It also moves seven tables the old version skipped: the four `seo_*` tables,
+  It also moves the seven tables the old version skipped, plus `lead_sources` since the lead
+  classifier: the four `seo_*` tables,
   `client_contacts`, `client_work_summaries` and `client_onboarding_progress`. The last one was
   held back until a check showed that table has no triggers. If a trigger is ever added there,
   make it INSERT-only or give it a WHEN clause that ignores a client_name-only change, or every
@@ -533,7 +536,7 @@ browser, and nothing about SEO goes through Make.
 client record. That order is deliberate: Search Console keeps roughly **16 months** and then
 drops the oldest month for good, so every week the pull is not running is a week that can never
 be reported on or built into a case study. Charts can be written any time; history cannot be
-recovered. The remaining phases — organic leads, GA4, the keyword/changelog UI, the portal tab
+recovered. Phase 2, organic leads, is further down this section. The remaining phases — GA4, the keyword/changelog UI, the portal tab
 and report block, baselines, GBP — are in the plan file and land on top of this.
 
 ### How a client is connected
@@ -627,7 +630,7 @@ No insert/update/delete policies on any of these tables. Only the edge function 
 **New tables key on the exact `clients.name`**, not a normalized form. The fuzzy
 `normalize().includes()` matching stays confined to the Meta tables, where it exists because Meta
 renames ad accounts under us. Here we control the writer, so an exact key is both possible and
-safer — and it means **`rename_client()` must be extended for every new table**, or a rename
+safer — and it means **every new table needs a line in `supabase/sql/rename_client.sql`**, or a rename
 orphans a client's entire SEO history with nothing to say what happened.
 
 ### The 1000-row cap, which already bites
@@ -640,68 +643,79 @@ are a hundred times larger.
 So: **these tables are never bulk-loaded.** The browser reads `seo_daily` for one client (≤ ~490
 rows for 16 months) and everything else through `security invoker` SQL functions that return a
 few hundred rows by construction. Any `select` on `seo_pages_daily`, `seo_queries_daily` or
-`organic_leads` without a client *and* date filter is a bug.
+`lead_sources` without a client *and* date filter is a bug.
 
-### Organic leads — capture mode (phase 2, started 2026-09-11)
+### Organic leads (phase 2, built 2026-09-11)
 
 `supabase/functions/ghl-lead-webhook/` receives a GHL workflow webhook (**Contact Created** →
-Webhook) and will decide whether each new lead came from organic search. It is currently in
-**capture mode**: it checks the shared secret, logs a redacted copy of the payload, returns
-200, and **stores nothing**. That's deliberate. The classifier has to be written against what
-GHL actually sends, because attribution field names vary by form type and plan, and a guessed
-name fails silently: every lead lands as "unknown" and the organic count reads zero forever.
+Webhook) for every new contact, and stores **one row per website lead** in `lead_sources`: which
+client, when, what kind (booking, form, call or chat), and where it came from (organic, paid,
+social, referral, direct, other or unknown). It stores ids and attribution only, **never a name,
+email, phone number or IP address**. The rules were written against real GHL payloads rather than
+GHL's documentation, and the four real captures are fixtures in its tests. Setup: `schema.sql` in
+that folder, then `supabase/sql/rename_client.sql`, then deploy.
 
-- `verify_jwt = false` for this one function (in `supabase/config.toml`), because GHL can't
-  send the gateway JWT. The `GHL_WEBHOOK_SECRET` secret is the only gate: sent as an
-  `x-webhook-secret` header, or as `?k=` on the URL for webhook actions without custom
-  headers. With the secret unset it refuses everything (500), so it never falls open.
-- The logged copy strips personal details by key (name, email, phone, address, date of birth
-  and so on) and by value (anything shaped like an email, or a phone number of 10+ digits),
-  while keeping IDs, dates and every attribution field. Header **names** are logged but never
-  their values, and the `k` query parameter is never logged.
-- 80 local checks cover the gate and the redaction, including a secret pasted into the body by mistake, which is redacted by key name and by value. **A refused request logs why**
-  (`ghl-lead-webhook REFUSED`): whether no secret was sent or it didn't match, plus both
-  lengths and the header names, but never either secret or any of the body. Refusals used to
-  log nothing, which is why the first real GHL test came back 401 with no explanation. Both
-  sides are trimmed and stripped of surrounding quotes before comparing. A 64-character hex
-  secret can't contain whitespace or quotes, and paste errors are the likeliest failure.
-- **Midas's own GHL sub-account is shared with client Sunset Design Build.** Midas isn't a
-  client in Golden Eye and Sunset isn't an SEO client, so leads from this sub-account count
-  for no one: with no `gsc_property` on either, there's no domain to match against. That
-  makes it the test bench. A test contact there still lands in Sunset's CRM and fires any of
-  their Contact Created workflows, so test only through Midas's own site (its calendar, since
-  midasmediafirm.com has no form), label test contacts clearly, delete them afterwards, and
-  turn the workflow off once testing is done. If Sunset ever becomes an SEO client, that
-  sub-account's location ID goes on their record.
-- **Captures also go into a temporary `ghl_webhook_captures` table** (`capture-table.sql`),
-  because the first real capture couldn't be found in the dashboard's log views. Only the
-  redacted object is stored, and only for requests that passed the secret check, so an
-  unauthenticated request never causes a write. RLS is on with no policies: the public API
-  can't see the table, and the SQL Editor (which runs as postgres) can. Drop it once the
-  classifier ships.
-- **The classifier will count a lead as a client's organic lead only if its landing page is on
-  that client's own domain**, taken from `gsc_property`. Organic means someone searched and
-  landed on the client's site, so this is part of the definition rather than an extra filter.
-  It's also what keeps Midas's own leads, which land on midasmediafirm.com, out of Sunset's
-  numbers.
-- **What the first real captures showed (2026-09-11).** GHL's own `sessionSource` label is
-  referrer-only and ignores UTM tags, so a UTM-tagged test still read "Direct traffic". The
-  classifier reads UTMs from the landing URL itself. Worse, a real Google click-through lost
-  Google entirely: the calendar lives on `goldeneye.midasmediafirm.com/book-page`, so the
-  visitor arrives there from midasmediafirm.com, and GHL records a "Referral" from the site
-  itself. Any client whose form or calendar sits on a different host from the page Google
-  sends people to has the same break. Also, every capture carried the same Meta `fbc` cookie
-  from an ad click months earlier. That cookie lasts 90 days, so it is never treated as a
-  paid signal; only a click ID in the URL of the current visit is. The full field map and
-  the rules are in the plan file.
-- **`snippets/lead-source-carry.html` fixes the cross-host break.** Pasted into the main
-  site's head, it records the real source on the page a visitor lands on: a search engine
-  becomes `utm_medium=organic`, another site becomes `referral`, and ad tags pass through
-  untouched. At click time it adds that source to links pointing at the booking host. It
-  never tags same-host links (GA4 would start a new session mid-visit) or third-party links,
-  never overwrites a link that already has `utm_source`, and marks restored sources with
-  `src_restored=1`. It covers `<a href>` links only, so a button that navigates with
-  JavaScript won't carry the source. Verify each site with one real Google-search test lead.
+- **A lead is stored only when its landing page is on its client's own domain**, taken from
+  `gsc_property`. Subdomains count, so a booking page on `book.example.com` belongs to
+  `sc-domain:example.com`. Organic means someone searched and landed on the client's site, so
+  this is part of the definition rather than a filter. It also means nothing is stored for a
+  client without a Search Console property, or for a sub-account not linked to any client. Meta
+  instant-form leads have no landing page and are already counted in `daily_reports`, so they
+  aren't website leads.
+- **Classification order (first match wins):**
+  - Google or Microsoft click IDs, a GHL ad id, or a paid `utm_medium` → **paid**.
+  - `utm_medium=organic` → **organic**. `utm_source=gbp` also sets `is_gbp`.
+  - Other UTM mediums → referral, social or other.
+  - `fbclid` on its own → **social**. Facebook adds it to organic post links too, so it isn't
+    proof of an ad.
+  - GHL's own `sessionSource`, if it says paid or organic.
+  - A search-engine referrer → **organic**.
+  - A referrer on the client's own domain → **unknown**, with `source_detail = 'self_referral'`.
+  - Any other referrer → **referral**. Nothing at all → **direct**.
+- **The real captures shaped those rules in three ways.**
+  - GHL's `sessionSource` is based only on the referrer and ignores UTM tags, so UTMs read from
+    the landing URL outrank it.
+  - GHL records only the last hop. A Google visitor who lands on the site and then clicks
+    through to a booking page on another host arrives as a "Referral" from the site itself, and
+    the Google origin is lost.
+  - The Meta `fbc`/`fbp` cookies last 90 days in the browser, so they're never treated as a
+    signal. Only click IDs on the current visit's URL are.
+- **`snippets/lead-source-carry.html` fixes the lost hop on the site itself.** Pasted into the
+  main site's head, it records the real source where the visitor lands: a search engine becomes
+  `utm_medium=organic`, other sites become `referral`, and ad tags and click IDs pass through
+  untouched. The last non-direct click is kept for 30 days. At click time, it adds that source to
+  links pointing at the booking host and marks it with `src_restored=1`. It never tags same-host
+  links (GA4 would start a new session mid-visit) or third-party links, and it never overwrites a
+  link that already has `utm_source`. It only covers `<a href>` links. **Verified live on
+  midasmediafirm.com on 2026-09-11:** a real Google search, then the site, then Book, arrived
+  tagged `utm_source=google&utm_medium=organic&src_restored=1`. A client without the snippet
+  shows a high `self_referral` rate, which is the signal to install it.
+- **Every new SEO client needs one real Google-search test lead** before their organic count is
+  trusted, because each site's form or booking setup decides whether the source survives.
+- **Security.** `verify_jwt = false` for this one function, because GHL can't send the gateway
+  JWT. That leaves the `GHL_WEBHOOK_SECRET` secret as the only gate, sent as an
+  `x-webhook-secret` header or as `?k=` for webhook actions without custom headers. If the secret
+  is unset, the function refuses everything. Both sides are trimmed and stripped of quotes before
+  a constant-time comparison. **A refused request logs why** (`ghl-lead-webhook REFUSED`: nothing
+  sent or a mismatch, both lengths, and the header names, but never either value). The first real
+  test came back 401 with no explanation, which is why that logging exists.
+- **Writes are idempotent.** An upsert on `ghl_contact_id`, where the first write wins, means a
+  GHL retry can't double-count a lead. A database failure returns 500 so GHL can retry.
+- **Debug capture** is controlled by the `GHL_CAPTURE=1` secret and is off by default. When on,
+  it also saves a redacted copy of the payload, plus the decision taken, to
+  `ghl_webhook_captures`, where the SQL Editor can read it. That exists because the dashboard's
+  log views proved unusable for this. Personal fields are stripped by key and by value, and any
+  credential is redacted, including the secret pasted into the body by mistake. Turn it on to see
+  why a new client's leads classify the way they do, then turn it off again.
+- **Midas's own GHL sub-account is shared with client Sunset Design Build.** Midas isn't a client
+  in Golden Eye and Sunset isn't an SEO client, so that sub-account isn't linked to any client and
+  nothing from it is stored. The workflow there stays on permanently at no cost. It's the test
+  bench: a test contact still lands in Sunset's CRM and fires their Contact Created workflows, so
+  test only through Midas's own site with fake details, and delete them afterwards. If Sunset ever
+  becomes an SEO client, that sub-account's location ID goes on their record, and the own-domain
+  rule keeps Midas's leads out of their numbers.
+- **98 local checks** cover the gate, every classification rule, the four real captures, the
+  shared-sub-account rule, idempotency, failure handling, and capture-mode redaction.
 
 ## Weekly check-in
 
@@ -870,6 +884,9 @@ GitHub Pages copy but not from the GHL domain.
 - `renderAdminSeo` / `renderCpSeo` still read `seo_metrics` and still average `avg_position`
   unweighted, so the Avg Position tile does not match what Google reports for the same range.
   Both are replaced in phase 4; until then the new `seo_*` tables accumulate unread
-- The SEO plan beyond phase 1 (organic leads via a GHL webhook, GA4, keywords + changelog,
+- `lead_sources` is written but not yet shown anywhere. The portal SEO tab and the weekly report
+  (phases 4–5) will read it. Until then, check it from the SQL Editor with the queries at the end
+  of `ghl-lead-webhook/schema.sql`
+- The SEO plan beyond phases 1 and 2 (GA4, keywords + changelog,
   the rebuilt portal tab and report block, baselines and case study, GBP) lives in
   `~/.claude/plans/fluttering-gliding-pebble.md`
