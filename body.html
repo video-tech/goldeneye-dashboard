@@ -2026,10 +2026,19 @@
                             <p class="text-[10px] text-gray-500 mt-1">Their GoHighLevel sub-account id. This is how an incoming lead webhook knows the lead is theirs.</p>
                         </div>
                         <div class="col-span-2">
+                            <label class="modal-label">SE Ranking Project ID</label>
+                            <input type="number" id="edit-client-seranking-site" class="glass-input" placeholder="12898862">
+                            <p class="text-[10px] text-gray-500 mt-1">The numeric id in the project's SE Ranking URL. Keywords stay managed in SE Ranking &mdash; this only tells Golden Eye which project to pull tracked rank from.</p>
+                        </div>
+                        <div class="col-span-2">
                             <button type="button" id="btn-test-seo-connection" onclick="testSeoConnection()" class="glass-pill px-4 py-2 text-xs font-bold">
-                                <i class="fa-solid fa-plug-circle-check mr-1"></i> Test connection
+                                <i class="fa-solid fa-plug-circle-check mr-1"></i> Test Search Console
+                            </button>
+                            <button type="button" id="btn-test-seranking-connection" onclick="testSeRankingConnection()" class="glass-pill px-4 py-2 text-xs font-bold ml-2">
+                                <i class="fa-solid fa-magnifying-glass-chart mr-1"></i> Test SE Ranking
                             </button>
                             <div id="seo-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
+                            <div id="seranking-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
                         </div>
 
                         <div>

@@ -6744,9 +6744,11 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-ga4-property').value = c.ga4_property_id || '';
     document.getElementById('edit-client-gbp-location').value = c.gbp_location_id || '';
     document.getElementById('edit-client-ghl-location').value = c.ghl_location_id || '';
+    document.getElementById('edit-client-seranking-site').value = c.seranking_site_id || '';
     // Cleared on open, not left showing the previous client's verdict — a stale green
     // "Connected" against a different client is worse than no answer at all.
     document.getElementById('seo-connection-result').innerHTML = '';
+    document.getElementById('seranking-connection-result').innerHTML = '';
 
     document.getElementById('edit-client-retainer').value     = c.monthly_retainer || '';
     if (c.contract_type) document.getElementById('edit-client-contract').value = c.contract_type;
@@ -6822,6 +6824,63 @@ window.testSeoConnection = async function() {
             html += `<br><span class="text-gray-500">Readable properties: ${data.available.map(s => escapeAttr(s)).join(', ')}</span>`;
         }
         out.innerHTML = html;
+    } catch (err) {
+        out.innerHTML = `<span class="text-red-400">${escapeAttr(err.message)}</span>`;
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+};
+
+// Same shape as testSeoConnection above, against the SE Ranking sync instead. Reads the
+// project id currently in the box, not the saved one, for the same reason: a correct old
+// value would pass while a freshly-typed typo sat there unsaved.
+const SERANKING_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/seranking-sync';
+
+window.testSeRankingConnection = async function() {
+    const out = document.getElementById('seranking-connection-result');
+    const btn = document.getElementById('btn-test-seranking-connection');
+    if (!out || !btn) return;
+
+    const clientName = document.getElementById('edit-client-original-name').value;
+    const siteId = parseInt(document.getElementById('edit-client-seranking-site').value, 10);
+
+    if (!siteId) {
+        out.innerHTML = '<span class="text-gray-500">Enter an SE Ranking project id first.</span>';
+        return;
+    }
+
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Checking...';
+    btn.disabled = true;
+    out.innerHTML = '';
+
+    try {
+        // This mode spends an SE Ranking API call and reveals the project's own search
+        // engine list, so it requires a real signed-in admin, same rule as Test Search
+        // Console — the anon key alone doesn't get to trigger this.
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+
+        // The check reads the client's SAVED seranking_site_id, unlike Test Search
+        // Console — SE Ranking has no near-miss string to correct, just a numeric id
+        // that either belongs to a real project or doesn't, so there's nothing gained by
+        // testing an unsaved value the way a typo-prone property string benefits from.
+        // Save first if the field doesn't match what's on record yet.
+        const res = await fetch(SERANKING_FN, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({ mode: 'check', client: clientName })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `the sync service returned ${res.status}`);
+
+        out.innerHTML = data.ok
+            ? `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>${escapeAttr(data.message)}</span>`
+            : `<span class="text-amber-400 font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${escapeAttr(data.message)}</span>`;
     } catch (err) {
         out.innerHTML = `<span class="text-red-400">${escapeAttr(err.message)}</span>`;
     } finally {
@@ -6958,7 +7017,10 @@ window.saveClientEdits = async function(e) {
             ga4_property_id: document.getElementById('edit-client-ga4-property').value.replace(/\D/g, '') || null,
             gbp_location_id: document.getElementById('edit-client-gbp-location').value.replace(/\D/g, '') || null,
             // GHL ids are alphanumeric, so this one is trimmed only.
-            ghl_location_id: document.getElementById('edit-client-ghl-location').value.trim() || null
+            ghl_location_id: document.getElementById('edit-client-ghl-location').value.trim() || null,
+            // SE Ranking's project id is purely numeric — parseInt over Number so a stray
+            // trailing character (a pasted URL fragment) doesn't turn the whole value NaN.
+            seranking_site_id: parseInt(document.getElementById('edit-client-seranking-site').value, 10) || null
         };
 
         const { error } = await supabaseClient.from('clients').update(payload).eq('id', id);

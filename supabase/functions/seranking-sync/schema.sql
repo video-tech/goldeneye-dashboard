@@ -19,12 +19,15 @@ alter table clients
 -- ---------------------------------------------------------------------------
 -- Which locations are tracked for a client
 -- ---------------------------------------------------------------------------
--- SE Ranking checks EVERY tracked keyword against EVERY search engine configured on a
--- project — a "search engine" here means a specific city (and possibly device), not just
--- "Google". A client serving three towns gets three rows here, one per site_engine_id, and
--- every keyword's rank is checked in all three automatically. There is no per-keyword
--- location assignment on SE Ranking's side to mirror; the full matrix is how their system
--- works.
+-- A "search engine" here means a specific city (and possibly device) SE Ranking is
+-- configured to check, not just "Google" — a client serving three towns gets three rows
+-- here, one per site_engine_id. **Correction, confirmed against real data 2026-09-11:**
+-- keywords are NOT automatically checked against every engine on a project. SE Ranking's
+-- own keyword list carries an explicit site_engine_ids array per keyword (seen in a real
+-- response: {"id":"17705872",...,"site_engine_ids":[386614]}), so the pairing is
+-- per-keyword, not a blanket matrix. That doesn't change how the tables below store
+-- results: seo_rank_checks is keyed by whichever (keyword, site_engine_id) pairs actually
+-- come back with position data, whatever SE Ranking's own scoping turns out to be.
 --
 -- Admin-only, like seo_sync_state: this is operational wiring — which search engines exist
 -- for a client's project — not something the portal needs to query directly yet. If a later

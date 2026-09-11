@@ -811,12 +811,48 @@ data has been sanity-checked.
 - **`seo_sync_state.source` now also accepts `'seranking'`**, alongside `gsc`/`ga4`/`gbp`, so
   the coming ingestion function can track its own sync state the same way `seo-sync` does.
 - All four new tables were added to `supabase/sql/rename_client.sql` in the same change.
-- **Not yet built:** the ingestion function itself. Still open before writing it: SE
-  Ranking's exact auth header format (`Authorization: Token <key>` is likely but unconfirmed
-  from their public docs), and whether "device" is a field their API actually exposes on a
-  search engine or is implied by which `search_engine_id` was chosen — `seo_rank_locations`
-  leaves `device` nullable rather than assert a shape not yet checked against a real
-  response.
+
+**`supabase/functions/seranking-sync/` (built 2026-09-11) is the ingestion function.** One
+mode, `sync`: for every active client with a `seranking_site_id`, it pulls search engines,
+keywords, and positions, in that order, and upserts each into the tables above. `mode:
+"check"` is the admin-only Test SE Ranking connection button in Edit Client — same pattern
+as Test Search Console, but it checks the client's *saved* project id rather than an
+unsaved one, since a numeric id has no near-miss format to correct the way a GSC property
+string does.
+
+- **Auth is `Authorization: Token <key>`, confirmed from SE Ranking's own docs and worked
+  examples** (their getting-started page itself 403'd a direct fetch, but the header format
+  is shown working elsewhere in their documentation) — **not yet confirmed against our own
+  key**, the same position the Google auth code was in before its first real token
+  exchange. The first live sync is what actually proves it.
+- **Parsing is split into `parse.ts`, with no imports at all**, so it can be tested against
+  fixed JSON with no network — same reason `morning-audit/engine.js` is kept separate from
+  that function's `index.ts`. 33 local checks, two of the three response shapes tested
+  against **real data captured this session via the SE Ranking MCP** (a different auth
+  path onto the same underlying API): search engines and keywords. The third, positions,
+  is built from SE Ranking's documented-but-not-directly-observed shape and is deliberately
+  defensive — a field it doesn't recognize produces null, but a completely wrong top-level
+  shape throws, landing the real response body in `seo_sync_state.last_error` rather than
+  silently storing zero rows.
+- **A keyword is NOT automatically checked against every search engine on a project** — a
+  real captured response shows `site_engine_ids` explicit per keyword
+  (`{"id":"17705872",...,"site_engine_ids":[386614]}`). An earlier draft of this schema's
+  comments assumed a blanket matrix; corrected once real data showed otherwise. Nothing
+  about how the tables store results changes: `seo_rank_checks` is keyed by whichever
+  `(keyword, site_engine_id)` pairs actually come back with position data.
+- **Organic and map-pack rank land in one row**, because SE Ranking returns both from the
+  same call. A day with no rank is stored as `null`, never `0` — SE Ranking's own UI shows
+  a dash for "not ranking," and storing zero would silently read as "ranked #1" to any
+  future chart that doesn't know to check for the sentinel.
+- **No backfill cursor, unlike `seo-sync`.** A rank-tracking project's own history starts
+  the day a keyword was added, not 16 months ago, so a rolling 35-day window on every run
+  is enough to never miss a day even after a missed run — there's no month-by-month walk
+  to build.
+- Scheduled at `0 19 * * *` (`seranking-sync/schedule.sql`) — an hour after `seo-sync`'s
+  daily pull, so the admin tab's GSC and SE Ranking numbers for a given day are never a mix
+  of one finished run and one partial one.
+- `clients.seranking_site_id` and the Test SE Ranking connection button live in Edit
+  Client, same section as the other SEO fields.
 
 ## Weekly check-in
 
