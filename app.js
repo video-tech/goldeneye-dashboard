@@ -1899,17 +1899,26 @@ async function obNotifyOnboardingComplete() {
     const steps = activeOnboardingSteps();
     if (!steps.length || !onboardingIsComplete(client)) return;
 
+    // Claimed before any await so the 2s form poll can't file a second one behind this
+    obCompletionRaised.add(key);
+
+    // trg_onboarding_handoff raises this same task inside the upsert that completed the
+    // last step, so it usually exists by now — in the database, not in globalTasksData.
+    // Checking only the local copy filed a duplicate every time, and each duplicate is
+    // one more admin alert through trg_notify_client_request.
+    if (!onboardingHandoffRaised(client)) {
+        const { data: existing } = await supabaseClient.from('tasks').select('*')
+            .eq('client', client).eq('title', OB_COMPLETE_TASK_TITLE).limit(1);
+        if (existing?.length) globalTasksData.push(...existing);
+    }
+
     // Worked or not, an existing copy means this already announced itself — but our own
     // checklist still has to be raised, or a handoff task the trigger got to first means
     // it never is
     if (onboardingHandoffRaised(client)) {
-        obCompletionRaised.add(key);
         await raiseOnboardingAgencyTasks(client);
         return;
     }
-
-    // Claimed before the await so the 2s form poll can't file a second one behind this
-    obCompletionRaised.add(key);
 
     const row = buildOnboardingHandoffTask(client);
 

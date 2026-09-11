@@ -90,11 +90,11 @@ begin
     update seo_queries_daily     set client_name = new_name where client_name = old_name;
     update seo_sync_state        set client_name = new_name where client_name = old_name;
 
-    -- Held back until 2026-09-11 for fear that trg_onboarding_handoff sat on this table
-    -- and would re-send the "onboarding complete" text on UPDATE. Checked: this table has
-    -- NO triggers at all, so moving its rows fires nothing. If a trigger is ever added
-    -- here, make it INSERT-only or give it a WHEN clause that ignores a client_name-only
-    -- change — otherwise every rename re-texts every finished client.
+    -- Safe only because trg_onboarding_handoff (supabase/triggers/onboarding_handoff.sql)
+    -- fires on INSERT or UPDATE OF completed_at, and this sets client_name alone — so
+    -- moving these rows never re-sends the "onboarding complete" text. Tested 2026-09-11
+    -- with a rename in a rolled-back transaction. Any other trigger ever added to this
+    -- table needs the same property, or every rename re-texts every finished client.
     update client_onboarding_progress set client_name = new_name where client_name = old_name;
     -- Added 2026-09-11 with the lead classifier (ghl-lead-webhook/schema.sql):
     update lead_sources               set client_name = new_name where client_name = old_name;

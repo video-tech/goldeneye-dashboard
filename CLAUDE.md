@@ -42,8 +42,10 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
    same dates, then unschedule it — see SEO measurement
 3. **Onboarding form completion** — GHL form submitted → look up client → write
    `client_onboarding_progress` so the step ticks off in the portal
-4. **Onboarding complete SMS** — Supabase trigger → webhook → tag GHL contact → GHL
-   workflow texts the client
+4. **Onboarding complete SMS** — `trg_onboarding_handoff` POSTs
+   `{event, client, client_email, completed_at}` to
+   `hook.us2.make.com/hucrpp6hm43ps165n7wxut8v9rn3dksu` → tag GHL contact → GHL workflow
+   texts the client
 5. **Weekly check-in reminder** — pg_cron → webhook with outstanding clients + contacts →
    iterate → find by phone → SMS
 6. **Admin alerts** — Supabase trigger on `Client Request` tasks → webhook → SMS to us.
@@ -59,12 +61,46 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
 
 ## Database objects we added
 
-- `raise_onboarding_handoff_task()` + `trg_onboarding_handoff` on
-  `client_onboarding_progress` — when every client step is done, create the handoff task
-  "Onboarding complete — ready for campaign build" and POST to Make. Skips rows whose
-  `completed_by = 'backfilled'`. **Missing as of 2026-09-11.** `pg_trigger` has no trigger
-  by that name on any table, so the POST to Make, and with it the client's "onboarding
-  complete" text, is not firing. The handoff task is still raised by app.js. See Known gaps.
+- **`raise_onboarding_handoff_task()` + `trg_onboarding_handoff` on
+  `client_onboarding_progress`, rebuilt 2026-09-11** — `supabase/triggers/onboarding_handoff.sql`.
+  When a client's last client-owned step is completed, it creates the handoff task
+  "Onboarding complete — ready for campaign build" and POSTs to Make scenario #4, which
+  texts the client. The function had survived, hook URL and all, but the trigger had gone
+  (cause unknown), and the table had no triggers at all. The task kept appearing because
+  app.js raises it too, but **the text had stopped going out**. What to know before touching it:
+  - **It fires on `INSERT OR UPDATE OF completed_at`, not INSERT only.** `saveOnboardingProgress()`
+    inserts a video step's row at 10% watched with `completed_at` null, and the step is
+    completed later by the upsert's DO UPDATE. An INSERT-only trigger misses every video
+    step. The function then acts only when `completed_at` goes from null to set. That's why
+    `rename_client()`, which sets `client_name` alone, and Make re-sending a finished form
+    never fire it.
+  - **"Already announced" means a handoff task exists. There is no separate flag.** That
+    is why re-attaching the trigger texted nobody who finished while it was missing (app.js
+    had raised their tasks). The check is also concurrency-safe, because the task commits in
+    the same transaction as the completion. Consequence: **deleting a client's handoff
+    task re-arms their text** if one of their steps is ever completed again.
+  - **It only acts for `current_stage = 'Onboarding'` and `status = 'active'`**, the same
+    gate `reconcileOnboardingHandoffTasks()` uses. Eight clients past onboarding sit at 9 of
+    11 steps, because two steps were added after they were backfilled. Make's form scenario
+    writes progress without looking at stage, so without this gate one resubmitted form
+    could tell a client whose campaigns are running that their onboarding is complete.
+  - Skips `completed_by = 'backfilled'` (`markOnboardingComplete()`, whose confirm dialog
+    promises no notification).
+  - `client_email` is stripped with `\s`, not `btrim` — the hidden `\r\n` in Known gaps
+    would otherwise make Make's GHL contact lookup miss.
+  - `onboarding_handoff_tests.sql` holds four rolled-back tests. Each attaches the trigger
+    inside its own transaction, then ends in a deliberate `raise exception` that prints
+    the results and makes a commit impossible.
+  - Known limit: if a client's last two steps complete in two *concurrent* transactions,
+    neither sees the other, so nothing fires. `reconcileOnboardingHandoffTasks()` still
+    raises the task on the next admin load, but no text goes out.
+  - app.js's portal path used to check only its local `globalTasksData` before filing the
+    same task. It never saw the one the trigger had just inserted, so every portal
+    completion filed a duplicate, and each duplicate meant another admin alert.
+    `obNotifyOnboardingComplete()` now asks the database first.
+  - **Live since 2026-09-11.** All four tests passed first (one text on a real completion,
+    none on a rename, a post-onboarding client, or a backfill); the trigger was then attached
+    and confirmed in `pg_trigger`.
 - `notify_admins_client_request()` + `trg_notify_client_request` on `tasks` — classifies
   `Client Request` inserts into onboarding_complete / help_request / task_request, builds
   the SMS text, POSTs to Make with the recipient list.
@@ -232,10 +268,11 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
 
   It also moves the seven tables the old version skipped, plus `lead_sources` since the lead
   classifier: the four `seo_*` tables,
-  `client_contacts`, `client_work_summaries` and `client_onboarding_progress`. The last one was
-  held back until a check showed that table has no triggers. If a trigger is ever added there,
-  make it INSERT-only or give it a WHEN clause that ignores a client_name-only change, or every
-  rename will re-text every client who has finished onboarding. Its error messages
+  `client_contacts`, `client_work_summaries` and `client_onboarding_progress`. The last one is
+  safe only because `trg_onboarding_handoff` fires on INSERT or UPDATE OF `completed_at`, and a
+  rename sets `client_name` alone — tested in a rolled-back rename, no second text. Any trigger
+  ever added to that table needs the same property, or every rename will re-text every client
+  who has finished onboarding. Its error messages
   deliberately avoid the word "function", because `saveClientEdits()` reads any error
   containing it as "rename_client isn't installed" and would show the wrong explanation.
 
@@ -881,14 +918,10 @@ GitHub Pages copy but not from the GHL domain.
   built yet, this is the documented intention only (see Client work summary)
 - `architecture.txt` is the original doc and is substantially out of date — it predates
   onboarding, check-ins, reports, triggers, cron and every Make scenario
-- **`trg_onboarding_handoff` no longer exists** (confirmed 2026-09-11: `pg_trigger` has no
-  trigger by that name on any table, and `client_onboarding_progress` has none at all). The
-  handoff *task* is unaffected, because app.js raises it too (on completion, and again
-  through `reconcileOnboardingHandoffTasks()` on admin load). What's lost is the POST to
-  Make, so clients finishing onboarding haven't been getting the "onboarding complete" text.
-  Recreating it needs care on two counts: `rename_client()` now updates that table on every
-  rename, so the trigger must ignore a client_name-only change, and it must not text clients
-  who finished while it was missing.
+- **Clients who finished onboarding while `trg_onboarding_handoff` was missing never got
+  their "onboarding complete" text.** Found and rebuilt 2026-09-11 (see Database objects).
+  The only clients affected were Alta Vista Construction and the `test` client. Decided
+  2026-09-11 **not** to send Alta Vista a late text; nothing further to do.
 - **SEO phase 1 needs its Google prerequisites before it does anything**: a GCP project with
   the Search Console and Analytics Data APIs enabled, a service account whose JSON key is set
   as the `GOOGLE_SA_JSON` secret, and that service account added as a user on each client's
