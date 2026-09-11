@@ -566,6 +566,20 @@ Console (Restricted is enough), GA4 (property Viewer), and later GBP (Manager). 
 refresh token to expire quietly — the failure mode is always "that email isn't on this
 property", which is visible and fixable.
 
+**"Midas Media" is deliberately NOT excluded from this pull, unlike `client-summary` and
+`morning-audit`, which both skip it on purpose.** An earlier version of `loadSeoClients()`
+copied that exclusion, reasoning it would generalize. It doesn't: those two exclude Midas
+because they generate CLIENT-FACING content (an AI work-summary blurb, an audit signal), and
+Midas isn't a client to write one about. Search Console has no equivalent conflict — each
+`gsc_property` is an independently scoped Google property, never shared between two client
+rows — so once Midas's own record has a real `gsc_property` and the service account has
+access, its Search Console history is pulled and stored exactly like any other client's,
+which is the point: Golden Eye tracks Midas's own SEO push (targeting the HVAC vertical
+first — see the plan file) the same way it tracks a client's. **This is separate from the
+Meta-ads exclusion** for the ad account Midas actually shares with Sunset Design Build:
+that one works by aliasing the shared account's name to Sunset in `normalize()`, not by
+blanket-skipping anything named Midas, and nothing here needs to imitate it.
+
 ### The pull
 
 `supabase/functions/seo-sync/` — `schema.sql`, then deploy, then `schedule.sql`. Two cron jobs:

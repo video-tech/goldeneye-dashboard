@@ -182,11 +182,20 @@ async function loadSeoClients(db: any, only?: string) {
     return (data ?? []).filter((c: any) => {
         if (!c.gsc_property || !String(c.gsc_property).trim()) return false;
         if ((c.status || "active") !== "active") return false;
-        if (normalize(c.name) === normalize("Midas Media")) return false;
         if (only && normalize(c.name) !== normalize(only)) return false;
         return true;
     });
 }
+// No "Midas Media" exclusion here, on purpose. client-summary/index.ts skips it for a
+// real reason — Midas isn't a client, so it shouldn't get an AI-generated client work
+// summary written about it — and an earlier version of this function copied that pattern
+// on the assumption it'd generalize. It doesn't: that exclusion protects CLIENT-FACING
+// content. Search Console has no equivalent conflict to protect against — each gsc_property
+// is an independently scoped Google property, one per client, never shared — so any client
+// row with a valid property gets pulled, Midas's own included. (The real Meta-ads-sharing
+// fix, for the ad account Midas and Sunset actually share, works differently: normalize()
+// aliases the shared account's name to Sunset Design Build so spend attributes correctly.
+// It was never a blanket "skip Midas" rule, and nothing here needs to imitate it.)
 
 async function loadState(db: any, clientName: string, source: string) {
     const { data } = await db
