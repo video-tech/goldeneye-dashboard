@@ -22,7 +22,7 @@ create or replace function seo_page_summary(
     p_limit int default 25
 )
 returns table (
-    page text, clicks bigint, impressions bigint, position numeric,
+    page text, clicks bigint, impressions bigint, weighted_position numeric,
     prior_clicks bigint, prior_impressions bigint, prior_position numeric
 )
 language sql stable
@@ -30,18 +30,18 @@ set search_path = public
 as $$
     select
         cur.page,
-        coalesce(cur.clicks, 0), coalesce(cur.impressions, 0), cur.position,
-        coalesce(pri.clicks, 0), coalesce(pri.impressions, 0), pri.position
+        coalesce(cur.clicks, 0), coalesce(cur.impressions, 0), cur.weighted_position,
+        coalesce(pri.clicks, 0), coalesce(pri.impressions, 0), pri.weighted_position
     from (
         select page, sum(clicks) as clicks, sum(impressions) as impressions,
-               sum(position * impressions) / nullif(sum(impressions), 0) as position
+               sum(position * impressions) / nullif(sum(impressions), 0) as weighted_position
         from seo_pages_daily
         where client_name = p_client and date between p_start and p_end
         group by page
     ) cur
     left join (
         select page, sum(clicks) as clicks, sum(impressions) as impressions,
-               sum(position * impressions) / nullif(sum(impressions), 0) as position
+               sum(position * impressions) / nullif(sum(impressions), 0) as weighted_position
         from seo_pages_daily
         where client_name = p_client and date between p_prior_start and p_prior_end
         group by page
@@ -59,7 +59,7 @@ create or replace function seo_query_summary(
     p_limit int default 25
 )
 returns table (
-    query text, clicks bigint, impressions bigint, position numeric,
+    query text, clicks bigint, impressions bigint, weighted_position numeric,
     prior_clicks bigint, prior_impressions bigint, prior_position numeric
 )
 language sql stable
@@ -67,18 +67,18 @@ set search_path = public
 as $$
     select
         cur.query,
-        coalesce(cur.clicks, 0), coalesce(cur.impressions, 0), cur.position,
-        coalesce(pri.clicks, 0), coalesce(pri.impressions, 0), pri.position
+        coalesce(cur.clicks, 0), coalesce(cur.impressions, 0), cur.weighted_position,
+        coalesce(pri.clicks, 0), coalesce(pri.impressions, 0), pri.weighted_position
     from (
         select query, sum(clicks) as clicks, sum(impressions) as impressions,
-               sum(position * impressions) / nullif(sum(impressions), 0) as position
+               sum(position * impressions) / nullif(sum(impressions), 0) as weighted_position
         from seo_queries_daily
         where client_name = p_client and date between p_start and p_end
         group by query
     ) cur
     left join (
         select query, sum(clicks) as clicks, sum(impressions) as impressions,
-               sum(position * impressions) / nullif(sum(impressions), 0) as position
+               sum(position * impressions) / nullif(sum(impressions), 0) as weighted_position
         from seo_queries_daily
         where client_name = p_client and date between p_prior_start and p_prior_end
         group by query
@@ -112,7 +112,7 @@ as $$
         k.keyword, k.target_page,
         cur.organic_rank, cur.map_rank, cur.date,
         pri.organic_rank,
-        coalesce(q.clicks, 0), coalesce(q.impressions, 0), q.position
+        coalesce(q.clicks, 0), coalesce(q.impressions, 0), q.weighted_position
     from seo_keywords k
     left join lateral (
         select src.organic_rank, src.map_rank, src.date
@@ -132,7 +132,7 @@ as $$
     ) pri on true
     left join (
         select query, sum(clicks) as clicks, sum(impressions) as impressions,
-               sum(position * impressions) / nullif(sum(impressions), 0) as position
+               sum(position * impressions) / nullif(sum(impressions), 0) as weighted_position
         from seo_queries_daily
         where client_name = p_client and date between p_start and p_end
         group by query

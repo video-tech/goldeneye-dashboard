@@ -4660,7 +4660,7 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
              <td class="py-2 pr-2 text-gray-300 truncate max-w-[220px]" title="${escapeAttr(r.page)}">${escapeAttr(r.page)}</td>
              <td class="py-2 text-right font-bold text-white">${Number(r.clicks).toLocaleString()}</td>
              <td class="py-2 text-right text-gray-400">${Number(r.impressions).toLocaleString()}</td>
-             <td class="py-2 text-right text-yellow-400">${r.position != null ? Number(r.position).toFixed(1) : '—'}</td>
+             <td class="py-2 text-right text-yellow-400">${r.weighted_position != null ? Number(r.weighted_position).toFixed(1) : '—'}</td>
          </tr>`).join('');
  }
 
