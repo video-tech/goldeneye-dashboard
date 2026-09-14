@@ -355,6 +355,7 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
   never gate it.
 - **`onboarding_auto_checks(p_client)`:** keys an agency task can auto-complete on (ad account saved,
   ad spend flowing, GHL linked, Search Console syncing, SE Ranking syncing, SEO settings, auto-log,
+  first auto-logged article, which is the Cuppa pipeline working end to end (Cuppa has no API),
   lead tracking live, first organic lead, website status). New checks are added there only.
 - **Migration:**
   - **Steps:** today's steps are tagged by title. The Facebook/Meta steps and the two ad tasks →

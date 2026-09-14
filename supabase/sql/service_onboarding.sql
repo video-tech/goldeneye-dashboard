@@ -221,6 +221,11 @@ as $$
             c.seo_start_date is not null and c.seo_monthly_fee is not null),
         ('autolog_configured',  'Article auto-logging set up',
             exists (select 1 from seo_webhook_configs w where w.client_name = c.name)),
+        -- Cuppa has no API to ask, but its end result is visible: an article published to the
+        -- client's site and logged automatically proves Cuppa, the site connection and auto-logging
+        -- all work together. Manual changelog entries (created_by an email) don't count.
+        ('first_article_logged', 'First article published and auto-logged (Cuppa pipeline working)',
+            exists (select 1 from seo_changelog l where l.client_name = c.name and l.created_by in ('webflow', 'wix', 'sanity', 'git'))),
         ('lead_tracking_live',  'Website lead tracking receiving leads',
             exists (select 1 from lead_sources l where l.client_name = c.name)),
         ('first_organic_lead',  'First lead from Google received',
