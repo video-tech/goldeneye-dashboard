@@ -4344,6 +4344,13 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
                 workBlock += `\n\nCURRENTLY OPEN / STILL TO DO:\n${openTasks.map(t => `- ${stripSlashEscapes(t.title)}${dueTag(t.due)}`).join('\n')}`;
             }
 
+            // "What We're Working On" is always in the report. Without open tasks it would
+            // otherwise be empty or invented, so the fallback wording is fixed here in code.
+            // The model only copies it and never writes its own version of "we're watching the
+            // account", which is exactly the filler the rules below ban everywhere else.
+            const WORKING_ON_DEFAULT_HEADLINE = 'Managing Your Campaigns';
+            const WORKING_ON_DEFAULT_DETAILS = "We're actively monitoring and managing your ads — keeping a close eye on lead volume, cost per lead, and how each ad is performing, and making adjustments as the numbers call for them.";
+
             // ---- SEO, only when this client actually has organic tracking. An empty
             // block plus the instruction below keeps the model from inventing SEO
             // performance for a client who has none set up.
@@ -4394,7 +4401,8 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
               or "on track" for anything marked OVERDUE.
             - If NEITHER list appears above, there is nothing to report on work or tasks at all
               this period. Do not mention tasks, work, or projects anywhere in the report — go
-              straight from ad performance into the notes or action plan.
+              straight from ad performance into the notes or action plan. The one exception is
+              the "What We're Working On" section, which always appears (see its rules below).
 
             HOW TO BE HONEST WITHOUT BEING NEGATIVE:
             State every number plainly regardless of which way it moved — never soften a decline
@@ -4422,6 +4430,9 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             concrete — no open tasks, no meaningful shift in the numbers, no manual notes — do
             not manufacture a closing action step at all. A report that ends after stating the
             numbers plainly is completely fine; it is far better than a sentence that says nothing.
+            (The "What We're Working On" section still appears in that case, using its fixed
+            default text. That is set out in its own rules below, and it is not a closing action step
+            you write yourself.)
 
             RULES FOR "email_summary":
             - Tone: Casual, completely honest, analytical, and direct. Do not use corporate fluff.
@@ -4437,10 +4448,19 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             - Every trend pill uses the COMPUTED CHANGE percentage given above verbatim (e.g.
               "+12% vs last period"), never a vague label like "Severe Drop" — and reads
               "No prior data" rather than inventing a comparison when none was given.
-            - The "What We're Improving" section is the one exception to "use this exact
-              structure": per NO GENERIC FILLER above, omit that entire <tr>...</tr> block from
-              the HTML if there is no specific action step this period. A report with three
-              sections some weeks and two others is expected, not a mistake.
+            - The "What We're Working On" section ALWAYS appears. Never omit it. Fill it like this:
+              * If the "CURRENTLY OPEN / STILL TO DO" list appears above, it says what's coming up
+                next from that list, with any OVERDUE / DUE SOON / DUE label exactly as given. A
+                specific action from the manual notes or from a metric that really moved can sit
+                alongside it.
+              * If that list does NOT appear but the manual notes or a metric that really moved give
+                a specific action step, use that.
+              * If neither gives you anything specific, use exactly this headline and text, word for
+                word, with nothing added:
+                Headline: ${WORKING_ON_DEFAULT_HEADLINE}
+                Details: ${WORKING_ON_DEFAULT_DETAILS}
+                That fixed text is the only exception to NO GENERIC FILLER above. Do not reword it,
+                and do not write any other version of it anywhere in the report.
             - Use this EXACT structure and inline styling, but replace the placeholders, highlights, and improvements to match this week's reality:
 
             <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background-color: #f5f5f7;">
@@ -4461,12 +4481,11 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             [GENERATE 2-3 DIV BLOCKS HERE. Each block format:]
             <div style="padding: 20px 0; border-bottom: 1px solid #e8e8ed;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Explanation]</div></div>
             </td></tr>
-            [OPTIONAL — omit this entire next <tr> block if there is no specific action step this period, per NO GENERIC FILLER above:]
+            [REQUIRED — this block is always included; see the "What We're Working On" rules above:]
             <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
-            <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">What We're Improving</h2>
-            <div style="padding: 20px 0;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Action Plan Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Action Plan Details]</div></div>
+            <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">What We're Working On</h2>
+            <div style="padding: 20px 0;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Working On Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Working On Details]</div></div>
             </td></tr>
-            [END OPTIONAL BLOCK]
             </table></td></tr></table></body></html>
             `;
 
