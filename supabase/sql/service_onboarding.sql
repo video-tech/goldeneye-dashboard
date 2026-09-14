@@ -5,10 +5,16 @@
 -- Safe on its own: nothing in app.js or the handoff trigger reads these columns or functions
 -- yet, so running this changes no client's Get Started. The app and trigger switch over in later steps.
 --
--- Services are data, not code. Midas sells video, ads, website and SEO in any combination, and the
--- list will change. Adding, renaming or retiring a service is a row edit in Templates → Services;
--- tagging steps with it is how it gets an onboarding. Nothing here names a service except the seed
--- rows and the migration of today's steps.
+-- Services are data, not code, so the list can change without touching the engine. Adding,
+-- renaming or retiring a service is a row edit in Templates → Services, and tagging steps with it is
+-- how it gets an onboarding. Nothing here names a service except the seed rows and the migration
+-- of today's steps.
+--
+-- Midas's offer (2026-09-14): every client starts on Base (free website, missed-call text-back,
+-- review automation, lead follow-up, portal access). Add-ons are SEO Growth, Ads management and
+-- Video. Base is NOT a service row: every client has it, so Base steps are simply the untagged
+-- ones. Website is not an add-on either, since the site comes with Base. What varies is the website
+-- situation (we build their free site, or they keep an existing one), stored on the client.
 
 -- ---------------------------------------------------------------------------
 -- Services and which ones each client has
@@ -21,8 +27,12 @@ create table if not exists services (
     sort_order  integer not null default 0,
     created_at  timestamptz not null default now()
 );
-insert into services (key, name, sort_order) values
-    ('ads', 'Ads', 1), ('seo', 'SEO', 2), ('website', 'Website', 3), ('video', 'Video', 4)
+-- Video is a placeholder: created switched off, so it can't be picked until its onboarding is built.
+-- Turning it on is one toggle in Templates → Services.
+insert into services (key, name, description, active, sort_order) values
+    ('ads',   'Ads management', 'Meta ads, creative testing, the morning audit, weekly reports', true, 1),
+    ('seo',   'SEO Growth', 'On-site SEO, service and location pages, Google Business Profile, content, rank tracking', true, 2),
+    ('video', 'Video', 'Ad creative, website and service videos, social clips', false, 3)
 on conflict (key) do nothing;
 
 alter table services enable row level security;
@@ -50,9 +60,11 @@ create policy "Clients and admins read their own services" on client_services fo
 drop policy if exists "Admins manage client services" on client_services;
 create policy "Admins manage client services" on client_services for all using (current_user_is_admin()) with check (current_user_is_admin());
 
--- The client's website situation. It's a fact about the client, not a service: ads and SEO steps
--- depend on it even when "website" wasn't bought. Null means not set yet, and steps that depend on
--- it are skipped until it is.
+-- The client's website situation, a fact about the client and not a service:
+--   new_build  we're building their free Base site (we own the access, so there's no chase)
+--   existing   they keep a site they already have (SEO needs login/collaborator access to it)
+--   none       no site and not building one yet
+-- Null means not set yet, and steps that depend on it are skipped until it is.
 alter table clients add column if not exists website_status text;
 do $$
 begin
@@ -119,7 +131,7 @@ as $$
         select st.*
         from onboarding_steps st, c
         where coalesce(st.active, true)
-          and exists (select 1 from mine)   -- a client with no services gets no onboarding
+          -- untagged steps are Base, which every client has, even with no add-ons
           and (cardinality(st.website_statuses) = 0 or c.website_status = any (st.website_statuses))
           and (cardinality(st.service_keys) = 0 or st.service_keys && (select array_agg(service_key) from mine))
     ),
@@ -144,9 +156,12 @@ as $$
 $$;
 grant execute on function onboarding_steps_for_client(text) to authenticated;
 
--- Per-service onboarding progress: a service's onboarding is complete when every client step that
--- counts toward it is done, meaning its own tagged steps plus the shared ones. Agency steps are tasks
--- and never gate the client.
+-- Onboarding progress per service:
+-- - The first row is always 'base': the untagged steps every client does. Its status is onboarding
+--   until they're all done, then active.
+-- - Each add-on is complete when its own tagged client steps are done AND Base is done, since an SEO
+--   client can't finish SEO onboarding without the shared basics.
+-- Agency steps are tasks and never gate the client.
 create or replace function service_onboarding_status(p_client text)
 returns table (service_key text, status text, client_steps bigint, client_steps_done bigint, complete boolean)
 language sql stable
@@ -158,14 +173,19 @@ as $$
         select cs.service_key, cs.status from client_services cs
         where cs.client_name = p_client and cs.status in ('onboarding', 'active')
     )
+    select 'base'::text,
+           case when exists (select 1 from shared where not completed) then 'onboarding' else 'active' end,
+           (select count(*) from shared), (select count(*) from shared where completed),
+           not exists (select 1 from shared where not completed)
+    where exists (select 1 from clients where name = p_client)
+    union all
     select m.service_key, m.status,
            (select count(*) from steps s where s.service_key = m.service_key) + (select count(*) from shared),
            (select count(*) from steps s where s.service_key = m.service_key and s.completed)
              + (select count(*) from shared where completed),
            not exists (select 1 from steps s where s.service_key = m.service_key and not s.completed)
              and not exists (select 1 from shared where not completed)
-    from mine m
-    order by m.service_key;
+    from mine m;
 $$;
 grant execute on function service_onboarding_status(text) to authenticated;
 
@@ -201,6 +221,8 @@ as $$
             c.seo_start_date is not null and c.seo_monthly_fee is not null),
         ('autolog_configured',  'Article auto-logging set up',
             exists (select 1 from seo_webhook_configs w where w.client_name = c.name)),
+        ('lead_tracking_live',  'Website lead tracking receiving leads',
+            exists (select 1 from lead_sources l where l.client_name = c.name)),
         ('first_organic_lead',  'First lead from Google received',
             exists (select 1 from lead_sources l where l.client_name = c.name and l.source = 'organic')),
         ('website_status_set',  'Website situation recorded',
@@ -212,16 +234,15 @@ grant execute on function onboarding_auto_checks(text) to authenticated;
 -- ---------------------------------------------------------------------------
 -- Migration: today's steps, checklist and clients, so nothing anyone sees changes
 -- ---------------------------------------------------------------------------
--- Steps as they stood on 2026-09-14, matched by title. Welcome, setup call, and the two business
--- forms stay shared (no tags). A title that's since been renamed is simply left untagged,
--- meaning shared, which is the current behavior.
+-- Steps as they stood on 2026-09-14, matched by title. Everything Base stays untagged (every client):
+-- welcome, setup call, the two business forms, sales team (lead follow-up is Base), and GHL setup
+-- (missed-call text-back, reviews and follow-up all run in GHL). A title renamed since is simply
+-- left untagged, meaning every client, which is the current behavior.
 update onboarding_steps set service_keys = '{ads}'
 where cardinality(service_keys) = 0 and title in (
     'Offers and preferences', 'Give us access to your Facebook', 'Add your card to Facebook',
     'How Meta charges you for ad spend', 'Create your Facebook Page', 'Set up your Business Manager',
     'Add their Meta ad account ID to Golden Eye', 'Build and launch ads');
-update onboarding_steps set service_keys = '{ads,seo,website}'
-where cardinality(service_keys) = 0 and title in ('Sales team (names & numbers)', 'Set up GHL sub-account & assets');
 update onboarding_steps set auto_check = 'ad_account_set'   where auto_check is null and title = 'Add their Meta ad account ID to Golden Eye';
 update onboarding_steps set auto_check = 'ads_data_flowing' where auto_check is null and title = 'Build and launch ads';
 update onboarding_steps set auto_check = 'ghl_location_set' where auto_check is null and title = 'Set up GHL sub-account & assets';

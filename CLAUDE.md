@@ -330,9 +330,17 @@ our agency tasks → when *every* Onboarding-stage task is Complete, the client
 auto-advances to Campaign Building and that checklist generates from `stage_templates`.
 
 **Service-based onboarding (in progress, started 2026-09-14; plan in
-`~/.claude/plans/fluttering-gliding-pebble.md`).** Midas sells video, ads, website and SEO in any
-combination. **Services are data** (the `services` table), never code, so a changing service list
-doesn't change the onboarding engine. `supabase/sql/service_onboarding.sql` (step 1) adds:
+`~/.claude/plans/fluttering-gliding-pebble.md`).** Every client starts on **Base** (free website,
+missed-call text-back, review automation, lead follow-up, portal access). Add-ons are **SEO Growth**,
+**Ads management** and **Video** (Video is seeded switched off as a placeholder).
+- **Base is not a service row.** Every client has it, so Base steps are simply the untagged ones,
+  and it creates no marketing tasks of its own.
+- **Website is not an add-on.** The site comes with Base, so what varies is `clients.website_status`
+  (we build their free site, or they keep an existing one).
+- **Services are data** (the `services` table), never code, so a changing offer doesn't change the
+  onboarding engine.
+
+`supabase/sql/service_onboarding.sql` (step 1) adds:
 - **`client_services`:** one row per client per service, status `onboarding` / `active` /
   `paused` / `ended`. Adding a service later sets it to `onboarding`, and its steps come back.
 - **`clients.website_status`:** `none` / `existing` / `new_build`, or null when unknown. It's a
@@ -342,16 +350,20 @@ doesn't change the onboarding engine. `supabase/sql/service_onboarding.sql` (ste
 - **`onboarding_steps_for_client(p_client)`, the single rule for what applies.** It returns one row
   per step per service it counts toward, plus `display_service_key` for grouping. Everything is meant
   to use it: the portal, the admin view and the handoff trigger, so they can't disagree.
-- **`service_onboarding_status(p_client)`:** a service is complete when its tagged client steps plus
-  the shared ones are done. Agency steps never gate it.
+- **`service_onboarding_status(p_client)`:** always a `base` row (the untagged steps), plus one row
+  per add-on. An add-on is complete when its tagged client steps AND Base are done. Agency steps
+  never gate it.
 - **`onboarding_auto_checks(p_client)`:** keys an agency task can auto-complete on (ad account saved,
   ad spend flowing, GHL linked, Search Console syncing, SE Ranking syncing, SEO settings, auto-log,
-  first organic lead, website status). New checks are added there only.
-- **Migration:** today's steps are tagged by title (the Facebook/Meta steps and ad tasks → `ads`;
-  sales team and GHL setup → `ads,seo,website`; welcome, setup call and the two business forms
-  shared). Every client gets `ads` with a status from their stage/status, and clients with Search
-  Console or SE Ranking connected also get `seo`. **Nothing reads these yet**: app.js and
-  `trg_onboarding_handoff` still use the global list until later steps switch them. 26 PGlite checks.
+  lead tracking live, first organic lead, website status). New checks are added there only.
+- **Migration:**
+  - **Steps:** today's steps are tagged by title. The Facebook/Meta steps and the two ad tasks →
+    `ads`. Welcome, setup call, both business forms, sales team and GHL setup stay untagged, as Base.
+  - **Clients:** every client gets `ads` with a status from their stage/status, and clients with
+    Search Console or SE Ranking connected also get `seo`.
+  - **Nothing reads these yet:** app.js and `trg_onboarding_handoff` still use the global list until
+    later steps switch them.
+  - **Tests:** 28 PGlite checks.
 
 Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5× default
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of
