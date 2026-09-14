@@ -17,7 +17,7 @@
 // exactly what arrived.
 
 export interface Article {
-    source: "webflow" | "wix";
+    source: "webflow" | "wix" | "git";
     ref: string;          // stable per article, so a republish can't log it twice
     title: string;
     url: string | null;
@@ -25,6 +25,7 @@ export interface Article {
     published_at: string | null;
     collection_id?: string | null;  // Webflow only
     slug?: string | null;           // Webflow only, so a held post can get its URL once its blog path is known
+    git?: { repo: string; sha: string; path: string };  // Git only, where to fetch the file for its real title
 }
 
 export type ParseResult =
@@ -162,6 +163,96 @@ export function parseWix(body: any): ParseResult {
             published_at: str(findKey(body, ["firstPublishedDate", "publishedDate", "lastPublishedDate", "publishDate", "published_at"])),
         }],
     };
+}
+
+// ---------------------------------------------------------------------------
+// Git (a Jamstack site whose articles are files in a GitHub repo)
+// ---------------------------------------------------------------------------
+// A GitHub "push" webhook. A new article is a file ADDED under the configured content folder,
+// in a push to the repo's default branch, since that's what deploys. Edits to existing files
+// aren't logged, same as a Webflow or Wix republish, and neither is code, styling or anything
+// outside the folder. The push payload lists paths only, so the title here is a stand-in from
+// the file name, and index.ts swaps in the file's own frontmatter title when it can fetch the file.
+
+const ARTICLE_EXT = /\.(md|mdx|markdown|html)$/i;
+
+// "src/content/blog/deck-repair.md" → "deck-repair"; "content/posts/deck-repair/index.mdx" → "deck-repair"
+export function slugOfPath(path: string): string | null {
+    const parts = path.split("/").filter(Boolean);
+    let file = parts.pop() ?? "";
+    if (!ARTICLE_EXT.test(file)) return null;
+    let name = file.replace(ARTICLE_EXT, "");
+    if (name.toLowerCase() === "index") name = parts.pop() ?? "";
+    // Leading dates are common in Jekyll/Hugo file names and aren't part of the URL
+    name = name.replace(/^\d{4}-\d{2}-\d{2}-/, "");
+    return name && !name.startsWith("_") && name.toLowerCase() !== "readme" ? name : null;
+}
+
+const titleFromSlug = (slug: string) =>
+    slug.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (c) => c.toUpperCase());
+
+export function parseGitPush(
+    body: any,
+    event: string | null,
+    params: { site: string | null; path: string | null; contentPath: string | null },
+): ParseResult {
+    if (event === "ping") return { ok: false, reason: "GitHub ping: the webhook is connected" };
+    if (event && event !== "push") return { ok: false, reason: `ignored GitHub event ${event}` };
+    // GitHub's default content type posts the JSON as a form field called "payload"
+    const b = typeof body?.payload === "string" ? (() => { try { return JSON.parse(body.payload); } catch { return null; } })() : body;
+    const repo = str(b?.repository?.full_name);
+    if (!repo || !Array.isArray(b?.commits)) return { ok: false, reason: "not a GitHub push payload" };
+
+    const branch = str(b?.repository?.default_branch) ?? str(b?.repository?.master_branch) ?? "main";
+    if (str(b?.ref) !== `refs/heads/${branch}`) return { ok: false, reason: `push to ${str(b?.ref) ?? "unknown ref"}, not the ${branch} branch` };
+
+    const folder = str(params.contentPath)?.replace(/^\/+/, "").replace(/\/*$/, "/") ?? null;
+    if (!folder) return { ok: false, reason: "no content folder set for this client" };
+
+    // Files added in this push and still present at its end: added then removed in the same push
+    // never went live
+    const added = new Map<string, { sha: string; timestamp: string | null }>();
+    for (const c of b.commits) {
+        for (const p of Array.isArray(c?.added) ? c.added : []) added.set(String(p), { sha: str(c?.id) ?? str(b?.after) ?? "", timestamp: str(c?.timestamp) });
+        for (const p of Array.isArray(c?.removed) ? c.removed : []) added.delete(String(p));
+    }
+
+    const host = siteHost(params.site);
+    const prefix = str(params.path) === "/" ? "" : (str(params.path)?.replace(/^\/*/, "/").replace(/\/+$/, "") ?? null);
+    const articles: Article[] = [];
+    for (const [path, info] of added) {
+        if (!path.startsWith(folder)) continue;
+        const slug = slugOfPath(path);
+        if (!slug) continue;
+        articles.push({
+            source: "git",
+            ref: `git:${repo}:${path}`,
+            title: titleFromSlug(slug).slice(0, 200),
+            url: host && prefix !== null ? `https://${host}${prefix}/${slug}` : null,
+            host,
+            published_at: info.timestamp ?? str(b?.head_commit?.timestamp),
+            slug,
+            git: { repo, sha: info.sha || str(b?.after) || "", path },
+        });
+    }
+    return articles.length ? { ok: true, articles } : { ok: false, reason: `no new article files under ${folder} in this push` };
+}
+
+// The article's own title from its source: frontmatter `title:`, else a Markdown "# Heading",
+// else an HTML <title> or <h1>. null when none is found, so the file-name stand-in is kept.
+export function titleFromSource(text: string): string | null {
+    const fm = text.match(/^﻿?---\s*\r?\n([\s\S]*?)\r?\n---/);
+    if (fm) {
+        const t = fm[1].match(/^title\s*:\s*(.+?)\s*$/m);
+        if (t) {
+            const v = t[1].replace(/^(["'])(.*)\1$/, "$2").trim();
+            if (v) return v.slice(0, 200);
+        }
+    }
+    const h1 = text.match(/^#\s+(.+?)\s*#*\s*$/m);
+    if (h1) return h1[1].trim().slice(0, 200);
+    const html = text.match(/<title[^>]*>([^<]+)<\/title>/i) ?? text.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+    return html ? html[1].trim().slice(0, 200) : null;
 }
 
 // ---------------------------------------------------------------------------

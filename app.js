@@ -5074,7 +5074,7 @@ Treat this period as a fresh starting point. State every number plainly as where
                  <div class="flex flex-wrap items-center gap-2">
                      <span class="text-[10px] font-bold uppercase tracking-widest" style="color:${kind.color}">${kind.label}</span>
                      <span class="text-[11px] text-gray-500">${escapeAttr(date)}</span>
-                     ${x.created_by === 'webflow' || x.created_by === 'wix' ? `<span class="text-[9px] uppercase tracking-widest text-gray-400 border border-white/15 rounded px-1" title="Logged automatically when the article was published">auto · ${x.created_by === 'wix' ? 'Wix' : 'Webflow'}</span>` : ''}
+                     ${['webflow', 'wix', 'git'].includes(x.created_by) ? `<span class="text-[9px] uppercase tracking-widest text-gray-400 border border-white/15 rounded px-1" title="Logged automatically when the article was published">auto · ${({ webflow: 'Webflow', wix: 'Wix', git: 'Git' })[x.created_by]}</span>` : ''}
                  </div>
                  <div class="text-sm text-white font-semibold break-words">${escapeAttr(x.title)}</div>
                  ${safeUrl ? `<a href="${escapeAttr(safeUrl)}" target="_blank" rel="noopener" class="text-xs text-blue-400 hover:underline break-all">${escapeAttr(safeUrl)}</a>` : ''}
@@ -5181,7 +5181,7 @@ Treat this period as a fresh starting point. State every number plainly as where
      if (status) {
          status.innerText = !seoAutologConfig ? 'Auto-log articles'
              : seoAutologConfig.platform === 'webflow' && !seoAutologConfig.collection_id ? 'Auto-log: pick blog collection'
-             : `Auto-log: on (${seoAutologConfig.platform === 'wix' ? 'Wix' : 'Webflow'})`;
+             : `Auto-log: on (${SEO_PLATFORM_LABEL[seoAutologConfig.platform] || seoAutologConfig.platform})`;
      }
      // Keep an open panel in step when switching clients
      if (!document.getElementById('seo-autolog-panel')?.classList.contains('hidden')) await fillSeoAutologPanel();
@@ -5197,9 +5197,12 @@ Treat this period as a fresh starting point. State every number plainly as where
  };
 
  window.seoAutologPlatformChanged = function() {
-     const webflow = document.getElementById('seo-al-platform').value === 'webflow';
-     document.querySelectorAll('.seo-al-webflow').forEach(el => el.classList.toggle('hidden', !webflow));
+     const platform = document.getElementById('seo-al-platform').value;
+     // Webflow and Git both build post URLs from a blog path. Only Git has a repo folder.
+     document.querySelectorAll('.seo-al-webflow').forEach(el => el.classList.toggle('hidden', platform === 'wix'));
+     document.querySelectorAll('.seo-al-git').forEach(el => el.classList.toggle('hidden', platform !== 'git'));
  };
+ const SEO_PLATFORM_LABEL = { webflow: 'Webflow', wix: 'Wix', git: 'Git' };
 
  async function fillSeoAutologPanel() {
      const cfg = seoAutologConfig;
@@ -5208,6 +5211,7 @@ Treat this period as a fresh starting point. State every number plainly as where
      document.getElementById('seo-al-error').classList.add('hidden');
      document.getElementById('seo-al-platform').value = cfg?.platform || 'webflow';
      document.getElementById('seo-al-path').value = cfg?.blog_path || '';
+     document.getElementById('seo-al-content').value = cfg?.content_path || '';
      document.getElementById('seo-al-off').classList.toggle('hidden', !cfg);
      seoAutologPlatformChanged();
      renderSeoAutologLink();
@@ -5242,7 +5246,13 @@ Treat this period as a fresh starting point. State every number plainly as where
      box.classList.toggle('hidden', !cfg);
      if (!cfg) return;
      document.getElementById('seo-al-url').value = `${SEO_WEBHOOK_FN}?t=${cfg.token}`;
-     const steps = cfg.platform === 'wix'
+     const steps = cfg.platform === 'git'
+         ? ['Copy the link above.',
+            'In the site\'s GitHub repo, open Settings → <b>Webhooks</b> → <b>Add webhook</b>.',
+            'Payload URL: paste the link. Content type: <b>application/json</b>. Events: <b>Just the push event</b>. Save.',
+            'GitHub sends a test ping right away, and that\'s fine. From then on, a new article file pushed to the main branch appears here with an "auto · Git" badge, titled from the file\'s own title.',
+            'Private repo? Add a GITHUB_TOKEN secret in Supabase (read-only access to the repo) so titles come from the file instead of the file name.']
+         : cfg.platform === 'wix'
          ? ['Copy the link above.',
             'In the Wix dashboard, open Automations and create a new automation.',
             'Trigger: <b>Blog post published</b>. Action: <b>Send HTTP request</b> (POST). Paste the link. If Wix asks what to send, include the post title, link and published date.',
@@ -5299,22 +5309,32 @@ Treat this period as a fresh starting point. State every number plainly as where
      const errEl = document.getElementById('seo-al-error');
      errEl.classList.add('hidden');
      const platform = document.getElementById('seo-al-platform').value;
-     const blog_path = platform === 'webflow' ? (seoCleanPath(document.getElementById('seo-al-path').value) || null) : null;
+     const rawPath = document.getElementById('seo-al-path').value.trim();
+     // "/" is a real answer for Git sites that serve articles at the root, e.g. example.com/my-article
+     const blog_path = platform === 'wix' ? null : (rawPath === '/' ? '/' : (seoCleanPath(rawPath) || null));
+     const content_path = platform === 'git'
+         ? (document.getElementById('seo-al-content').value.trim().replace(/^\/+/, '').replace(/\/*$/, '/') || null)
+         : null;
+     if (platform === 'git' && (!content_path || content_path === '/')) {
+         errEl.innerText = 'Add the repo folder the articles live in, e.g. src/content/blog/';
+         errEl.classList.remove('hidden');
+         return;
+     }
      if (!seoDomainOf(seoAutologClientObj.gsc_property)) {
          errEl.innerText = 'Add this client\'s Search Console property under Edit first. That\'s how their site is confirmed.';
          errEl.classList.remove('hidden');
          return;
      }
-     if (platform === 'webflow' && !blog_path) {
-         errEl.innerText = 'Add the blog address prefix (e.g. /blog), so logged posts link to the right page.';
+     if (platform !== 'wix' && !blog_path) {
+         errEl.innerText = 'Add the blog address prefix (e.g. /blog, or / if articles sit at the root), so logged posts link to the right page.';
          errEl.classList.remove('hidden');
          return;
      }
      btn.disabled = true; btn.innerText = 'Saving...';
      try {
-         const row = { client_name: seoAutologClientObj.name, platform, blog_path, updated_at: new Date().toISOString() };
+         const row = { client_name: seoAutologClientObj.name, platform, blog_path, content_path, updated_at: new Date().toISOString() };
          // Switching platform clears a Webflow collection that no longer applies
-         if (platform === 'wix') row.collection_id = null;
+         if (platform !== 'webflow') row.collection_id = null;
          const { error } = await supabaseClient.from('seo_webhook_configs').upsert(row, { onConflict: 'client_name' });
          if (error) throw error;
          await refreshSeoAutologStatus(seoAutologClientObj);

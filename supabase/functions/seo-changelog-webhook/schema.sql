@@ -83,6 +83,18 @@ notify pgrst, 'reload schema';
 -- Then re-run supabase/sql/rename_client.sql, which now also moves seo_webhook_configs.
 
 -- ---------------------------------------------------------------------------
+-- Git: Jamstack sites whose articles are files in a GitHub repo (added 2026-09-14)
+-- ---------------------------------------------------------------------------
+-- A GitHub push webhook logs files ADDED under content_path, e.g. src/content/blog/.
+-- The check constraint was created inline, so Postgres named it <table>_<column>_check.
+alter table seo_webhook_configs add column if not exists content_path text;
+alter table seo_webhook_configs drop constraint if exists seo_webhook_configs_platform_check;
+alter table seo_webhook_configs add constraint seo_webhook_configs_platform_check
+    check (platform in ('webflow', 'wix', 'git'));
+
+notify pgrst, 'reload schema';
+
+-- ---------------------------------------------------------------------------
 -- Checking on it
 -- ---------------------------------------------------------------------------
 -- What arrived, and what happened to it:

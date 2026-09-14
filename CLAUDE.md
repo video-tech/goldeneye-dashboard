@@ -970,7 +970,7 @@ real client data; see the Known gaps entry on that.
   lands on the first plotted day on or after its date, and same-day markers stack. URLs are
   only linked when they're http(s). No SQL was needed, since the table and its admin write
   policy already existed from `seranking-sync/schema.sql`.
-- **Articles published on Webflow or Wix log themselves (built 2026-09-14).** Setup
+- **Articles published on Webflow, Wix or a GitHub-based site log themselves (built 2026-09-14).** Setup
   is on the SEO tab: **Auto-log articles**, on the changelog panel.
   `supabase/functions/seo-changelog-webhook/` takes the site's own publish event, not Cuppa's.
   Cuppa only stages a Webflow post, and the changelog records when work went live.
@@ -1003,10 +1003,21 @@ real client data; see the Known gaps entry on that.
     every authenticated request is recorded with its outcome and a scrubbed payload. Only admins
     can read it, and it's not in `rename_client.sql` because `client_name` there is
     informational.
+  - **Git (Jamstack sites), added 2026-09-14:** a GitHub repo webhook (push event,
+    application/json) to the same `?t=` link. A new article is a `.md/.mdx/.markdown/.html`
+    file **added** under the client's `content_path` in a push to the repo's default branch.
+    Edits, code, other branches, drafts (`_file`), READMEs and files added then removed in
+    the same push are ignored. The slug is the file name, or the folder name for `index.*`,
+    minus a leading `YYYY-MM-DD-`. The URL is domain + `blog_path` + slug, where `/` means
+    articles sit at the root. The title comes from the file's frontmatter `title:` (else its
+    first `#` heading or HTML `<title>`/`<h1>`), fetched from raw.githubusercontent.com. A
+    private repo needs a `GITHUB_TOKEN` secret, and without one the title falls back to the
+    file name. `source_ref` is `git:<repo>:<path>`. Author, committer, pusher and sender are
+    dropped before a payload is stored. 22 checks.
   - **First-version URLs** (`?k=<SEO_WEBHOOK_SECRET>&source=&site=&path=&collection=`) still
     work, matched to a client by domain. 3Sixty's Webflow webhook uses one.
   - **Tests:** parsing is in dependency-free `parse.ts`. 38 checks (26 on the first version,
-    12 on the token path).
+    12 on the token path, 22 on Git).
 - **Not yet built:** the keyword manager. `seo_keywords` is currently populated only by
   `seranking-sync`'s sync, with no admin-side add/retire form yet, even though its RLS already
   allows admin writes. The changelog isn't in the weekly report or the client portal yet either.

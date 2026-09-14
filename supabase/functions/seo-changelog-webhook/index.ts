@@ -27,15 +27,36 @@
 // Schema:  schema.sql in this folder, then supabase/sql/rename_client.sql.
 // Secret:  SEO_WEBHOOK_SECRET, only needed by ?k= URLs.
 
-import { checkTokenClient, domainOf, liveDateOf, parseWebflow, parseWix, resolveClient, siteHost, type Article } from "./parse.ts";
+import { checkTokenClient, domainOf, liveDateOf, parseGitPush, parseWebflow, parseWix, resolveClient, siteHost, titleFromSource, type Article } from "./parse.ts";
 
-type Config = { client_name: string; platform: "webflow" | "wix"; blog_path: string | null; collection_id: string | null };
+type Config = { client_name: string; platform: "webflow" | "wix" | "git"; blog_path: string | null; collection_id: string | null; content_path: string | null };
+
+// A Git push lists file paths, not titles. Fetch each new file and use its own title. Public repos
+// need nothing, and a private repo needs a GITHUB_TOKEN secret with read access. On any failure
+// the file-name title stands, and it can be edited in the changelog.
+async function fillGitTitles(articles: Article[]): Promise<void> {
+    const ghToken = Deno.env.get("GITHUB_TOKEN");
+    await Promise.all(articles.map(async (a) => {
+        if (!a.git?.sha) return;
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 4000);
+        try {
+            const res = ghToken
+                ? await fetch(`https://api.github.com/repos/${a.git.repo}/contents/${a.git.path.split("/").map(encodeURIComponent).join("/")}?ref=${a.git.sha}`,
+                    { headers: { "Authorization": `Bearer ${ghToken}`, "Accept": "application/vnd.github.raw", "User-Agent": "golden-eye" }, signal: ctl.signal })
+                : await fetch(`https://raw.githubusercontent.com/${a.git.repo}/${a.git.sha}/${a.git.path.split("/").map(encodeURIComponent).join("/")}`, { signal: ctl.signal });
+            if (!res.ok) return;
+            const title = titleFromSource((await res.text()).slice(0, 20000));
+            if (title) a.title = title;
+        } catch { /* keep the file-name title */ } finally { clearTimeout(timer); }
+    }));
+}
 
 async function loadConfigByToken(token: string): Promise<Config | null> {
     // A token is 64 hex characters, and anything else isn't worth a query
     if (!/^[0-9a-f]{64}$/.test(token)) return null;
     const { base, headers } = service();
-    const res = await fetch(`${base}/rest/v1/seo_webhook_configs?select=client_name,platform,blog_path,collection_id&token=eq.${token}`, { headers });
+    const res = await fetch(`${base}/rest/v1/seo_webhook_configs?select=client_name,platform,blog_path,collection_id,content_path&token=eq.${token}`, { headers });
     if (!res.ok) throw new Error(`config lookup failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
     const rows = await res.json();
     return rows[0] ?? null;
@@ -89,6 +110,8 @@ async function logArticle(client: string, a: Article): Promise<boolean> {
 function scrub(value: unknown, secret: string, key = "", depth = 0): unknown {
     if (depth > 8) return "[too deep]";
     if (value === null || value === undefined) return value;
+    // GitHub push payloads name whoever committed. Nothing here needs people's names.
+    if (/^(author|committer|pusher|sender)$/i.test(key)) return "[removed]";
     if (Array.isArray(value)) return value.slice(0, 50).map((v) => scrub(v, secret, key, depth + 1));
     if (typeof value === "object") {
         return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, scrub(v, secret, k, depth + 1)]));
@@ -171,7 +194,7 @@ Deno.serve(async (req: Request) => {
             path: url.searchParams.get("path"),
             collection: url.searchParams.get("collection"),
         };
-    const source = params.source === "wix" || params.source === "webflow"
+    const source = params.source === "wix" || params.source === "webflow" || params.source === "git"
         ? params.source
         : (body && typeof body === "object" && "triggerType" in body ? "webflow" : "wix");
 
@@ -197,7 +220,12 @@ Deno.serve(async (req: Request) => {
 
         const parsed = source === "webflow"
             ? parseWebflow(body, { site: params.site, path: params.path, collection: params.collection })
+            : source === "git"
+            // Git only through a per-client token: its content folder lives in the config
+            ? (config ? parseGitPush(body, req.headers.get("x-github-event"), { site: params.site, path: params.path, contentPath: config.content_path })
+                      : { ok: false as const, reason: "Git sites need a per-client link from the SEO tab" })
             : parseWix(body);
+        if (parsed.ok && source === "git") await fillGitTitles(parsed.articles);
         if (!parsed.ok) {
             await recordEvent({ ...event, outcome: "skipped", reason: parsed.reason });
             // 200, not an error: an ignored event (another collection, a draft) is normal, and a

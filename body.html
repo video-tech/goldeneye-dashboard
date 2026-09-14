@@ -768,14 +768,20 @@
                                     </div>
 
                                     <div id="seo-autolog-panel" class="hidden space-y-4 mb-5 p-4 rounded-xl border border-white/10">
-                                        <p class="text-xs text-gray-400">When a blog post is published on this client's Webflow or Wix site, it's added here automatically. Set it up once: pick the platform, copy the link, and paste it into the site.</p>
+                                        <p class="text-xs text-gray-400">When a blog post is published on this client's Webflow, Wix or GitHub-based site, it's added here automatically. Set it up once: pick the platform, copy the link, and paste it into the site.</p>
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                             <div>
                                                 <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-al-platform">Site platform</label>
                                                 <select id="seo-al-platform" class="glass-input" onchange="seoAutologPlatformChanged()">
                                                     <option value="webflow">Webflow</option>
                                                     <option value="wix">Wix</option>
+                                                    <option value="git">Jamstack site on GitHub</option>
                                                 </select>
+                                            </div>
+                                            <div class="seo-al-git hidden">
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-al-content">Articles folder in the repo</label>
+                                                <input type="text" id="seo-al-content" class="glass-input font-mono" placeholder="src/content/blog/">
+                                                <p class="text-[11px] text-gray-500 mt-1">New .md, .mdx or .html files added here are logged as articles.</p>
                                             </div>
                                             <div class="seo-al-webflow">
                                                 <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-al-path">Blog address prefix</label>
