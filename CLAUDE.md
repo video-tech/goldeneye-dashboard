@@ -88,6 +88,14 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
     promises no notification).
   - `client_email` is stripped with `\s`, not `btrim` — the hidden `\r\n` in Known gaps
     would otherwise make Make's GHL contact lookup miss.
+  - **It never calls Make without a well-formed email** (added 2026-09-14). The task is still
+    raised. **Incident, 2026-09-14:** one real completion made scenario #4's GHL contact
+    search, which is fuzzy, return 10 contacts. Make tagged all 10, and the GHL onboarding
+    workflow texted "onboarding complete" to 10 leads. Two guards now: this trigger, and
+    Make filters (`client_email` not empty, search limited to 1 result, and the found
+    contact's email must exactly equal `client_email` before tagging). **Never let a Make
+    step act on a GHL search result without an exact-match filter**, because GHL search
+    returns near-misses.
   - `onboarding_handoff_tests.sql` holds four rolled-back tests. Each attaches the trigger
     inside its own transaction, then ends in a deliberate `raise exception` that prints
     the results and makes a commit impossible.

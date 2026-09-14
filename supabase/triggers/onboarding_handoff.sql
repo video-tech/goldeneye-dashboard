@@ -137,6 +137,16 @@ begin
           5, 4, 1, 92, current_date + 1,
           v_client || ' finished every onboarding step in their portal.', now());
 
+  -- No usable email means no text. Make finds the client in GHL by email, and GHL's contact
+  -- search is fuzzy. On 2026-09-14 a single completion came back with 10 contacts, all
+  -- leads, which Make tagged, and GHL texted every one "onboarding complete". Make now
+  -- filters for an exact email match too, but a blank or malformed email must never leave
+  -- here at all. The handoff task above is still raised, so an admin sees the client finished.
+  if v_email !~ '^[^@\s,]+@[^@\s,]+\.[^@\s,]+$' then
+    raise warning 'onboarding handoff: no usable client_email for %, text not requested', v_client;
+    return NEW;
+  end if;
+
   -- A Make outage must never roll back the client's own progress save
   begin
     perform net.http_post(
