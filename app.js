@@ -4320,12 +4320,37 @@ window.renderClientReports = async function() {
             const leadsDelta = hasPriorData ? pctChange(currentAdsStats.l || 0, priorLeads) : null;
             const cplDelta   = (hasPriorData && priorCpl !== null) ? pctChange(currentAdsStats.cpl || 0, priorCpl) : null;
 
+            // The same change in everyday words, for the casual "Hi team," summary. The report's
+            // tiles already show the exact percentages, so the summary shouldn't read them out
+            // again. Worked out here, because "+100%" is double, not "a 200% increase", and the
+            // model is never trusted to do that conversion itself.
+            const casualChange = (now, was) => {
+                if (!was || now == null) return 'no comparison';
+                const r = now / was;
+                const pct = Math.round(Math.abs(r - 1) * 100 / 5) * 5;
+                if (r >= 3.75) return `roughly ${Math.round(r)} times as much`;
+                if (r >= 2.75) return 'about triple';
+                if (r >= 2.25) return 'about two and a half times as much';
+                if (r >= 1.8)  return 'about double';
+                if (r >= 1.4)  return `about ${pct}% more (well up)`;
+                if (r >= 1.05) return `a bit more (about ${pct}% up)`;
+                if (r > 0.95)  return 'about the same';
+                if (r > 0.6)   return `a bit less (about ${pct}% down)`;
+                if (r > 0.4)   return 'about half';
+                if (r > 0.28)  return 'about a third';
+                if (r > 0)     return 'a small fraction of it';
+                return 'none at all';
+            };
+
             const trendBlock = hasPriorData
                 ? `PREVIOUS PERIOD (the ${spanDays} day${spanDays === 1 ? '' : 's'} immediately before this range):
 - Spend: $${priorSpend.toFixed(2)} | Leads: ${priorLeads} | CPL: ${priorCpl !== null ? '$' + priorCpl.toFixed(2) : 'n/a (no leads)'}
 
 COMPUTED CHANGE vs previous period — use these exact figures for any trend you state, never calculate your own:
-- Spend: ${fmtPct(spendDelta)} | Leads: ${fmtPct(leadsDelta)} | CPL: ${fmtPct(cplDelta)}`
+- Spend: ${fmtPct(spendDelta)} | Leads: ${fmtPct(leadsDelta)} | CPL: ${fmtPct(cplDelta)}
+
+SAME CHANGE IN EVERYDAY WORDS (this period compared with the previous one), for the casual email_summary only:
+- Spend: ${casualChange(currentAdsStats.s || 0, priorSpend)} | Leads: ${casualChange(currentAdsStats.l || 0, priorLeads)} | CPL: ${priorCpl !== null && currentAdsStats.l ? casualChange(currentAdsStats.cpl || 0, priorCpl) : 'no comparison'}`
                 : `NEW BASELINE: ads ran on only ${priorActiveDays.size} of the ${spanDays} days before this range (paused, not yet launched, or otherwise not running), so there is no fair previous period to compare against.
 Treat this period as a fresh starting point. State every number plainly as where things stand now. Do NOT give any percentage change, and do NOT describe anything as up, down, better, worse, recovered or improved compared with before. Don't dwell on the gap or apologize for it. At most, say once in passing that this is the new baseline future weeks will be measured against.`;
 
@@ -4461,13 +4486,29 @@ Treat this period as a fresh starting point. State every number plainly as where
             you write yourself.)
 
             RULES FOR "email_summary":
-            - Tone: Casual, completely honest, analytical, and direct. Do not use corporate fluff.
+            This is the short note that sits ABOVE the report in the email. The report right below
+            it already shows every number and its exact percentage change on the tiles, so this
+            note must not read them out again. Write it the way you'd catch a client up in person.
+            - Tone: Casual, conversational, completely honest and direct, like a quick update from
+              someone who knows the account. Short sentences. No corporate fluff, no stiff analyst
+              language.
             - Format: Start directly with "Hi team," (Do NOT output a "Subject:" line).
-            - Content: State the spend and leads upfront. Explain the "why" behind the numbers
-              using the computed change and the work lists above — never a guess. If manual
-              notes were provided, use them. Close with a specific priority or action step only
-              when the data actually supports one — see NO GENERIC FILLER above. Otherwise end
-              on the numbers; do not force a closing sentence that isn't there.
+            - Changes: Talking about how things moved is good, but in everyday words, never as a
+              recited percentage. Use the SAME CHANGE IN EVERYDAY WORDS line above: "we got about
+              double the leads", "cost per lead came down a bit", "spend was about the same". Never
+              write "a 100% increase" or "+23%". Those numbers live on the tiles. It's fine to
+              mention a raw count when it reads naturally ("14 leads this week").
+            - When NEW BASELINE is given above, make no comparison at all, casual or otherwise.
+            - Insights: This is the place for general insights, meaning the useful "here's what we're
+              seeing" observations. Examples: leads came in cheaper even though spend barely moved;
+              clicks are up but they aren't turning into leads yet; SEO work that went live; how the
+              manual notes explain a number. Every insight must come from the data, work lists, SEO
+              data or manual notes above. Never invent a cause, a seasonal trend, or a market
+              condition you weren't given. One or two real insights beat several thin ones, and none
+              is fine when nothing stands out.
+            - If manual notes were provided, work them in naturally.
+            - Close with a specific priority or action step only when the data actually supports
+              one — see NO GENERIC FILLER above. Otherwise just end; do not force a closing sentence.
 
             RULES FOR "html_report":
             - Output a complete, copy-safe HTML string based on the data and notes.
