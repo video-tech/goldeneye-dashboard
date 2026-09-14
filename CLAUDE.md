@@ -946,6 +946,15 @@ real client data; see the Known gaps entry on that.
   that matters most (fixed 2026-09-14). Each window now takes the latest day with either rank.
   Hovering a keyword shows the page SE Ranking found ranking for it. Changing the function's
   return columns needs `drop function` first, which is already in `seo_admin_rpcs.sql`.
+- **Almost Page 1 (added 2026-09-14)** is `seo_almost_page_one`, which lists queries whose
+  impression-weighted position for the range is above 10 and at most 20. Page 2 gets a small
+  fraction of page 1's clicks, so these are the best content targets: Google already finds the
+  page relevant. Rows are ordered by impressions, with an impressions floor of
+  `max(10, days in range)` passed from app.js, so long ranges don't fill up with one-off
+  searches. Each row shows its position change from the previous period and a `tracked`
+  badge when SE Ranking already watches it. The data is GSC's query-level rows only, so it
+  can't say *which page* ranks for the query. That needs a `[date,page,query]` pull
+  `seo-sync` deliberately doesn't do.
 - **The dead "AI SEO Specialist Analysis" box is gone** — `triggerAdminSeoAI` never existed,
   so its Run Analysis button always threw. Replaced with "What Moved"
   (`seo_movers`): the top page/query gainers and losers by click delta, gated on

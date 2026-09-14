@@ -4997,6 +4997,31 @@ Treat this period as a fresh starting point. State every number plainly as where
      }).join('');
  }
 
+ function renderSeoAlmostPageOne(rows, minImpressions, failed) {
+     const tbody = document.getElementById('seo-almost-p1-tbody');
+     if (!tbody) return;
+     if (failed) {
+         tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-amber-400">Couldn\'t load this list. Run the latest supabase/sql/seo_admin_rpcs.sql.</td></tr>';
+         return;
+     }
+     if (!rows.length) {
+         tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-gray-500">No searches sitting just off page 1 with at least ${minImpressions} impressions in this range.</td></tr>`;
+         return;
+     }
+     tbody.innerHTML = rows.map(r => {
+         // Lower is better, so a move from 18 to 13 reads green
+         const move = r.prior_position != null ? seoDeltaPill(Number(r.weighted_position), Number(r.prior_position), { invert: true }) : '';
+         const tracked = r.tracked ? ' <span class="text-[9px] uppercase tracking-widest text-purple-400 border border-purple-400/30 rounded px-1 ml-1" title="Tracked in SE Ranking">tracked</span>' : '';
+         return `
+         <tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 max-w-[260px]"><span class="truncate inline-block max-w-[200px] align-bottom" title="${escapeAttr(r.query)}">${escapeAttr(r.query)}</span>${tracked}</td>
+             <td class="py-2 text-right text-white font-bold">${Number(r.impressions).toLocaleString()}</td>
+             <td class="py-2 text-right text-gray-400">${Number(r.clicks).toLocaleString()}</td>
+             <td class="py-2 text-right text-yellow-400 whitespace-nowrap">${Number(r.weighted_position).toFixed(1)} ${move}</td>
+         </tr>`;
+     }).join('');
+ }
+
  function renderSeoChart(daily, s, e) {
      const inRange = daily.filter(r => { const rd = new Date(r.date + 'T12:00:00'); return rd >= s && rd <= e; });
      const labels = inRange.map(r => r.date);
@@ -5078,18 +5103,24 @@ Treat this period as a fresh starting point. State every number plainly as where
          renderSeoChart(daily, s, e);
 
          const iso = seoIso;
-         const [pagesRes, keywordsRes, moversRes] = await Promise.all([
+         // At least ~1 impression a day, never under 10: enough to be a real search, without a
+         // 90-day view filling up with queries seen twice
+         const almostMinImpr = Math.max(10, spanDays);
+         const [pagesRes, keywordsRes, moversRes, almostRes] = await Promise.all([
              supabaseClient.rpc('seo_page_summary', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) }),
              supabaseClient.rpc('seo_keyword_summary', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) }),
-             supabaseClient.rpc('seo_movers', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
+             supabaseClient.rpc('seo_movers', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) }),
+             supabaseClient.rpc('seo_almost_page_one', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd), p_min_impressions: almostMinImpr })
          ]);
          if (pagesRes.error) console.error('seo_page_summary failed:', pagesRes.error);
          if (keywordsRes.error) console.error('seo_keyword_summary failed:', keywordsRes.error);
          if (moversRes.error) console.error('seo_movers failed:', moversRes.error);
+         if (almostRes.error) console.error('seo_almost_page_one failed:', almostRes.error);
 
          renderSeoPagesTable(pagesRes.data || []);
          renderSeoKeywordsTable(keywordsRes.data || []);
          renderSeoMoversPanel(moversRes.data || []);
+         renderSeoAlmostPageOne(almostRes.data || [], almostMinImpr, !!almostRes.error);
      } catch (err) {
          console.error('renderAdminSeo failed:', err);
      }

@@ -208,6 +208,53 @@ as $$
 $$;
 grant execute on function seo_movers(text, date, date, date, date, int) to authenticated;
 
+-- Almost page 1: searches where the client already shows up, just past the first page
+-- (impression-weighted position above 10, up to 20), with real impressions behind them. Page 2
+-- gets a small fraction of page 1's clicks, so these are the highest-return targets for content
+-- and on-page work. Google already considers the page relevant, it just needs a push.
+--
+-- Ordered by impressions, meaning the most searched first. The impressions floor is passed in by
+-- the caller, scaled to the window length, so a 90-day view isn't flooded with queries that
+-- got two impressions a month. prior_position shows which way each query is already moving, and
+-- `tracked` flags queries SE Ranking is already watching.
+create or replace function seo_almost_page_one(
+    p_client text, p_start date, p_end date, p_prior_start date, p_prior_end date,
+    p_min_impressions int default 10, p_limit int default 20
+)
+returns table (
+    query text, clicks bigint, impressions bigint, weighted_position numeric,
+    prior_position numeric, tracked boolean
+)
+language sql stable
+set search_path = public
+as $$
+    with cur as (
+        select q.query, sum(q.clicks) as clicks, sum(q.impressions) as impressions,
+               sum(q.position * q.impressions) / nullif(sum(q.impressions), 0) as weighted_position
+        from seo_queries_daily q
+        where q.client_name = p_client and q.date between p_start and p_end
+        group by q.query
+    ),
+    pri as (
+        select q.query,
+               sum(q.position * q.impressions) / nullif(sum(q.impressions), 0) as weighted_position
+        from seo_queries_daily q
+        where q.client_name = p_client and q.date between p_prior_start and p_prior_end
+        group by q.query
+    )
+    select cur.query, cur.clicks, cur.impressions,
+           round(cur.weighted_position, 1), round(pri.weighted_position, 1),
+           exists (select 1 from seo_keywords k
+                   where k.client_name = p_client and k.keyword = cur.query and k.active)
+    from cur
+    left join pri on pri.query = cur.query
+    where cur.weighted_position > 10 and cur.weighted_position <= 20
+      and cur.impressions >= p_min_impressions
+    order by cur.impressions desc, cur.weighted_position asc
+    limit p_limit;
+$$;
+grant execute on function seo_almost_page_one(text, date, date, date, date, int, int) to authenticated;
+
 notify pgrst, 'reload schema';
 
 -- ---------------------------------------------------------------------------
