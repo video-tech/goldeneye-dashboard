@@ -108,6 +108,8 @@ begin
     update seo_webhook_configs        set client_name = new_name where client_name = old_name;
     -- Added 2026-09-14 with the client SEO tab data (supabase/sql/seo_client_tab.sql):
     update seo_project_daily          set client_name = new_name where client_name = old_name;
+    -- Added 2026-09-14 with service-based onboarding (supabase/sql/service_onboarding.sql):
+    update client_services            set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users
