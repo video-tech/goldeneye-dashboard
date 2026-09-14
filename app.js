@@ -4298,13 +4298,16 @@ window.renderClientReports = async function() {
                 const rd = new Date(r.date.split('T')[0] + 'T12:00:00');
                 return rd >= priorStart && rd <= priorEnd;
             });
-            let priorSpend = 0, priorLeads = 0;
+            let priorSpend = 0, priorLeads = 0, priorImp = 0, priorClk = 0;
             const priorActiveDays = new Set();
             priorRows.forEach(r => {
                 const sp = parseFloat(r.spend || 0);
                 priorSpend += sp; priorLeads += parseInt(r.leads || 0);
+                // Same fields currentAdsStats.ctr is built from, so the two CTRs compare like for like
+                priorImp += parseInt(r.impressions || 0); priorClk += parseInt(r.unique_link_clicks || 0);
                 if (sp > 0) priorActiveDays.add(r.date.split('T')[0]);
             });
+            const priorCtr = priorImp > 0 ? (priorClk / priorImp) * 100 : null;
             const priorCpl = priorLeads > 0 ? priorSpend / priorLeads : null;
             // The prior period only counts as a comparison if ads actually ran through most of
             // it. A week the client was paused for, or had two days of spend in, isn't "last
@@ -4318,7 +4321,27 @@ window.renderClientReports = async function() {
             const fmtPct = (v) => v === null ? 'n/a' : `${v > 0 ? '+' : ''}${v.toFixed(0)}%`;
             const spendDelta = hasPriorData ? pctChange(currentAdsStats.s || 0, priorSpend) : null;
             const leadsDelta = hasPriorData ? pctChange(currentAdsStats.l || 0, priorLeads) : null;
-            const cplDelta   = (hasPriorData && priorCpl !== null) ? pctChange(currentAdsStats.cpl || 0, priorCpl) : null;
+            // A period with no leads has no CPL, not a CPL of $0, which would read as "-100%"
+            const cplDelta   = (hasPriorData && priorCpl !== null && currentAdsStats.l > 0) ? pctChange(currentAdsStats.cpl || 0, priorCpl) : null;
+            const ctrDelta   = (hasPriorData && priorCtr) ? pctChange(currentAdsStats.ctr || 0, priorCtr) : null;
+
+            // The tiles' trend pills are built here, text AND color, and pasted into the template
+            // below. The model used to pick them: CPL was always orange (a drop in cost per lead
+            // looked like a warning), and CTR got an invented "Steady" with no comparison behind it.
+            // good = which direction is good news. Spend has none: more budget isn't better or worse.
+            const trendPill = (delta, good) => {
+                const tone = !hasPriorData ? 'none'
+                    : delta === null ? 'none'
+                    : Math.abs(delta) < 3 || !good ? 'flat'
+                    : (good === 'up') === (delta > 0) ? 'better' : 'worse';
+                const colors = { better: ['#e8f5e9', '#1b7f3b'], worse: ['#fff3e0', '#e65100'], flat: ['#f2f2f7', '#515154'], none: ['#f2f2f7', '#515154'] }[tone];
+                const text = !hasPriorData ? 'New baseline' : delta === null ? 'No comparison' : `${fmtPct(delta)} vs last period`;
+                return `<div style="display: inline-block; background-color: ${colors[0]}; color: ${colors[1]}; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px;">${text}</div>`;
+            };
+            const pillLeads = trendPill(leadsDelta, 'up');
+            const pillSpend = trendPill(spendDelta, null);
+            const pillCpl   = trendPill(cplDelta, 'down');
+            const pillCtr   = trendPill(ctrDelta, 'up');
 
             // The same change in everyday words, for the casual "Hi team," summary. The report's
             // tiles already show the exact percentages, so the summary shouldn't read them out
@@ -4402,21 +4425,31 @@ Treat this period as a fresh starting point. State every number plainly as where
             const WORKING_ON_DEFAULT_HEADLINE = 'Managing Your Campaigns';
             const WORKING_ON_DEFAULT_DETAILS = "We're actively monitoring and managing your ads — keeping a close eye on lead volume, cost per lead, and how each ad is performing, and making adjustments as the numbers call for them.";
 
-            // ---- SEO, only when this client actually has organic tracking. An empty
-            // block plus the instruction below keeps the model from inventing SEO
-            // performance for a client who has none set up.
-            const normC = normalize(cSelectedAccount);
-            const seoRows = globalSeoData.filter(r => {
-                if (!r.date || !normalize(r.client_name).includes(normC)) return false;
-                const rd = new Date(r.date.split('T')[0] + 'T12:00:00');
-                return rd >= s && rd <= e;
-            });
+            // ---- SEO, from seo_daily (Search Console via seo-sync), only for a client connected to
+            // it. This used to read globalSeoData, the legacy seo_metrics table from Make #2. That
+            // table is silently cut off at PostgREST's 1000-row cap and averages position
+            // unweighted, and on 2026-09-14 it put "16 clicks, 943 impressions" into a PANDEN report
+            // whose notes said 32 and 2.25K. No seo_daily rows means no SEO block at all, and SEO
+            // then comes only from the notes.
             let seoBlock = '';
-            if (seoRows.length) {
-                let seoClicks = 0, seoImpressions = 0, sumPos = 0;
-                seoRows.forEach(r => { seoClicks += parseInt(r.clicks) || 0; seoImpressions += parseInt(r.impressions) || 0; sumPos += parseFloat(r.avg_position || 0); });
-                seoBlock = `\n\nORGANIC SEO (this period — omit entirely from the report if this section is blank):
-- Clicks: ${seoClicks.toLocaleString()} | Impressions: ${seoImpressions.toLocaleString()} | Avg. position: ${(sumPos / seoRows.length).toFixed(1)}`;
+            try {
+                const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                const { data: clientRows } = await supabaseClient.from('clients').select('name, gsc_property');
+                const seoClient = (clientRows || []).find(c => c.gsc_property && normalize(c.name) === normalize(cSelectedAccount));
+                if (seoClient) {
+                    const { data: seoRows } = await supabaseClient.from('seo_daily')
+                        .select('date, clicks, impressions, position')
+                        .eq('client_name', seoClient.name)
+                        .gte('date', ymd(s)).lte('date', ymd(e))
+                        .order('date');
+                    if (seoRows?.length) {
+                        const t = seoWindowTotals(seoRows, s, e);
+                        seoBlock = `\n\nORGANIC SEO — Google Search Console, ${seoRows[0].date} to ${seoRows[seoRows.length - 1].date} (Google reports search data 2–3 days late, so the most recent days of this range may not be in yet):
+- Clicks: ${t.clicks.toLocaleString()} | Impressions: ${t.impressions.toLocaleString()} | Avg. position: ${t.position != null ? t.position.toFixed(1) : 'n/a'}`;
+                    }
+                }
+            } catch (err) {
+                console.warn('Report: Search Console data unavailable, SEO will come from the notes only.', err);
             }
 
             const p = `You are an expert, highly transparent Senior Media Buyer writing a weekly update for a client.
@@ -4439,6 +4472,16 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             YOUR TASK:
             Return ONLY a JSON object with two keys: "email_summary" and "html_report".
+
+            THE MEDIA BUYER'S NOTES WIN — follow this exactly:
+            - The notes are written by the person running the account, and they know things the data
+              above doesn't. Every specific fact or number in the notes goes into the report,
+              EXACTLY as written: counts, dollar amounts, clicks, impressions, AI mentions, anything.
+              Don't round it, restate it differently, or leave any of it out.
+            - When the notes and the data above give different figures for the same thing (SEO
+              clicks, say), use the notes' figure and don't mention the other one. They often cover a
+              different period or a source the data above doesn't have.
+            - The data above only fills in what the notes don't cover.
 
             WORK STATUS — follow this exactly, it is not optional:
             - A "COMPLETED THIS PERIOD" list above means real work was finished — name it.
@@ -4512,18 +4555,16 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             RULES FOR "html_report":
             - Output a complete, copy-safe HTML string based on the data and notes.
-            - Every trend pill uses the COMPUTED CHANGE percentage given above verbatim (e.g.
-              "+12% vs last period"), never a vague label like "Severe Drop" — and reads
-              "New baseline" rather than inventing a comparison when NEW BASELINE is given above.
+            - The four KPI tiles, including their numbers and trend pills, are already filled in
+              below. Copy them exactly as given. Never change a tile's number, pill text or colors.
             - The "What We're Working On" section ALWAYS appears. Never omit it. Fill it like this:
-              * If the "CURRENTLY OPEN / STILL TO DO" list appears above, it says what's coming up
-                next from that list, with any OVERDUE / DUE SOON / DUE label exactly as given. A
-                specific action from the manual notes or from a metric that really moved can sit
-                alongside it.
-              * If that list does NOT appear but the manual notes or a metric that really moved give
-                a specific action step, use that.
-              * If neither gives you anything specific, use exactly this headline and text, word for
-                word, with nothing added:
+              * If the manual notes say what we're doing or doing next (for example "we're testing
+                new ads to find a winner"), that is a specific action. Use it, in the notes' own terms.
+              * If the "CURRENTLY OPEN / STILL TO DO" list appears above, include what's coming up
+                next from that list, with any OVERDUE / DUE SOON / DUE label exactly as given.
+              * A metric that really moved, and what's being done about it, can sit alongside either.
+              * Only if the notes, the open list and the metrics give you nothing specific at all, use
+                exactly this headline and text, word for word, with nothing added:
                 Headline: ${WORKING_ON_DEFAULT_HEADLINE}
                 Details: ${WORKING_ON_DEFAULT_DETAILS}
                 That fixed text is the only exception to NO GENERIC FILLER above. Do not reword it,
@@ -4535,13 +4576,13 @@ Treat this period as a fresh starting point. State every number plainly as where
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; margin-bottom: 24px; border: 1px solid #e5e5ea;"><div style="font-size: 14px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">${cSelectedAccount}</div><h1 style="font-size: 42px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 16px 0; color: #1d1d1f;">Weekly Performance</h1><div style="font-size: 17px; color: #86868b; font-weight: 500;">${dateRangeLabel}</div></td></tr>
             <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
             <tr><td><table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td width="280" style="background-color: #ffffff; border-radius: 16px; padding: 32px; vertical-align: top; border: 1px solid #e5e5ea;"><div style="font-size: 13px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">TOTAL LEADS</div><div style="font-size: 44px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #1d1d1f;">[LEADS]</div><div style="display: inline-block; background-color: #f2f2f7; color: #515154; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px;">[Short trend e.g. Severe Drop]</div></td><td width="20" style="width: 20px;"></td>
-            <td width="280" style="background-color: #ffffff; border-radius: 16px; padding: 32px; vertical-align: top; border: 1px solid #e5e5ea;"><div style="font-size: 13px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">AD SPEND</div><div style="font-size: 44px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #1d1d1f;">$[SPEND]</div><div style="display: inline-block; background-color: #f2f2f7; color: #515154; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px;">[Short trend]</div></td>
+            <td width="280" style="background-color: #ffffff; border-radius: 16px; padding: 32px; vertical-align: top; border: 1px solid #e5e5ea;"><div style="font-size: 13px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">TOTAL LEADS</div><div style="font-size: 44px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #1d1d1f;">${(currentAdsStats.l || 0).toLocaleString()}</div>${pillLeads}</td><td width="20" style="width: 20px;"></td>
+            <td width="280" style="background-color: #ffffff; border-radius: 16px; padding: 32px; vertical-align: top; border: 1px solid #e5e5ea;"><div style="font-size: 13px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">AD SPEND</div><div style="font-size: 44px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #1d1d1f;">$${(currentAdsStats.s || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>${pillSpend}</td>
             </tr></table></td></tr>
             <tr><td style="height: 20px; font-size: 20px; line-height: 20px;">&nbsp;</td></tr>
             <tr><td><table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td width="280" style="background-color: #ffffff; border-radius: 16px; padding: 32px; vertical-align: top; border: 1px solid #e5e5ea;"><div style="font-size: 13px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">COST PER LEAD</div><div style="font-size: 44px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #1d1d1f;">$[CPL]</div><div style="display: inline-block; background-color: #fff3e0; color: #e65100; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px;">[Short trend]</div></td><td width="20" style="width: 20px;"></td>
-            <td width="280" style="background-color: #ffffff; border-radius: 16px; padding: 32px; vertical-align: top; border: 1px solid #e5e5ea;"><div style="font-size: 13px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">CTR (LINK)</div><div style="font-size: 44px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #1d1d1f;">[CTR]%</div><div style="display: inline-block; background-color: #f2f2f7; color: #515154; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px;">[Short trend]</div></td>
+            <td width="280" style="background-color: #ffffff; border-radius: 16px; padding: 32px; vertical-align: top; border: 1px solid #e5e5ea;"><div style="font-size: 13px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">COST PER LEAD</div><div style="font-size: 44px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #1d1d1f;">${currentAdsStats.l > 0 ? "$" + currentAdsStats.cpl.toFixed(2) : "No leads"}</div>${pillCpl}</td><td width="20" style="width: 20px;"></td>
+            <td width="280" style="background-color: #ffffff; border-radius: 16px; padding: 32px; vertical-align: top; border: 1px solid #e5e5ea;"><div style="font-size: 13px; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">CTR (LINK)</div><div style="font-size: 44px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #1d1d1f;">${(currentAdsStats.ctr || 0).toFixed(2)}%</div>${pillCtr}</td>
             </tr></table></td></tr>
             <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">Highlights</h2>
