@@ -847,13 +847,21 @@ string does.
   exchange. The first live sync is what actually proves it.
 - **Parsing is split into `parse.ts`, with no imports at all**, so it can be tested against
   fixed JSON with no network — same reason `morning-audit/engine.js` is kept separate from
-  that function's `index.ts`. 33 local checks, two of the three response shapes tested
-  against **real data captured this session via the SE Ranking MCP** (a different auth
-  path onto the same underlying API): search engines and keywords. The third, positions,
-  is built from SE Ranking's documented-but-not-directly-observed shape and is deliberately
-  defensive — a field it doesn't recognize produces null, but a completely wrong top-level
-  shape throws, landing the real response body in `seo_sync_state.last_error` rather than
-  silently storing zero rows.
+  that function's `index.ts`. 39 local checks, and all three response shapes (search
+  engines, keywords, positions) are tested against **real data from the SE Ranking MCP**, a
+  different auth path onto the same API. Positions was first built from the docs alone, and
+  the real 3Sixty response on 2026-09-14 showed it had `landing_pages` wrong: the field
+  sits on the **keyword**, not on each daily position, and holds `{url, date}` objects. So
+  every `ranking_url` had been stored null. Each day now gets the latest page seen on or
+  before it, because a keyword can switch ranking pages. The map fields (`pos`, `is_map`,
+  `map_position`, with `is_map` sent as `0`/`1`) were right. A completely wrong top-level
+  shape still throws, landing the real response body in `seo_sync_state.last_error`
+  rather than silently storing zero rows.
+- **A project only tracks the map pack when its search engine has `merge_map: 1` and a
+  `business_name`.** 3Sixty's does (Eagle Mountain, UT). Midas's national project doesn't.
+  Unverified: with `merge_map` on, whether `pos` on a map-pack day is the true organic rank
+  or the local pack's slot on the page. No tracked keyword was in a map pack yet to check.
+  Look at the first `seo_rank_checks` row with `map_rank` set against SE Ranking's UI.
 - **A keyword is NOT automatically checked against every search engine on a project** — a
   real captured response shows `site_engine_ids` explicit per keyword
   (`{"id":"17705872",...,"site_engine_ids":[386614]}`). An earlier draft of this schema's
@@ -916,6 +924,12 @@ real client data; see the Known gaps entry on that.
   `seo_queries_daily` matched by exact keyword text. A keyword with GSC clicks and no SE
   Ranking rank yet means it isn't being checked, or is ranking below SE Ranking's tracked
   depth — both worth seeing rather than left to cross-reference by eye.
+- **Organic and Map Pack are separate columns, each with its own change pill.** The first
+  version picked the latest day with an *organic* rank only, so a keyword in the map pack
+  with no organic listing read "not ranking". For a local contractor that's often the ranking
+  that matters most (fixed 2026-09-14). Each window now takes the latest day with either rank.
+  Hovering a keyword shows the page SE Ranking found ranking for it. Changing the function's
+  return columns needs `drop function` first, which is already in `seo_admin_rpcs.sql`.
 - **The dead "AI SEO Specialist Analysis" box is gone** — `triggerAdminSeoAI` never existed,
   so its Run Analysis button always threw. Replaced with "What Moved"
   (`seo_movers`): the top page/query gainers and losers by click delta, gated on

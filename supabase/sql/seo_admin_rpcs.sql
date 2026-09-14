@@ -96,13 +96,24 @@ grant execute on function seo_query_summary(text, date, date, date, date, int) t
 -- rank yet is either not being checked, or ranking below SE Ranking's tracked depth —
 -- both worth seeing side by side rather than left to cross-reference by eye across two
 -- tools.
-create or replace function seo_keyword_summary(
+--
+-- Map pack counts as ranking. The first version only looked at days with an organic rank, so
+-- a keyword sitting #2 in the map pack with no organic listing showed as "not ranking" — for a
+-- local contractor, often the one ranking that matters most. Now each window takes the most
+-- recent day with EITHER rank, and the best organic and best map position across every
+-- tracked location on that day (min() ignores nulls, so one location's map rank and another's
+-- organic rank both survive).
+--
+-- The return columns changed (prior_map_rank, ranking_url added), and Postgres can't change a
+-- function's return type with create or replace, hence the drop first.
+drop function if exists seo_keyword_summary(text, date, date, date, date);
+create function seo_keyword_summary(
     p_client text, p_start date, p_end date, p_prior_start date, p_prior_end date
 )
 returns table (
     keyword text, target_page text,
-    rank int, map_rank int, rank_date date,
-    prior_rank int,
+    rank int, map_rank int, rank_date date, ranking_url text,
+    prior_rank int, prior_map_rank int,
     gsc_clicks bigint, gsc_impressions bigint, gsc_position numeric
 )
 language sql stable
@@ -110,24 +121,31 @@ set search_path = public
 as $$
     select
         k.keyword, k.target_page,
-        cur.organic_rank, cur.map_rank, cur.date,
-        pri.organic_rank,
+        cur.organic_rank, cur.map_rank, cur.date, cur.ranking_url,
+        pri.organic_rank, pri.map_rank,
         coalesce(q.clicks, 0), coalesce(q.impressions, 0), q.weighted_position
     from seo_keywords k
     left join lateral (
-        select src.organic_rank, src.map_rank, src.date
+        select src.date,
+               min(src.organic_rank) as organic_rank,
+               min(src.map_rank) as map_rank,
+               max(src.ranking_url) as ranking_url
         from seo_rank_checks src
         where src.client_name = k.client_name and src.keyword = k.keyword
-          and src.date between p_start and p_end and src.organic_rank is not null
-        order by src.date desc, src.organic_rank asc
+          and src.date between p_start and p_end
+          and (src.organic_rank is not null or src.map_rank is not null)
+        group by src.date
+        order by src.date desc
         limit 1
     ) cur on true
     left join lateral (
-        select src.organic_rank
+        select min(src.organic_rank) as organic_rank, min(src.map_rank) as map_rank
         from seo_rank_checks src
         where src.client_name = k.client_name and src.keyword = k.keyword
-          and src.date between p_prior_start and p_prior_end and src.organic_rank is not null
-        order by src.date desc, src.organic_rank asc
+          and src.date between p_prior_start and p_prior_end
+          and (src.organic_rank is not null or src.map_rank is not null)
+        group by src.date
+        order by src.date desc
         limit 1
     ) pri on true
     left join (
@@ -138,7 +156,10 @@ as $$
         group by query
     ) q on q.query = k.keyword
     where k.client_name = p_client and k.active
-    order by (cur.organic_rank is null), cur.organic_rank asc nulls last, k.keyword asc;
+    -- Ranking anywhere first, then by organic rank, map-only keywords after the organic ones,
+    -- and keywords not ranking at all last.
+    order by (cur.organic_rank is null and cur.map_rank is null),
+             cur.organic_rank asc nulls last, cur.map_rank asc nulls last, k.keyword asc;
 $$;
 grant execute on function seo_keyword_summary(text, date, date, date, date) to authenticated;
 

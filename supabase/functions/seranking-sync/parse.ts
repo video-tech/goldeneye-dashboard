@@ -71,15 +71,32 @@ export interface RankCheckRow {
     ranking_url: string | null;
 }
 
-// UNCONFIRMED against a live call — SE Ranking's own docs describe (not show in full) an
-// array of {site_engine_id, keywords: [{id, positions: [{date, pos, is_map, map_position,
-// landing_pages, ...}]}]}. Position 0 or absent means "not ranking that day", which SE
-// Ranking's UI shows as a dash, not a 100 — kept as null here rather than guessing a
-// sentinel number. landing_pages may be a string or an array depending on how many pages
-// ranked; the first one is what's stored, matching what the admin tab needs (one
-// cross-check page per keyword, not a list). If this shape is wrong, this throws with the
-// raw body attached, which the caller writes to last_error — visible from the SQL Editor
-// rather than a silent zero rows.
+// Confirmed against a real 3Sixty response on 2026-09-14:
+//   [{site_engine_id, keywords: [{id, name, positions: [{date, pos, is_map, map_position, ...}],
+//     landing_pages: [{url, ascii_url, date}] }]}]
+// Position 0 means "not ranking that day" (SE Ranking's UI shows a dash), so it's stored as
+// null, never 0.
+//
+// landing_pages sits on the KEYWORD, not on each position, and holds objects, not strings.
+// The first version read p.landing_pages, which is always undefined, so every ranking_url was
+// null. Each entry's `date` is when SE Ranking first saw that page ranking, and a keyword can
+// switch pages ("pergola builder logan ut" moved from custom-outdoor-living-projects to
+// pergola-builds the next day). So each day gets the latest page seen on or before it.
+//
+// A completely wrong top-level shape still throws with the raw body, which the caller writes
+// to last_error rather than silently storing zero rows.
+function landingPageFor(pages: any[], date: string): string | null {
+    let best: { url: string; date: string } | null = null;
+    for (const lp of pages) {
+        const url = typeof lp === "string" ? lp : lp?.url;
+        if (!url) continue;
+        const seen = typeof lp === "string" ? "" : String(lp?.date ?? "").slice(0, 10);
+        if (seen && seen > date) continue;
+        if (!best || seen >= best.date) best = { url: String(url), date: seen };
+    }
+    return best?.url ?? null;
+}
+
 export function parsePositions(raw: unknown, keywordById: Map<number, string>): RankCheckRow[] {
     const engines = asArray(raw);
     const out: RankCheckRow[] = [];
@@ -89,18 +106,21 @@ export function parsePositions(raw: unknown, keywordById: Map<number, string>): 
             const keywordText = keywordById.get(Number(kw?.id));
             if (!keywordText) continue; // a keyword id we don't have on file — skip, don't guess a name
             const points = Array.isArray(kw?.positions) ? kw.positions : [];
+            const pages = Array.isArray(kw?.landing_pages) ? kw.landing_pages : [];
             for (const p of points) {
                 const date = String(p?.date ?? "").slice(0, 10);
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
                 const organic = Number(p?.pos);
                 const map = Number(p?.map_position);
-                const landing = Array.isArray(p?.landing_pages) ? p.landing_pages[0] : p?.landing_pages;
+                const organicRank = Number.isFinite(organic) && organic > 0 ? organic : null;
+                const mapRank = (p?.is_map && Number.isFinite(map) && map > 0) ? map : null;
                 out.push({
                     keyword: keywordText,
                     date,
-                    organic_rank: Number.isFinite(organic) && organic > 0 ? organic : null,
-                    map_rank: (p?.is_map && Number.isFinite(map) && map > 0) ? map : null,
-                    ranking_url: landing ? String(landing) : null,
+                    organic_rank: organicRank,
+                    map_rank: mapRank,
+                    // A page only means something on a day the keyword actually ranked.
+                    ranking_url: (organicRank != null || mapRank != null) ? landingPageFor(pages, date) : null,
                 });
             }
         }

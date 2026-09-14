@@ -4723,19 +4723,27 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
      const tbody = document.getElementById('seo-keywords-tbody');
      if (!tbody) return;
      if (!rows.length) {
-         tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No keywords tracked yet — add some in SE Ranking, they show up here on the next sync.</td></tr>';
+         tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No keywords tracked yet — add some in SE Ranking, they show up here on the next sync.</td></tr>';
          return;
      }
      tbody.innerHTML = rows.map(r => {
-         const rankCell = r.rank != null
-             ? `${r.rank}${r.map_rank != null ? ` <span class="text-purple-400 text-[10px]" title="Map pack position">(map #${r.map_rank})</span>` : ''}`
-             : '<span class="text-gray-500">not ranking</span>';
-         const rankDelta = (r.rank != null && r.prior_rank != null)
-             ? seoDeltaPill(r.rank, r.prior_rank, { invert: true }) : '';
+         // Organic and map pack are separate columns, each with its own change pill. A keyword
+         // in the map pack with no organic listing is ranking, not "not ranking".
+         const dash = '<span class="text-gray-600">—</span>';
+         const organicCell = r.rank != null
+             ? `${r.rank} ${r.prior_rank != null ? seoDeltaPill(r.rank, r.prior_rank, { invert: true }) : ''}`
+             : dash;
+         const mapCell = r.map_rank != null
+             ? `#${r.map_rank} ${r.prior_map_rank != null ? seoDeltaPill(r.map_rank, r.prior_map_rank, { invert: true }) : ''}`
+             : dash;
+         const keywordTitle = r.ranking_url ? `${r.keyword}\nRanking page: ${r.ranking_url}` : r.keyword;
+         const notRanking = r.rank == null && r.map_rank == null;
          return `
          <tr class="hover:bg-white/5 transition">
-             <td class="py-2 pr-2 text-gray-300 truncate max-w-[200px]" title="${escapeAttr(r.keyword)}">${escapeAttr(r.keyword)}</td>
-             <td class="py-2 text-right text-yellow-400">${rankCell} ${rankDelta}</td>
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[200px]" title="${escapeAttr(keywordTitle)}">${escapeAttr(r.keyword)}</td>
+             ${notRanking
+                 ? '<td colspan="2" class="py-2 text-right text-gray-500">not ranking</td>'
+                 : `<td class="py-2 text-right text-yellow-400">${organicCell}</td><td class="py-2 text-right text-purple-400">${mapCell}</td>`}
              <td class="py-2 text-right text-white">${Number(r.gsc_clicks || 0).toLocaleString()}</td>
              <td class="py-2 text-right text-gray-400">${Number(r.gsc_impressions || 0).toLocaleString()}</td>
          </tr>`;
