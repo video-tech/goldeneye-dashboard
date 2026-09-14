@@ -4299,9 +4299,20 @@ window.renderClientReports = async function() {
                 return rd >= priorStart && rd <= priorEnd;
             });
             let priorSpend = 0, priorLeads = 0;
-            priorRows.forEach(r => { priorSpend += parseFloat(r.spend || 0); priorLeads += parseInt(r.leads || 0); });
+            const priorActiveDays = new Set();
+            priorRows.forEach(r => {
+                const sp = parseFloat(r.spend || 0);
+                priorSpend += sp; priorLeads += parseInt(r.leads || 0);
+                if (sp > 0) priorActiveDays.add(r.date.split('T')[0]);
+            });
             const priorCpl = priorLeads > 0 ? priorSpend / priorLeads : null;
-            const hasPriorData = priorRows.length > 0;
+            // The prior period only counts as a comparison if ads actually ran through most of
+            // it. A week the client was paused for, or had two days of spend in, isn't "last
+            // week" in any useful sense. Comparing against it prints "+400% leads" for a client
+            // who simply switched back on. In that case this period is a new baseline instead:
+            // numbers stated plainly, no percentages, and next week compares against this one.
+            const minActiveDays = Math.ceil(spanDays * 0.7);
+            const hasPriorData = priorActiveDays.size >= minActiveDays;
 
             const pctChange = (now, was) => (!was) ? null : ((now - was) / was) * 100;
             const fmtPct = (v) => v === null ? 'n/a' : `${v > 0 ? '+' : ''}${v.toFixed(0)}%`;
@@ -4315,7 +4326,8 @@ window.renderClientReports = async function() {
 
 COMPUTED CHANGE vs previous period — use these exact figures for any trend you state, never calculate your own:
 - Spend: ${fmtPct(spendDelta)} | Leads: ${fmtPct(leadsDelta)} | CPL: ${fmtPct(cplDelta)}`
-                : `PREVIOUS PERIOD: no data for the period immediately before this range — likely a new account or early in tracking. Do not invent a trend; say plainly there isn't yet a prior period to compare against.`;
+                : `NEW BASELINE: ads ran on only ${priorActiveDays.size} of the ${spanDays} days before this range (paused, not yet launched, or otherwise not running), so there is no fair previous period to compare against.
+Treat this period as a fresh starting point. State every number plainly as where things stand now. Do NOT give any percentage change, and do NOT describe anything as up, down, better, worse, recovered or improved compared with before. Don't dwell on the gap or apologize for it. At most, say once in passing that this is the new baseline future weeks will be measured against.`;
 
             // ---- This week's work, computed directly from tasks — the same source
             // client-summary reads, not its finished paragraph. A pre-written summary
@@ -4461,7 +4473,7 @@ COMPUTED CHANGE vs previous period — use these exact figures for any trend you
             - Output a complete, copy-safe HTML string based on the data and notes.
             - Every trend pill uses the COMPUTED CHANGE percentage given above verbatim (e.g.
               "+12% vs last period"), never a vague label like "Severe Drop" — and reads
-              "No prior data" rather than inventing a comparison when none was given.
+              "New baseline" rather than inventing a comparison when NEW BASELINE is given above.
             - The "What We're Working On" section ALWAYS appears. Never omit it. Fill it like this:
               * If the "CURRENTLY OPEN / STILL TO DO" list appears above, it says what's coming up
                 next from that list, with any OVERDUE / DUE SOON / DUE label exactly as given. A
