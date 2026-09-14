@@ -1489,7 +1489,7 @@
                 <button id="cp-tab-pipeline" onclick="switchCpTab('pipeline')" class="hidden whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-bars-progress mr-2"></i> Pipeline</button>
                 <button id="cp-tab-creatives" onclick="switchCpTab('creatives')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-palette mr-2"></i> Ad Creatives</button>
                 <button id="cp-tab-settings" onclick="switchCpTab('settings')" class="hidden whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-gear mr-2"></i> Settings</button>
-                <button id="cp-tab-seo" onclick="switchCpTab('seo')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-brands fa-google mr-2"></i> Organic SEO</button>
+                <button id="cp-tab-seo" onclick="switchCpTab('seo')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-brands fa-google mr-2"></i> Organic Search</button>
                 <button id="cp-tab-leaderboard" onclick="switchCpTab('leaderboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-trophy mr-2 text-yellow-500"></i> Network Ranks</button>
                 <button id="cp-tab-knowledge" onclick="switchCpTab('knowledge')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-graduation-cap mr-2"></i> Knowledge Base</button>
                 <button id="cp-tab-profile" onclick="switchCpTab('profile')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-circle-user mr-2"></i> Profile</button>
@@ -1773,18 +1773,109 @@
                     </div>
             </div>
             
-            <div id="cp-view-seo" class="space-y-8 hidden">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
-                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Google Search Console Metrics</h3>
+            <!-- Organic Search (rebuilt 2026-09-14). Written for clients who know nothing about SEO:
+                 outcomes first, then progress, then cause and effect, then what's next. All figures
+                 come from the SQL functions in supabase/sql/seo_client_tab.sql. See renderCpSeo(). -->
+            <div id="cp-view-seo" class="space-y-6 hidden">
+                <div id="cp-seo-loading" class="glass p-8 text-center text-gray-500 text-sm hidden"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading your search results…</div>
+                <div id="cp-seo-empty" class="glass p-8 text-center hidden">
+                    <i class="fa-brands fa-google text-3xl text-gray-500 mb-3"></i>
+                    <h3 class="text-lg font-bold text-white mb-1">Search results will show up here</h3>
+                    <p class="text-sm text-gray-400 max-w-md mx-auto">Once your website's Google data is connected, this tab shows the visits, leads and jobs your SEO brings in.</p>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div class="glass p-6"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Organic Clicks</p><h4 class="text-3xl font-bold text-blue-400" id="cp-seo-clicks">0</h4></div>
-                    <div class="glass p-6"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Impressions</p><h4 class="text-3xl font-bold text-purple-400" id="cp-seo-imp">0</h4></div>
-                    <div class="glass p-6"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CTR</p><h4 class="text-3xl font-bold text-green-400" id="cp-seo-ctr">0%</h4></div>
-                    <div class="glass p-6"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg Position</p><h4 class="text-3xl font-bold text-yellow-400" id="cp-seo-pos">0.0</h4></div>
-                </div>
-                <div class="glass p-6 min-h-[400px]">
-                    <canvas id="cpSeoChart"></canvas>
+
+                <div id="cp-seo-body" class="space-y-6 hidden">
+                    <!-- 1. What SEO did for you -->
+                    <section class="glass p-6 md:p-8">
+                        <div class="flex flex-wrap items-end justify-between gap-3 mb-5">
+                            <div>
+                                <h3 class="text-2xl md:text-3xl font-bold text-white tracking-tight">What SEO did for you</h3>
+                                <p id="cp-seo-range-label" class="text-sm text-gray-400 mt-1"></p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 border-t border-white/10">
+                            <div class="py-5 md:pr-6 space-y-1.5">
+                                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Leads from Google</p>
+                                <p id="cp-seo-leads" class="text-4xl md:text-5xl font-bold text-white tracking-tight">0</p>
+                                <p id="cp-seo-leads-delta" class="text-xs font-bold"></p>
+                                <p class="text-xs text-gray-500">People who found you on Google and reached out through your website</p>
+                            </div>
+                            <div id="cp-seo-jobs" class="py-5 md:px-6 md:border-l border-t md:border-t-0 border-white/10 space-y-1.5"></div>
+                            <div class="py-5 md:pl-6 md:border-l border-t md:border-t-0 border-white/10 space-y-1.5">
+                                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Visits from Google</p>
+                                <p id="cp-seo-visits" class="text-4xl md:text-5xl font-bold text-white tracking-tight">0</p>
+                                <p id="cp-seo-visits-delta" class="text-xs font-bold"></p>
+                                <p class="text-xs text-gray-500">Times someone clicked your site in Google search results</p>
+                            </div>
+                        </div>
+                        <div id="cp-seo-roi" class="mt-2"></div>
+                    </section>
+
+                    <!-- 2. Since SEO started -->
+                    <section id="cp-seo-since-wrap" class="glass p-6 hidden">
+                        <div class="flex flex-wrap justify-between items-start gap-3 mb-4">
+                            <div>
+                                <h3 class="text-lg font-bold text-white">Since SEO started</h3>
+                                <p id="cp-seo-since-sub" class="text-sm text-gray-400 mt-1"></p>
+                            </div>
+                        </div>
+                        <div id="cp-seo-since" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+                    </section>
+
+                    <!-- 3. Visits chart with work markers -->
+                    <section class="glass p-6">
+                        <div class="mb-4">
+                            <h3 class="text-lg font-bold text-white">Visits from Google</h3>
+                            <p class="text-sm text-gray-400 mt-1">Daily clicks from Google search to your website. Each gold marker is SEO work going live, so you can see what moved the line.</p>
+                        </div>
+                        <div class="relative w-full h-[280px]"><canvas id="cpSeoChart" aria-label="Daily visits from Google" role="img"></canvas></div>
+                        <ul id="cp-seo-markers" class="flex flex-wrap gap-x-5 gap-y-2 mt-4 text-sm text-gray-300"></ul>
+                    </section>
+
+                    <!-- 4. Target searches -->
+                    <section id="cp-seo-kw-wrap" class="glass p-6 hidden">
+                        <div class="mb-4">
+                            <h3 class="text-lg font-bold text-white">Your target searches</h3>
+                            <p class="text-sm text-gray-400 mt-1">The searches we're working to rank you for, checked on Google every day. Most people never scroll past the first page.</p>
+                        </div>
+                        <div id="cp-seo-dist" class="flex h-4 gap-[2px] mb-3" role="img"></div>
+                        <div id="cp-seo-dist-legend" class="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-gray-300 mb-4"></div>
+                        <div id="cp-seo-kw-list"></div>
+                        <button type="button" id="cp-seo-kw-toggle" onclick="toggleCpSeoKeywords()" class="hidden mt-3 text-sm font-bold text-gray-300 border border-white/10 hover:bg-white/5 rounded-full px-4 py-1.5 transition"></button>
+                    </section>
+
+                    <!-- 5. Work we did + up next -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <section id="cp-seo-work-wrap" class="glass p-6 hidden">
+                            <div class="mb-3">
+                                <h3 class="text-lg font-bold text-white">Work we did</h3>
+                                <p class="text-sm text-gray-400 mt-1">Every change we made to your site, logged the day it went live.</p>
+                            </div>
+                            <ol id="cp-seo-work"></ol>
+                        </section>
+                        <section id="cp-seo-next-wrap" class="glass p-6 hidden">
+                            <div class="mb-3">
+                                <h3 class="text-lg font-bold text-white">Up next</h3>
+                                <p class="text-sm text-gray-400 mt-1">Searches where you're close to page 1. These are what we're pushing now.</p>
+                            </div>
+                            <ul id="cp-seo-next" class="space-y-2 mb-4"></ul>
+                            <div id="cp-seo-grow"></div>
+                        </section>
+                    </div>
+
+                    <!-- 6. Visibility and authority -->
+                    <div id="cp-seo-health-wrap" class="grid grid-cols-1 md:grid-cols-2 gap-6 hidden">
+                        <section class="glass p-6">
+                            <h3 class="text-lg font-bold text-white">Visibility score</h3>
+                            <p class="text-sm text-gray-400 mt-1 mb-4">How visible you are for your target searches, from 0 to 100. It rises as more of them reach the top of Google.</p>
+                            <div id="cp-seo-visibility"></div>
+                        </section>
+                        <section class="glass p-6">
+                            <h3 class="text-lg font-bold text-white">Site authority</h3>
+                            <p class="text-sm text-gray-400 mt-1 mb-4">How much Google trusts your site, from 0 to 100. It grows as other sites link to you.</p>
+                            <div id="cp-seo-authority"></div>
+                        </section>
+                    </div>
                 </div>
             </div>
 

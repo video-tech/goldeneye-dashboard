@@ -928,6 +928,38 @@ string does.
 - `clients.seranking_site_id` and the Test SE Ranking connection button live in Edit
   Client, same section as the other SEO fields.
 
+### The client Organic Search tab (rebuilt 2026-09-14)
+
+`window.renderCpSeo()` in app.js, with markup in `#cp-view-seo` in body.html. It's written for clients who
+know little about SEO, and the approved mockup is at claude.ai/code/artifact/b382d28c-a932-4bb5-ab39-71da6d960c65.
+Top to bottom:
+1. **What SEO did for you:** leads from Google, jobs closed from Google, and visits.
+2. **"Since SEO started"** before-and-after.
+3. **Visits chart with changelog markers.** It reuses `seoChangelogChartPlugin` and `seoChangelogMarkers`.
+4. **Target searches:** a bucket bar plus chips. A map pack spot counts at its pack position.
+5. **Work we did / Up next:** the changelog, almost-page-1 searches, and room to grow.
+6. **Visibility and authority.**
+
+It reads `seo_client_overview`, `seo_since_start`, `seo_keyword_summary`, `seo_almost_page_one`,
+`seo_daily` for the range, and `seo_changelog`, all in parallel and all RLS-scoped.
+
+- **The tab only exists for SEO clients.** `updateSeoTabVisibility()` (called from
+  `portalSwitchClient`) hides `#cp-tab-seo` when the client row has neither `gsc_property` nor
+  `seranking_site_id`. If RLS hides the row, the tab stays and the empty state covers it. This is
+  the hook for service-based onboarding, since connecting SEO turns the tab on.
+- **Honesty rules, all in code:**
+  - **Noise guard:** under 5 leads or 50 visits, a change reads as "N the period before", never a %.
+  - **Return per dollar:** the line appears only when `roi_multiple > 1`. Otherwise it's "SEO builds
+    over time", with page-1 count, ranking count and work since start.
+  - **Lead dates:** leads before `LEAD_TRACKING_START` (2026-09-11) show as not measured (—), never 0.
+  - **Google's lag:** a lag note appears when Search Console's last day is before the range end.
+- **Range clamping:** "All time" is clamped to 16 months, Search Console's history.
+- **Stale renders:** a render token drops responses from a render that's been superseded (fast
+  client or range switching).
+- **Theme:** position chips and the bucket bar use the validated ordinal gold ramp for the
+  current theme (`cpSeoRamp`).
+- **Tests:** 28 checks render the real markup and code in jsdom with a fake client.
+
 ### The admin SEO tab (rebuilt 2026-09-11)
 
 `window.renderAdminSeo()` is the first surface reading GSC, SE Ranking and organic leads
@@ -1239,12 +1271,12 @@ GitHub Pages copy but not from the GHL domain.
   property. Until then every client's `last_error` will say so. The Business Profile API also
   needs Google's manual approval — days to weeks — which is why GBP is the last phase and
   nothing else waits on it
-- **`renderAdminSeo` rebuilt 2026-09-11 — `renderCpSeo` (the client portal tab) has not
-  been.** It still reads `seo_metrics` and averages `avg_position` unweighted, so its tile
-  won't match Google's own figure for the same range. That's deliberate: this build is
-  admin-first on purpose, so the portal keeps working on the old data source until the
-  admin tab is checked out against real numbers.
-- `lead_sources` is written but not yet shown anywhere. The portal SEO tab and the weekly report
+- **The client portal no longer reads `seo_metrics`** (Organic Search tab rebuilt 2026-09-14),
+  but `initClientPortal()` still fetches it into `allRawSeo`, unused. Remove that query, and
+  retire Make scenario #2, once `seo_metrics` and `seo_daily` have been compared over the same dates.
+- **The client tab has no AI search or competitor sections yet.** Both need the monthly Data API
+  job (plan step 6), and the tab adds them when that data exists.
+- `lead_sources` is written but not yet shown in the weekly report. The weekly report
   (phases 4–5) will read it. Until then, check it from the SQL Editor with the queries at the end
   of `ghl-lead-webhook/schema.sql`
 - The SEO plan beyond phases 1 and 2 (GA4, keywords + changelog,

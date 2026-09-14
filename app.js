@@ -533,7 +533,8 @@
                 supabaseClient.from('client_contacts').select('*').in('client_name', allowedClients),
                 supabaseClient.from('onboarding_steps').select('*').order('sort_order'),
                 supabaseClient.from('client_onboarding_progress').select('*').in('client_name', allowedClients),
-                supabaseClient.from('clients').select('name, client_email, current_stage').in('name', allowedClients),
+                // gsc_property / seranking_site_id decide whether the Organic Search tab shows at all
+                supabaseClient.from('clients').select('name, client_email, current_stage, gsc_property, seranking_site_id').in('name', allowedClients),
                 supabaseClient.from('weekly_reports').select('*').order('created_at', { ascending: false })
             ]);
 
@@ -2485,6 +2486,10 @@ window.maybeShowWeeklyCheckin = function() {
             filterPortalData();
             if(!document.getElementById('cp-view-pipeline').classList.contains('hidden')) renderCpPipeline();
             if(!document.getElementById('cp-view-creatives').classList.contains('hidden')) renderClientCreatives();
+            // Per-client state for Organic Search: hide the tab for a client without SEO, and forget
+            // the other client's "show all searches" choice
+            cpSeoShowAllKeywords = false;
+            updateSeoTabVisibility();
             if(!document.getElementById('cp-view-seo').classList.contains('hidden')) renderCpSeo();
         }
 
@@ -5656,56 +5661,353 @@ Treat this period as a fresh starting point. State every number plainly as where
      }
  };
 
- window.renderCpSeo = function() {
-            const { s, e } = getPortalRange();
+ // ---- Client portal: Organic Search (rebuilt 2026-09-14) ----
+ // For clients who know little about SEO. Outcomes first (leads, jobs, visits), then progress
+ // (since SEO started), then cause and effect (the chart with work markers), then rankings and
+ // what's next. Every figure comes from SECURITY INVOKER functions in supabase/sql/seo_client_tab.sql,
+ // so the client's own RLS decides what they can read. Nothing is bulk-loaded (see the 1000-row cap
+ // in CLAUDE.md).
+ //
+ // Two honesty rules decide what's shown:
+ // - Noise guard: under 5 leads or 50 visits, a change is stated as the plain earlier number,
+ //   never as a percentage swing.
+ // - The return-per-dollar line appears only when revenue from Google beats the SEO fee for the
+ //   period. Before that, "SEO builds over time" shows progress instead. SEO takes months, and a
+ //   sub-1× ratio shouldn't be the first thing a client sees.
+ let cpSeoShowAllKeywords = false;
+ let cpSeoRenderToken = 0;
+ let cpSeoLastKeywords = [];
+ // lead_sources only exists from this date. Any earlier "leads from Google" figure would read as 0
+ // when it was really never measured.
+ const LEAD_TRACKING_START = '2026-09-11';
 
-            const f = allRawSeo.filter(r => {
-                if (!r.date) return false;
-                const dateStr = r.date.includes('T') ? r.date.split('T')[0] : r.date;
-                const rd = new Date(dateStr + 'T12:00:00');
-                if (rd < s || rd > e) return false;
-                return normalize(r.client_name).includes(normalize(currentActiveClient));
-            });
+ function cpSeoClientRow() {
+     return (portalClientRows || []).find(r => normalize(r.name) === normalize(currentActiveClient)) || null;
+ }
 
-            let clk=0, imp=0, sumPos=0;
-            f.forEach(r => { clk += parseInt(r.clicks)||0; imp += parseInt(r.impressions)||0; sumPos += parseFloat(r.avg_position||0); });
-            const avgCtr = imp > 0 ? (clk / imp) * 100 : 0;
-            const avgPos = f.length > 0 ? (sumPos / f.length) : 0;
+ // The tab exists only for clients with SEO connected. If RLS hides the client row, the answer is
+ // unknown, so the tab stays and renderCpSeo shows its empty state if there's nothing to show.
+ function updateSeoTabVisibility() {
+     const btn = document.getElementById('cp-tab-seo');
+     if (!btn) return;
+     const row = cpSeoClientRow();
+     const off = !!row && !row.gsc_property && !row.seranking_site_id;
+     btn.classList.toggle('hidden', off);
+     if (off && window.cpCurrentTab === 'seo') switchCpTab('dashboard');
+ }
 
-            document.getElementById('cp-seo-clicks').innerText = clk.toLocaleString();
-            document.getElementById('cp-seo-imp').innerText = imp.toLocaleString();
-            document.getElementById('cp-seo-ctr').innerText = avgCtr.toFixed(2) + '%';
-            document.getElementById('cp-seo-pos').innerText = avgPos.toFixed(1);
+ // Position buckets, with the validated ordinal ramp for each theme
+ function cpSeoRamp() {
+     const light = document.getElementById('theme-wrapper')?.classList.contains('light-mode');
+     return light
+         ? { t3: '#7C3A0A', p1: '#9A4F0C', p2: '#B8680F', b50: '#CF8A2E', b100: '#DDA85C', none: '#E2E8F0', ink: '#FFFFFF', noneInk: '#475569' }
+         : { t3: '#FBBF24', p1: '#D69A22', p2: '#A27A2C', b50: '#74613A', b100: '#524C40', none: 'rgba(255,255,255,0.08)', ink: '#1A1204', noneInk: '#9CA3AF' };
+ }
+ const CP_SEO_BUCKET_NAMES = { t3: 'Top 3', p1: 'Page 1', p2: 'Page 2', b50: '#21–50', b100: '#51–100', none: 'Not ranking yet' };
+ function cpSeoBucket(best) {
+     if (best == null) return 'none';
+     if (best <= 3) return 't3';
+     if (best <= 10) return 'p1';
+     if (best <= 20) return 'p2';
+     return best <= 50 ? 'b50' : 'b100';
+ }
+ // Best of organic and map pack, the same rule seo_keyword_distribution uses
+ const cpSeoBest = (organic, map) => {
+     const o = organic == null ? null : Number(organic), m = map == null ? null : Number(map);
+     return o == null ? m : m == null ? o : Math.min(o, m);
+ };
 
-            const dailyMap = {}; 
-            f.forEach(r => { 
-                const dt = r.date.includes('T') ? r.date.split('T')[0] : r.date; 
-                dailyMap[dt] = dailyMap[dt] || {c:0, i:0}; 
-                dailyMap[dt].c += parseInt(r.clicks)||0; 
-                dailyMap[dt].i += parseInt(r.impressions)||0; 
-            });
-            const labels = Object.keys(dailyMap).sort();
+ function cpSeoDelta(el, cur, prior, smallBelow, noun) {
+     if (!el) return;
+     cur = Number(cur) || 0; prior = Number(prior) || 0;
+     if (cur === 0 && prior === 0) { el.className = 'text-xs font-bold text-gray-500'; el.innerText = 'None in the period before either'; return; }
+     if (cur < smallBelow || prior < smallBelow) {
+         el.className = 'text-xs font-bold text-gray-400';
+         el.innerText = `${prior.toLocaleString()} ${noun} the period before`;
+         return;
+     }
+     const pct = Math.round(((cur - prior) / prior) * 100);
+     if (Math.abs(pct) < 3) { el.className = 'text-xs font-bold text-gray-400'; el.innerText = 'About the same as the period before'; return; }
+     el.className = `text-xs font-bold ${pct > 0 ? 'text-emerald-400' : 'text-orange-400'}`;
+     el.innerText = `${pct > 0 ? '▲' : '▼'} ${Math.abs(pct)}% vs the period before`;
+ }
 
-            if(cpSeoChart) cpSeoChart.destroy();
-            const ctx = document.getElementById('cpSeoChart');
-            if(ctx) {
-                cpSeoChart = new Chart(ctx.getContext('2d'), { 
-                    type: 'line', 
-                    data: { 
-                        labels: labels, 
-                        datasets: [ 
-                            { label: 'Organic Clicks', data: labels.map(x=>dailyMap[x].c), borderColor: '#fbbf24', tension: 0.3, fill: true, backgroundColor: 'rgba(251,191,36,0.1)', yAxisID: 'y' }, 
-                            { label: 'Impressions', data: labels.map(x=>dailyMap[x].i), borderColor: '#c084fc', tension: 0.3, yAxisID: 'y1' } 
-                        ] 
-                    }, 
-                    options: { 
-                        maintainAspectRatio: false, 
-                        scales: { y: { position: 'left' }, y1: { position: 'right', grid: { display: false } } },
-                        plugins: { zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } } }
-                    } 
-                });
-            }
-        };
+ const cpSeoDate = (ymd, withYear = true) => ymd
+     ? new Date(String(ymd).slice(0, 10) + 'T12:00:00').toLocaleDateString(undefined, withYear ? { month: 'short', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' })
+     : '';
+ const cpSeoSafeUrl = (u) => { try { const x = new URL(u); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : ''; } catch (_) { return ''; } };
+
+ window.toggleCpSeoKeywords = function() {
+     cpSeoShowAllKeywords = !cpSeoShowAllKeywords;
+     renderCpSeoKeywords(cpSeoLastKeywords);
+ };
+
+ function renderCpSeoKeywords(rows) {
+     const wrap = document.getElementById('cp-seo-kw-wrap');
+     if (!wrap) return;
+     cpSeoLastKeywords = rows;
+     wrap.classList.toggle('hidden', !rows.length);
+     if (!rows.length) return;
+
+     const ramp = cpSeoRamp();
+     const order = ['t3', 'p1', 'p2', 'b50', 'b100', 'none'];
+     const counts = Object.fromEntries(order.map(k => [k, 0]));
+     const items = rows.map(r => {
+         const best = cpSeoBest(r.rank, r.map_rank);
+         const prior = cpSeoBest(r.prior_rank, r.prior_map_rank);
+         const bucket = cpSeoBucket(best);
+         counts[bucket]++;
+         return { r, best, prior, bucket, viaMap: r.map_rank != null && (r.rank == null || Number(r.map_rank) < Number(r.rank)) };
+     });
+     const onPage1 = counts.t3 + counts.p1;
+
+     const dist = document.getElementById('cp-seo-dist');
+     dist.setAttribute('aria-label', `${onPage1} of ${rows.length} target searches on page 1`);
+     const present = order.filter(k => counts[k]);
+     dist.innerHTML = present.map((k, i) =>
+         `<div title="${CP_SEO_BUCKET_NAMES[k]}: ${counts[k]}" style="flex:${counts[k]};background:${ramp[k]};border-radius:${i === 0 ? '4px 0 0 4px' : '0'}${i === present.length - 1 ? ';border-top-right-radius:4px;border-bottom-right-radius:4px' : ''}"></div>`).join('');
+     document.getElementById('cp-seo-dist-legend').innerHTML =
+         `<span class="font-bold text-white">${onPage1} of ${rows.length} on page 1</span>` +
+         order.map(k => `<span class="inline-flex items-center gap-1.5"><i style="width:10px;height:10px;border-radius:3px;display:inline-block;background:${ramp[k]}"></i>${CP_SEO_BUCKET_NAMES[k]} <b class="text-white">${counts[k]}</b></span>`).join('');
+
+     items.sort((a, b) => (a.best ?? 9999) - (b.best ?? 9999) || String(a.r.keyword).localeCompare(String(b.r.keyword)));
+     const shown = cpSeoShowAllKeywords ? items : items.slice(0, 8);
+     document.getElementById('cp-seo-kw-list').innerHTML = shown.map(({ r, best, prior, bucket, viaMap }) => {
+         const label = best == null ? 'Not ranking yet'
+             : viaMap ? `Map pack #${best}`
+             : bucket === 't3' || bucket === 'p1' || bucket === 'p2' ? `${CP_SEO_BUCKET_NAMES[bucket]} · #${best}` : `#${best}`;
+         const chipStyle = bucket === 'none'
+             ? `background:transparent;color:${ramp.noneInk};border:1px solid ${ramp.none}`
+             : bucket === 't3' || bucket === 'p1' ? `background:${ramp[bucket]};color:${ramp.ink}`
+             : `background:${ramp[bucket]};color:${bucket === 'p2' ? '#FFFFFF' : ramp.ink}`;
+         let move = '<span class="text-gray-500">–</span>';
+         if (best != null && prior == null) move = '<span class="text-gray-400">New</span>';
+         else if (best != null && prior != null && best !== prior) {
+             move = best < prior ? `<span class="text-emerald-400">▲ ${prior - best}</span>` : `<span class="text-orange-400">▼ ${best - prior}</span>`;
+         }
+         const volume = r.search_volume ? `${Number(r.search_volume).toLocaleString()} searches a month` : 'Local search, low volume';
+         return `<div class="grid grid-cols-[minmax(0,1fr)_auto_3.5rem] items-center gap-3 py-2.5 border-b border-white/5 last:border-0">
+             <div class="min-w-0"><p class="text-sm font-bold text-white break-words">${escapeAttr(r.keyword)}</p><p class="text-xs text-gray-500">${volume}</p></div>
+             <span class="text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap" style="${chipStyle}">${label}</span>
+             <span class="text-xs font-bold text-right tabular-nums">${move}</span>
+         </div>`;
+     }).join('');
+
+     const toggle = document.getElementById('cp-seo-kw-toggle');
+     toggle.classList.toggle('hidden', items.length <= 8);
+     toggle.innerText = cpSeoShowAllKeywords ? 'Show fewer' : `Show all ${items.length} searches`;
+ }
+
+ window.renderCpSeo = async function() {
+     const token = ++cpSeoRenderToken;
+     const $ = (id) => document.getElementById(id);
+     const body = $('cp-seo-body'), empty = $('cp-seo-empty'), loading = $('cp-seo-loading');
+     if (!body || !empty || !loading) return;
+
+     const row = cpSeoClientRow();
+     const client = row?.name || currentActiveClient;
+     const showEmpty = () => { loading.classList.add('hidden'); body.classList.add('hidden'); empty.classList.remove('hidden'); };
+     if (!client || (row && !row.gsc_property && !row.seranking_site_id)) { showEmpty(); return; }
+
+     // "All time" starts in the year 2000. Search Console keeps 16 months, so clamp to that, which
+     // also keeps the period-before comparison meaningful.
+     let { s, e } = getPortalRange();
+     const earliest = new Date(); earliest.setMonth(earliest.getMonth() - 16); earliest.setHours(0, 0, 0, 0);
+     if (s < earliest) s = earliest;
+     const days = Math.round((e - s) / 86400000) + 1;
+     const priorEnd = new Date(s); priorEnd.setDate(priorEnd.getDate() - 1);
+     const priorStart = new Date(priorEnd); priorStart.setDate(priorStart.getDate() - days + 1);
+     const ymd = seoLocalYmd;
+     const range = { p_client: client, p_start: ymd(s), p_end: ymd(e), p_prior_start: ymd(priorStart), p_prior_end: ymd(priorEnd) };
+
+     // Hold the previous render while refetching (no flash). Show the spinner only the first time.
+     if (body.classList.contains('hidden')) { empty.classList.add('hidden'); loading.classList.remove('hidden'); }
+
+     const [ovRes, sinceRes, kwRes, almostRes, dailyRes, logRes] = await Promise.all([
+         supabaseClient.rpc('seo_client_overview', range),
+         supabaseClient.rpc('seo_since_start', { p_client: client }),
+         supabaseClient.rpc('seo_keyword_summary', range),
+         supabaseClient.rpc('seo_almost_page_one', { ...range, p_min_impressions: Math.max(10, days) }),
+         supabaseClient.from('seo_daily').select('date, clicks').eq('client_name', client).gte('date', range.p_start).lte('date', range.p_end).order('date'),
+         supabaseClient.from('seo_changelog').select('id, live_date, kind, title, url, notes').eq('client_name', client).order('live_date', { ascending: false }).limit(200)
+     ]);
+     if (token !== cpSeoRenderToken) return;   // a newer render (client or range change) owns the tab
+
+     [['seo_client_overview', ovRes], ['seo_since_start', sinceRes], ['seo_keyword_summary', kwRes], ['seo_almost_page_one', almostRes], ['seo_daily', dailyRes], ['seo_changelog', logRes]]
+         .forEach(([name, res]) => { if (res.error) console.error(`Organic Search: ${name} failed`, res.error); });
+
+     const ov = ovRes.data?.[0];
+     const keywords = kwRes.data || [];
+     const daily = dailyRes.data || [];
+     const changelog = logRes.data || [];
+     const hasAnything = ov && (Number(ov.clicks) > 0 || Number(ov.prior_clicks) > 0 || Number(ov.keywords_tracked) > 0 || changelog.length || daily.length);
+     if (!hasAnything) { showEmpty(); return; }
+
+     loading.classList.add('hidden'); empty.classList.add('hidden'); body.classList.remove('hidden');
+     const n = (v) => v == null ? null : Number(v);
+
+     // ---- 1. What SEO did for you
+     const lagNote = ov.gsc_last_date && String(ov.gsc_last_date).slice(0, 10) < range.p_end
+         ? ` Google's search data runs 2–3 days behind, so visits are complete through ${cpSeoDate(ov.gsc_last_date, false)}.` : '';
+     $('cp-seo-range-label').innerText = `${cpSeoDate(range.p_start)} – ${cpSeoDate(range.p_end)}, compared with the ${days} days before.${lagNote}`;
+
+     $('cp-seo-leads').innerText = (n(ov.organic_leads) || 0).toLocaleString();
+     if (range.p_prior_end < LEAD_TRACKING_START) {
+         const d = $('cp-seo-leads-delta'); d.className = 'text-xs font-bold text-gray-500'; d.innerText = `Tracking began ${cpSeoDate(LEAD_TRACKING_START)}`;
+     } else {
+         cpSeoDelta($('cp-seo-leads-delta'), ov.organic_leads, ov.prior_organic_leads, 5, n(ov.prior_organic_leads) === 1 ? 'lead' : 'leads');
+     }
+     $('cp-seo-visits').innerText = (n(ov.clicks) || 0).toLocaleString();
+     cpSeoDelta($('cp-seo-visits-delta'), ov.clicks, ov.prior_clicks, 50, 'visits');
+
+     $('cp-seo-jobs').innerHTML = n(ov.checkins_with_sources) > 0
+         ? `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Jobs closed from Google</p>
+            <p class="text-4xl md:text-5xl font-bold text-white tracking-tight">${(n(ov.google_closes) || 0).toLocaleString()}<span class="text-lg font-bold text-gray-400 ml-2">${money0(ov.google_revenue || 0)}</span></p>
+            <p class="text-xs font-bold text-gray-400">From your weekly check-ins</p>
+            <p class="text-xs text-gray-500">Jobs you told us came from Google search or your website</p>`
+         : `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Jobs closed from Google</p>
+            <p class="text-base font-bold text-gray-300 pt-2">None reported yet</p>
+            <p class="text-xs text-gray-500">When a lead from Google becomes a job, add it to your weekly check-in under "Google search / your website".</p>`;
+
+     // Return per dollar, only when positive
+     const roi = n(ov.roi_multiple);
+     const since = sinceRes.data?.[0] || null;
+     if (roi != null && roi > 1) {
+         const perDollar = roi >= 2 ? `$${Math.floor(roi)}` : `$${roi.toFixed(2)}`;
+         $('cp-seo-roi').innerHTML = `<div class="rounded-2xl p-5 border border-yellow-400/30 bg-yellow-400/10 flex flex-wrap items-center gap-x-6 gap-y-2">
+             <p class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">About ${perDollar} back for every $1</p>
+             <p class="text-sm text-gray-300">${money0(ov.google_revenue)} in jobs from Google this period, against ${money0(ov.seo_fee_for_period)} for SEO.</p>
+         </div>`;
+     } else {
+         const start = ov.seo_start_date ? String(ov.seo_start_date).slice(0, 10) : null;
+         const monthIn = start ? Math.max(1, Math.floor((Date.now() - new Date(start + 'T12:00:00')) / (30.44 * 86400000)) + 1) : null;
+         const workSinceStart = start ? changelog.filter(c => c.live_date >= start).length : changelog.length;
+         const steps = [];
+         if (n(ov.keywords_tracked) > 0) {
+             const was = since && since.rank_baseline_date ? ` (was ${n(since.page1_before)})` : '';
+             steps.push([`${n(ov.keywords_page1)}`, `target searches on page 1${was}`]);
+             steps.push([`${n(ov.keywords_ranking)} of ${n(ov.keywords_tracked)}`, 'target searches now show up on Google']);
+         }
+         if (workSinceStart) steps.push([`${workSinceStart}`, start ? `pieces of SEO work live since we started` : 'pieces of SEO work live']);
+         const bars = monthIn ? Array.from({ length: 6 }, (_, i) => `<i class="flex-1 h-1.5 rounded ${i < Math.min(monthIn, 6) ? 'bg-yellow-400' : 'bg-white/10'}"></i>`).join('') : '';
+         $('cp-seo-roi').innerHTML = `<div class="rounded-2xl p-5 border border-white/10 bg-white/[0.03] grid grid-cols-1 lg:grid-cols-[minmax(220px,1fr)_2fr] gap-5">
+             <div>
+                 <p class="text-base font-bold text-white">SEO builds over time</p>
+                 <p class="text-sm text-gray-400 mt-1">Google takes months to trust a site, so leads usually follow rankings. Here's the groundwork so far.</p>
+                 ${monthIn ? `<div class="flex gap-1.5 mt-3" aria-label="Month ${monthIn} of SEO">${bars}</div>
+                 <div class="flex justify-between text-[11px] text-gray-500 mt-1.5"><span>Month ${monthIn}</span><span>${monthIn < 6 ? 'Leads usually build by month 3–6' : ''}</span></div>` : ''}
+             </div>
+             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">${steps.map(([big, small]) =>
+                 `<div class="rounded-xl border border-white/10 p-3"><p class="text-xl font-bold text-white">${escapeAttr(big)}</p><p class="text-xs text-gray-400">${escapeAttr(small)}</p></div>`).join('')}</div>
+         </div>`;
+     }
+
+     // ---- 2. Since SEO started
+     $('cp-seo-since-wrap').classList.toggle('hidden', !since);
+     if (since) {
+         const items = [];
+         const partial = n(since.days_with_data_before) > 0 && n(since.days_with_data_before) < 25 ? ` <span class="text-[11px] text-gray-500">(${n(since.days_with_data_before)} days of data)</span>` : '';
+         items.push(['Visits from Google a month', n(since.days_with_data_before) > 0 ? n(since.clicks_before).toLocaleString() + partial : '—', n(since.clicks_after).toLocaleString()]);
+         if (since.rank_baseline_date) items.push(['Target searches on page 1', `${n(since.page1_before)}`, `${n(since.page1_after)}`]);
+         const leadsMeasuredBefore = String(since.before_start).slice(0, 10) >= LEAD_TRACKING_START;
+         items.push(['Leads from Google a month', leadsMeasuredBefore ? `${n(since.leads_before)}` : '—', `${n(since.leads_after)}`]);
+         $('cp-seo-since-sub').innerText = `SEO work began ${cpSeoDate(since.start_date)}. Comparing the month before that with your latest month (${cpSeoDate(since.after_start, false)} – ${cpSeoDate(since.after_end, false)}).`;
+         $('cp-seo-since').innerHTML = items.map(([label, was, now]) => `<div class="rounded-2xl border border-white/10 p-4">
+             <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">${label}</p>
+             <p class="mt-2 flex items-baseline flex-wrap gap-2"><span class="text-lg font-bold text-gray-400">${was}</span><span class="text-gray-500" aria-hidden="true">→</span><span class="text-3xl font-bold text-white">${now}</span></p>
+         </div>`).join('');
+     }
+
+     // ---- 3. Chart with work markers
+     const markers = seoChangelogMarkers(changelog, s, e);
+     if (cpSeoChart) cpSeoChart.destroy();
+     const canvas = $('cpSeoChart');
+     if (canvas) {
+         const light = document.getElementById('theme-wrapper')?.classList.contains('light-mode');
+         cpSeoChart = new Chart(canvas.getContext('2d'), {
+             type: 'line',
+             plugins: [seoChangelogChartPlugin],
+             data: {
+                 labels: daily.map(d => d.date),
+                 datasets: [{ label: 'Visits from Google', data: daily.map(d => d.clicks || 0), borderColor: light ? '#2563EB' : '#60A5FA', borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.3, fill: true, backgroundColor: light ? 'rgba(37,99,235,0.10)' : 'rgba(96,165,250,0.12)' }]
+             },
+             options: {
+                 maintainAspectRatio: false,
+                 interaction: { mode: 'index', intersect: false },
+                 layout: { padding: { top: markers.length ? 14 : 0 } },
+                 scales: {
+                     x: { grid: { display: false }, ticks: { maxTicksLimit: 7, callback: function(v) { return cpSeoDate(this.getLabelForValue(v), false); } } },
+                     y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: light ? 'rgba(15,23,42,0.06)' : 'rgba(255,255,255,0.06)' } }
+                 },
+                 plugins: {
+                     legend: { display: false },
+                     tooltip: { callbacks: { title: (items) => cpSeoDate(items[0].label), label: (item) => `${item.parsed.y} visits` } },
+                     seoChangelogMarkers: { markers }
+                 }
+             }
+         });
+     }
+     $('cp-seo-markers').innerHTML = !daily.length
+         ? '<li class="text-gray-500">No visits from Google recorded in this range yet.</li>'
+         : markers.map(m => `<li class="flex items-center gap-2"><span class="w-5 h-5 rounded-full text-[10px] font-extrabold flex items-center justify-center text-black shrink-0" style="background:${(SEO_CHANGELOG_KINDS[m.kind] || SEO_CHANGELOG_KINDS.other).color}">${m.n}</span>${escapeAttr(m.title)}</li>`).join('');
+
+     // ---- 4. Target searches
+     renderCpSeoKeywords(keywords);
+
+     // ---- 5. Work we did + up next
+     const numberById = new Map(markers.map(m => [String(m.id), m.n]));
+     const recentWork = changelog.slice(0, 6);
+     $('cp-seo-work-wrap').classList.toggle('hidden', !recentWork.length);
+     $('cp-seo-work').innerHTML = recentWork.map(c => {
+         const kind = SEO_CHANGELOG_KINDS[c.kind] || SEO_CHANGELOG_KINDS.other;
+         const num = numberById.get(String(c.id));
+         const url = cpSeoSafeUrl(c.url);
+         return `<li class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-3 py-3 border-b border-white/5 last:border-0">
+             ${num ? `<span class="w-5 h-5 mt-0.5 rounded-full text-[10px] font-extrabold flex items-center justify-center text-black" style="background:${kind.color}">${num}</span>` : '<span class="w-5 h-5 mt-0.5 rounded-full border border-white/10"></span>'}
+             <div class="min-w-0">
+                 <p class="text-xs text-gray-500">${cpSeoDate(c.live_date)} · <span class="font-bold uppercase tracking-wider text-gray-400">${kind.label}</span></p>
+                 <p class="text-sm font-bold text-white break-words">${url ? `<a href="${escapeAttr(url)}" target="_blank" rel="noopener" class="hover:underline">${escapeAttr(c.title)}</a>` : escapeAttr(c.title)}</p>
+                 ${c.notes ? `<p class="text-xs text-gray-400 mt-0.5 whitespace-pre-wrap break-words">${escapeAttr(c.notes)}</p>` : ''}
+             </div>
+         </li>`;
+     }).join('');
+
+     const almost = (almostRes.data || []).slice(0, 5);
+     const potValue = n(ov.seo_potential_value), potTraffic = n(ov.seo_potential_traffic);
+     const hasGrow = potValue != null && potValue > 0;
+     $('cp-seo-next-wrap').classList.toggle('hidden', !almost.length && !hasGrow);
+     $('cp-seo-next').innerHTML = almost.map(a => {
+         const pos = Number(a.weighted_position);
+         const prior = a.prior_position == null ? null : Number(a.prior_position);
+         const note = pos < 13 ? 'One or two spots from page 1' : 'On page 2, close to page 1';
+         const trend = prior != null && Math.round(prior) > Math.round(pos) ? ` · up ${Math.round(prior) - Math.round(pos)} this period` : '';
+         return `<li class="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+             <div class="min-w-0"><p class="text-sm font-bold text-white break-words">${escapeAttr(a.query)}</p><p class="text-xs text-gray-500">${note}${trend} · ${Number(a.impressions).toLocaleString()} people saw you</p></div>
+             <span class="text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap" style="background:${cpSeoRamp().p2};color:#FFFFFF">#${Math.round(pos)}</span>
+         </li>`;
+     }).join('');
+     $('cp-seo-grow').innerHTML = hasGrow
+         ? `<div class="rounded-2xl p-4 bg-yellow-400/10 border border-yellow-400/20">
+             <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Room to grow</p>
+             <p class="text-2xl font-extrabold text-white mt-1">+${(potTraffic || 0).toLocaleString()} visits a month</p>
+             <p class="text-sm text-gray-300">worth about ${money0(potValue)} a month in Google Ads, if your target searches reach the top 3</p>
+           </div>` : '';
+     // One card in the row fills the row rather than leaving an empty half
+     const row5 = $('cp-seo-work-wrap').parentElement;
+     const bothVisible = !$('cp-seo-work-wrap').classList.contains('hidden') && !$('cp-seo-next-wrap').classList.contains('hidden');
+     row5.classList.toggle('lg:grid-cols-2', bothVisible);
+
+     // ---- 6. Visibility and authority
+     const vis = n(ov.visibility_percent), trust = n(ov.domain_trust);
+     $('cp-seo-health-wrap').classList.toggle('hidden', vis == null && trust == null);
+     const gauge = (pct) => `<div class="h-2.5 rounded-full bg-white/10 overflow-hidden my-3"><div class="h-full rounded-full bg-yellow-400" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>`;
+     $('cp-seo-visibility').innerHTML = vis == null ? '<p class="text-sm text-gray-500">Measured daily from your target searches. Check back tomorrow.</p>'
+         : `<p class="text-4xl font-bold text-white">${vis % 1 ? vis.toFixed(1) : vis}<span class="text-lg text-gray-400 font-bold"> / 100</span></p>${gauge(vis)}
+            <p class="text-xs text-gray-500">${vis < 5 ? 'Early days: most target searches are still below the top 10, where visibility starts to count.' : 'Rises as more target searches reach the top of Google.'}</p>`;
+     $('cp-seo-authority').innerHTML = trust == null ? '<p class="text-sm text-gray-500">Measured daily. Check back tomorrow.</p>'
+         : `<p class="text-4xl font-bold text-white">${trust}<span class="text-lg text-gray-400 font-bold"> / 100</span></p>${gauge(trust)}
+            <p class="text-xs text-gray-500">${n(ov.pages_indexed) != null ? `Google has ${n(ov.pages_indexed).toLocaleString()} of your pages in its index. ` : ''}${trust < 15 ? 'Newer local sites usually start here. Each article and quality link nudges it up.' : 'Keeps growing as trusted sites link to you.'}</p>`;
+ };
 
         // ============================================================================
         // GPT-4o RAG CHAT AGENT (MINIFIED FOR TOKEN SAVINGS)
