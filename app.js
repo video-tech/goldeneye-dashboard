@@ -5152,6 +5152,236 @@ Treat this period as a fresh starting point. State every number plainly as where
      await window.renderAdminSeo();
  };
 
+ // ---- Auto-log articles: per-client setup for supabase/functions/seo-changelog-webhook ----
+ // Each client gets a token in seo_webhook_configs, and the webhook link is just ?t=<token>.
+ // Platform, blog path and blog collection are edited here, so the webhook pasted into
+ // Webflow (which can't edit webhooks) or Wix never has to change.
+ const SEO_WEBHOOK_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/seo-changelog-webhook';
+ let seoAutologConfig = null;
+ let seoAutologClientObj = null;
+
+ // "sc-domain:example.com" / "https://www.example.com/" -> "example.com". Same as the webhook's domainOf.
+ function seoDomainOf(gscProperty) {
+     const p = String(gscProperty || '').trim();
+     if (!p) return null;
+     if (p.toLowerCase().startsWith('sc-domain:')) return p.slice(10).toLowerCase().replace(/^www\./, '') || null;
+     try { return new URL(p).hostname.toLowerCase().replace(/^www\./, '') || null; } catch (_) { return null; }
+ }
+ const seoCleanPath = (p) => { const t = String(p || '').trim().replace(/^https?:\/\/[^/]+/i, '').replace(/\/+$/, ''); return t ? '/' + t.replace(/^\/+/, '') : ''; };
+ const seoDenverDate = (iso) => {
+     const d = iso ? new Date(iso) : new Date();
+     return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' }).format(isNaN(d.getTime()) ? new Date() : d);
+ };
+
+ async function refreshSeoAutologStatus(clientObj) {
+     seoAutologClientObj = clientObj;
+     const status = document.getElementById('seo-al-status');
+     const { data, error } = await supabaseClient.from('seo_webhook_configs').select('*').eq('client_name', clientObj.name).maybeSingle();
+     seoAutologConfig = error ? null : data;
+     if (status) {
+         status.innerText = !seoAutologConfig ? 'Auto-log articles'
+             : seoAutologConfig.platform === 'webflow' && !seoAutologConfig.collection_id ? 'Auto-log: pick blog collection'
+             : `Auto-log: on (${seoAutologConfig.platform === 'wix' ? 'Wix' : 'Webflow'})`;
+     }
+     // Keep an open panel in step when switching clients
+     if (!document.getElementById('seo-autolog-panel')?.classList.contains('hidden')) await fillSeoAutologPanel();
+ }
+
+ window.toggleSeoAutologPanel = async function() {
+     if (currentUserRole !== 'admin') return;
+     const panel = document.getElementById('seo-autolog-panel');
+     if (!panel) return;
+     if (!panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
+     panel.classList.remove('hidden');
+     await fillSeoAutologPanel();
+ };
+
+ window.seoAutologPlatformChanged = function() {
+     const webflow = document.getElementById('seo-al-platform').value === 'webflow';
+     document.querySelectorAll('.seo-al-webflow').forEach(el => el.classList.toggle('hidden', !webflow));
+ };
+
+ async function fillSeoAutologPanel() {
+     const cfg = seoAutologConfig;
+     const client = seoAutologClientObj;
+     if (!client) return;
+     document.getElementById('seo-al-error').classList.add('hidden');
+     document.getElementById('seo-al-platform').value = cfg?.platform || 'webflow';
+     document.getElementById('seo-al-path').value = cfg?.blog_path || '';
+     document.getElementById('seo-al-off').classList.toggle('hidden', !cfg);
+     seoAutologPlatformChanged();
+     renderSeoAutologLink();
+     suggestSeoBlogPath(client);
+     await renderSeoAutologCollection();
+ }
+
+ // Suggest the blog prefix from pages Search Console already knows: the most common first path
+ // segment among pages at least two levels deep, like /blog-posts/some-article
+ async function suggestSeoBlogPath(client) {
+     const hint = document.getElementById('seo-al-path-hint');
+     if (!hint) return;
+     hint.innerHTML = '';
+     const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 90);
+     const { data } = await supabaseClient.rpc('seo_page_summary', { p_client: client.name, p_start: seoIso(start), p_end: seoIso(end), p_prior_start: seoIso(start), p_prior_end: seoIso(start), p_limit: 500 });
+     const counts = {};
+     (data || []).forEach(r => {
+         try {
+             const parts = new URL(r.page).pathname.split('/').filter(Boolean);
+             if (parts.length >= 2) counts[parts[0]] = (counts[parts[0]] || 0) + 1;
+         } catch (_) {}
+     });
+     const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+     if (!best || best[1] < 2) { hint.innerText = 'The part of a post\'s address before its name, e.g. /blog'; return; }
+     hint.innerHTML = `Most articles on this site look like <span class="font-mono">/${escapeAttr(best[0])}/…</span> (${best[1]} pages). <button type="button" class="text-blue-400 hover:underline" onclick="document.getElementById('seo-al-path').value='/${escapeAttr(best[0])}'">Use it</button>`;
+ }
+
+ function renderSeoAutologLink() {
+     const cfg = seoAutologConfig;
+     const box = document.getElementById('seo-al-link-box');
+     if (!box) return;
+     box.classList.toggle('hidden', !cfg);
+     if (!cfg) return;
+     document.getElementById('seo-al-url').value = `${SEO_WEBHOOK_FN}?t=${cfg.token}`;
+     const steps = cfg.platform === 'wix'
+         ? ['Copy the link above.',
+            'In the Wix dashboard, open Automations and create a new automation.',
+            'Trigger: <b>Blog post published</b>. Action: <b>Send HTTP request</b> (POST). Paste the link. If Wix asks what to send, include the post title, link and published date.',
+            'Turn it on, then publish a post. It appears in the changelog with an "auto · Wix" badge.']
+         : ['Copy the link above.',
+            'In Webflow, open Site settings → <b>Webhooks</b> and add a webhook.',
+            'Trigger type: <b>Collection Item Published</b>. Paste the link and save.',
+            cfg.collection_id
+                ? 'Done. Publish a blog post and it appears in the changelog with an "auto · Webflow" badge.'
+                : 'Publish (or republish) one blog post, then pick the blog collection below. That post gets logged too.'];
+     document.getElementById('seo-al-steps').innerHTML = steps.map(s => `<li>${s}</li>`).join('');
+ }
+
+ // Publishes held back because no blog collection was picked, grouped by collection, so the blog
+ // can be picked by recognising its post titles instead of hunting for an id.
+ async function renderSeoAutologCollection() {
+     const cfg = seoAutologConfig;
+     const box = document.getElementById('seo-al-collection-box');
+     const el = document.getElementById('seo-al-collection');
+     if (!box || !el) return;
+     const show = cfg && cfg.platform === 'webflow';
+     box.classList.toggle('hidden', !show);
+     if (!show) return;
+     if (cfg.collection_id) {
+         el.innerHTML = `<p class="text-xs text-emerald-400"><i class="fa-solid fa-circle-check mr-1"></i>Picked (<span class="font-mono">${escapeAttr(cfg.collection_id)}</span>). <button type="button" class="text-gray-400 hover:underline" onclick="pickSeoBlogCollection(null)">Change</button></p>`;
+         return;
+     }
+     const { data } = await supabaseClient.from('seo_changelog_webhook_events')
+         .select('received_at, results').eq('client_name', cfg.client_name).eq('outcome', 'needs_collection')
+         .order('received_at', { ascending: false }).limit(50);
+     const groups = new Map();
+     (data || []).forEach(ev => (Array.isArray(ev.results) ? ev.results : []).forEach(it => {
+         if (!it?.collection_id) return;
+         const g = groups.get(it.collection_id) || { id: it.collection_id, items: new Map() };
+         g.items.set(it.ref, it);
+         groups.set(it.collection_id, g);
+     }));
+     if (!groups.size) {
+         el.innerHTML = '<p class="text-xs text-amber-400">Waiting for a publish. Once the webhook is added in Webflow, publish or republish one blog post, then reopen this panel.</p>';
+         return;
+     }
+     el.innerHTML = [...groups.values()].map(g => {
+         const titles = [...g.items.values()].slice(0, 3).map(i => `"${escapeAttr(i.title)}"`).join(', ');
+         return `<div class="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
+             <div class="min-w-0 text-xs text-gray-300">${titles}${g.items.size > 3 ? ` and ${g.items.size - 3} more` : ''}</div>
+             <button type="button" onclick="pickSeoBlogCollection('${escapeAttr(g.id)}')" class="shrink-0 text-xs font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg transition">These are blog posts</button>
+         </div>`;
+     }).join('');
+ }
+
+ window.saveSeoAutolog = async function() {
+     if (currentUserRole !== 'admin' || !seoAutologClientObj) return;
+     const btn = document.getElementById('seo-al-save');
+     const errEl = document.getElementById('seo-al-error');
+     errEl.classList.add('hidden');
+     const platform = document.getElementById('seo-al-platform').value;
+     const blog_path = platform === 'webflow' ? (seoCleanPath(document.getElementById('seo-al-path').value) || null) : null;
+     if (!seoDomainOf(seoAutologClientObj.gsc_property)) {
+         errEl.innerText = 'Add this client\'s Search Console property under Edit first. That\'s how their site is confirmed.';
+         errEl.classList.remove('hidden');
+         return;
+     }
+     if (platform === 'webflow' && !blog_path) {
+         errEl.innerText = 'Add the blog address prefix (e.g. /blog), so logged posts link to the right page.';
+         errEl.classList.remove('hidden');
+         return;
+     }
+     btn.disabled = true; btn.innerText = 'Saving...';
+     try {
+         const row = { client_name: seoAutologClientObj.name, platform, blog_path, updated_at: new Date().toISOString() };
+         // Switching platform clears a Webflow collection that no longer applies
+         if (platform === 'wix') row.collection_id = null;
+         const { error } = await supabaseClient.from('seo_webhook_configs').upsert(row, { onConflict: 'client_name' });
+         if (error) throw error;
+         await refreshSeoAutologStatus(seoAutologClientObj);
+         await fillSeoAutologPanel();
+     } catch (err) {
+         errEl.innerText = /seo_webhook_configs/.test(err.message || '')
+             ? 'Setup table missing: run supabase/functions/seo-changelog-webhook/schema.sql first.'
+             : 'Could not save: ' + (err.message || err);
+         errEl.classList.remove('hidden');
+     } finally {
+         btn.disabled = false; btn.innerText = 'Save & get link';
+     }
+ };
+
+ window.copySeoAutologUrl = async function() {
+     const input = document.getElementById('seo-al-url');
+     const btn = document.getElementById('seo-al-copy');
+     try { await navigator.clipboard.writeText(input.value); }
+     catch (_) { input.select(); document.execCommand('copy'); }   // the GHL iframe can block the clipboard API
+     btn.innerText = 'Copied'; setTimeout(() => { btn.innerText = 'Copy'; }, 2000);
+ };
+
+ window.pickSeoBlogCollection = async function(collectionId) {
+     if (currentUserRole !== 'admin' || !seoAutologConfig || !seoAutologClientObj) return;
+     const { error } = await supabaseClient.from('seo_webhook_configs')
+         .update({ collection_id: collectionId, updated_at: new Date().toISOString() })
+         .eq('client_name', seoAutologConfig.client_name);
+     if (error) { alert('Could not save: ' + error.message); return; }
+
+     // Log the posts that were held back from this collection, same shape the webhook writes.
+     // Upserted on (client_name, source_ref), first write wins, so nothing can be logged twice.
+     if (collectionId) {
+         const { data } = await supabaseClient.from('seo_changelog_webhook_events')
+             .select('results').eq('client_name', seoAutologConfig.client_name).eq('outcome', 'needs_collection').limit(200);
+         const domain = seoDomainOf(seoAutologClientObj.gsc_property);
+         const path = seoAutologConfig.blog_path || '';
+         const held = new Map();
+         (data || []).forEach(ev => (Array.isArray(ev.results) ? ev.results : []).forEach(it => {
+             if (it?.collection_id === collectionId && it.ref && it.title) held.set(it.ref, it);
+         }));
+         const rows = [...held.values()].map(it => ({
+             client_name: seoAutologConfig.client_name,
+             live_date: seoDenverDate(it.published_at),
+             kind: 'content',
+             title: String(it.title).slice(0, 200),
+             url: domain && path && it.slug ? `https://${domain}${path}/${it.slug}` : null,
+             notes: null,
+             created_by: 'webflow',
+             source_ref: it.ref
+         }));
+         if (rows.length) {
+             const { error: logErr } = await supabaseClient.from('seo_changelog').upsert(rows, { onConflict: 'client_name,source_ref', ignoreDuplicates: true });
+             if (logErr) alert('Blog collection saved, but the held posts could not be logged: ' + logErr.message);
+         }
+     }
+     await window.renderAdminSeo();
+ };
+
+ window.turnOffSeoAutolog = async function() {
+     if (currentUserRole !== 'admin' || !seoAutologConfig) return;
+     if (!confirm('Turn off auto-logging for this client? Their webhook link stops working immediately. Entries already logged stay. Remember to remove the webhook from their site.')) return;
+     const { error } = await supabaseClient.from('seo_webhook_configs').delete().eq('client_name', seoAutologConfig.client_name);
+     if (error) { alert('Could not turn off: ' + error.message); return; }
+     await refreshSeoAutologStatus(seoAutologClientObj);
+     await fillSeoAutologPanel();
+ };
+
  // Draws a dashed line and numbered dot per changelog entry. Kept inline rather than adding
  // chartjs-plugin-annotation: a new CDN script means re-pasting goldeneye.html into GHL.
  const seoChangelogChartPlugin = {
@@ -5278,6 +5508,7 @@ Treat this period as a fresh starting point. State every number plainly as where
          seoChangelogClient = clientName;
          const markers = seoChangelogMarkers(seoChangelogEntries, s, e);
          renderSeoChangelogList(seoChangelogEntries, markers, !!changelogErr);
+         refreshSeoAutologStatus(clientObj).catch(err => console.error('seo auto-log status failed:', err));
 
          renderSeoChart(daily, s, e, markers);
 

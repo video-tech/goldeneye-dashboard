@@ -23,6 +23,8 @@ export interface Article {
     url: string | null;
     host: string | null;  // from url when there is one
     published_at: string | null;
+    collection_id?: string | null;  // Webflow only
+    slug?: string | null;           // Webflow only, so a held post can get its URL once its blog path is known
 }
 
 export type ParseResult =
@@ -97,6 +99,8 @@ export function parseWebflow(body: any, params: { site: string | null; path: str
             url,
             host: host,
             published_at: str(it?.lastPublished) ?? str(it?.createdOn),
+            collection_id: str(it?.collectionId),
+            slug,
         });
     }
     return articles.length
@@ -183,6 +187,21 @@ export function resolveClient(
     if (!matches.length) return { reason: `no client has a Search Console property for ${host}` };
     if (matches.length > 1) return { reason: `more than one client matches ${host}` };
     return { client: matches[0].name };
+}
+
+// A per-client token already says whose articles these are, so there's nothing to match. The
+// one check left is that an article with a URL is really on that client's site, so a Wix
+// automation pasted into the wrong client's site can't file articles under this one.
+export function checkTokenClient(
+    client: { name: string; gsc_property: string | null },
+    articleHost: string | null,
+): { client: string } | { reason: string } {
+    const domain = domainOf(client.gsc_property);
+    if (!domain) return { reason: `${client.name} has no Search Console property, so its site can't be confirmed` };
+    if (articleHost && !onDomain(articleHost, domain)) {
+        return { reason: `article is on ${articleHost}, not ${client.name}'s site (${domain})` };
+    }
+    return { client: client.name };
 }
 
 // The day it went live, in Mountain time, where the team reads the chart. An article published

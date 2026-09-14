@@ -761,7 +761,48 @@
                                             <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">SEO Changelog</h3>
                                             <p class="text-xs text-gray-500">Log SEO work on the day it went live. Numbered entries show as markers on the chart above, so you can see what caused a change.</p>
                                         </div>
-                                        <button type="button" onclick="openSeoChangelogForm()" class="shrink-0 text-xs font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-2 rounded-lg transition"><i class="fa-solid fa-plus mr-1"></i> Log work</button>
+                                        <div class="shrink-0 flex gap-2">
+                                            <button type="button" onclick="toggleSeoAutologPanel()" id="seo-al-toggle" class="text-xs font-bold text-gray-300 bg-white/5 hover:bg-white/10 px-3 py-2 rounded-lg transition" title="Log articles automatically when they're published on Webflow or Wix"><i class="fa-solid fa-bolt mr-1"></i> <span id="seo-al-status">Auto-log articles</span></button>
+                                            <button type="button" onclick="openSeoChangelogForm()" class="text-xs font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-2 rounded-lg transition"><i class="fa-solid fa-plus mr-1"></i> Log work</button>
+                                        </div>
+                                    </div>
+
+                                    <div id="seo-autolog-panel" class="hidden space-y-4 mb-5 p-4 rounded-xl border border-white/10">
+                                        <p class="text-xs text-gray-400">When a blog post is published on this client's Webflow or Wix site, it's added here automatically. Set it up once: pick the platform, copy the link, and paste it into the site.</p>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-al-platform">Site platform</label>
+                                                <select id="seo-al-platform" class="glass-input" onchange="seoAutologPlatformChanged()">
+                                                    <option value="webflow">Webflow</option>
+                                                    <option value="wix">Wix</option>
+                                                </select>
+                                            </div>
+                                            <div class="seo-al-webflow">
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-al-path">Blog address prefix</label>
+                                                <input type="text" id="seo-al-path" class="glass-input" placeholder="/blog">
+                                                <p id="seo-al-path-hint" class="text-[11px] text-gray-500 mt-1"></p>
+                                            </div>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button type="button" id="seo-al-save" onclick="saveSeoAutolog()" class="text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition">Save &amp; get link</button>
+                                            <button type="button" id="seo-al-off" onclick="turnOffSeoAutolog()" class="hidden text-xs font-bold text-red-400 hover:text-red-300 px-3 py-2 rounded-lg transition">Turn off</button>
+                                        </div>
+                                        <p id="seo-al-error" class="text-xs text-red-400 hidden"></p>
+
+                                        <div id="seo-al-link-box" class="hidden space-y-3">
+                                            <div>
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-al-url">Webhook link <span class="normal-case font-normal text-gray-600">(private: paste it only into this client's site)</span></label>
+                                                <div class="flex gap-2">
+                                                    <input type="text" id="seo-al-url" class="glass-input font-mono text-xs" readonly>
+                                                    <button type="button" onclick="copySeoAutologUrl()" id="seo-al-copy" class="shrink-0 text-xs font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-2 rounded-lg transition">Copy</button>
+                                                </div>
+                                            </div>
+                                            <ol id="seo-al-steps" class="text-xs text-gray-400 list-decimal pl-5 space-y-1"></ol>
+                                            <div id="seo-al-collection-box" class="hidden">
+                                                <p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Blog collection</p>
+                                                <div id="seo-al-collection"></div>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <form id="seo-changelog-form" class="hidden space-y-3 mb-5 p-4 rounded-xl border border-white/10" onsubmit="saveSeoChangelogEntry(event)">

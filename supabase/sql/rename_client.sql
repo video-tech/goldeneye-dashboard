@@ -103,6 +103,9 @@ begin
     update seo_keywords               set client_name = new_name where client_name = old_name;
     update seo_rank_checks            set client_name = new_name where client_name = old_name;
     update seo_changelog              set client_name = new_name where client_name = old_name;
+    -- Added 2026-09-14 with article auto-logging (seo-changelog-webhook/schema.sql). Run that
+    -- schema first: this table must exist before a rename runs.
+    update seo_webhook_configs        set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users

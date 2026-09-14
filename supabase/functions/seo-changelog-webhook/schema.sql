@@ -42,7 +42,45 @@ create table if not exists seo_changelog_webhook_events (
 create index if not exists seo_changelog_webhook_events_received on seo_changelog_webhook_events (received_at desc);
 alter table seo_changelog_webhook_events enable row level security;
 
+-- ---------------------------------------------------------------------------
+-- Per-client setup, managed from the SEO tab (added 2026-09-14, the same day)
+-- ---------------------------------------------------------------------------
+-- The first version put everything in the webhook URL (the shared secret, site, blog path,
+-- collection id). Setting a client up meant hand-building that URL and finding a collection id,
+-- and Webflow can't edit a webhook, so any correction meant deleting and recreating it.
+--
+-- Now each client gets a random token, and the URL is just ?t=<token>. Platform, blog path and
+-- collection live here and are edited in Golden Eye, and the webhook itself never changes. The
+-- token is the credential: 64 random hex characters from two v4 UUIDs, which are generated with
+-- a cryptographically secure source. Leaking one lets someone add fake article entries to that
+-- client's changelog, nothing more, and deleting the row revokes it.
+--
+-- The old ?k=<shared secret> URLs keep working.
+create table if not exists seo_webhook_configs (
+    client_name   text primary key,
+    token         text not null unique
+                  default (replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')),
+    platform      text not null check (platform in ('webflow', 'wix')),
+    blog_path     text,   -- Webflow only: the URL prefix before a post's slug, e.g. /blog-posts
+    collection_id text,   -- Webflow only: which CMS collection is the blog. Null = not picked yet
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now()
+);
+alter table seo_webhook_configs enable row level security;
+
+drop policy if exists "Admins manage webhook configs" on seo_webhook_configs;
+create policy "Admins manage webhook configs"
+on seo_webhook_configs for all using (current_user_is_admin()) with check (current_user_is_admin());
+
+-- The SEO tab lists collections seen in publishes that arrived before a blog collection was
+-- picked, so admins read these events too. Nobody else can.
+drop policy if exists "Admins read webhook events" on seo_changelog_webhook_events;
+create policy "Admins read webhook events"
+on seo_changelog_webhook_events for select using (current_user_is_admin());
+
 notify pgrst, 'reload schema';
+
+-- Then re-run supabase/sql/rename_client.sql, which now also moves seo_webhook_configs.
 
 -- ---------------------------------------------------------------------------
 -- Checking on it

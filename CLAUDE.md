@@ -970,29 +970,43 @@ real client data; see the Known gaps entry on that.
   lands on the first plotted day on or after its date, and same-day markers stack. URLs are
   only linked when they're http(s). No SQL was needed, since the table and its admin write
   policy already existed from `seranking-sync/schema.sql`.
-- **Articles published on Webflow or Wix log themselves (built 2026-09-14, not yet tested live).**
+- **Articles published on Webflow or Wix log themselves (built 2026-09-14).** Setup
+  is on the SEO tab: **Auto-log articles**, on the changelog panel.
   `supabase/functions/seo-changelog-webhook/` takes the site's own publish event, not Cuppa's.
-  Cuppa only stages a Webflow post, and the changelog records when work went live. Setup:
-  `schema.sql`, the `SEO_WEBHOOK_SECRET` secret, and deploy (`verify_jwt = false` is in
-  `config.toml`). Then, per client:
-  - **Webflow:** a "Collection Item Published" webhook to
-    `...?source=webflow&site=<domain>&path=/blog&collection=<blog collection id>&k=<secret>`.
-    The payload has no domain or URL, hence `site` and `path`. Without `collection`, every
-    CMS collection's publishes arrive, team members included.
-  - **Wix:** an Automation, "Blog post published" → "Send HTTP request", to
-    `...?source=wix&site=<domain>&k=<secret>`. Wix doesn't document the body, so the parser
-    finds title, URL, id and date by field name wherever they're nested. **Check the first
-    real payload** in `seo_changelog_webhook_events`.
-  - **How entries are filed:** each article goes under the one client whose `gsc_property`
-    domain matches its URL (or `site`), and a URL/`site` mismatch is refused. It's logged
-    once, because `seo_changelog.source_ref` (`webflow:<item id>` / `wix:<post id or URL>`) is
-    unique per client and inserts are first-write-wins. So a republish never duplicates it,
-    but a major update to an old article must be logged by hand. `live_date` is the publish
-    day in America/Denver.
-  - **Every authenticated request is recorded** in `seo_changelog_webhook_events` with its
-    outcome and a scrubbed payload. RLS is on with no policies, so only the SQL Editor can
-    read it. It's deliberately not in `rename_client.sql`, since `client_name` there is
-    informational. Parsing is in dependency-free `parse.ts`. 26 checks.
+  Cuppa only stages a Webflow post, and the changelog records when work went live.
+  - **One-time:** `schema.sql`, then `supabase/sql/rename_client.sql` (it now moves
+    `seo_webhook_configs`), then deploy. `verify_jwt = false` is in `config.toml`.
+  - **Per client, about a minute:** pick Webflow or Wix, click *Save & get link*, and paste the
+    link, `...?t=<token>`, into Webflow (Site settings → Webhooks → *Collection Item
+    Published*) or a Wix Automation (*Blog post published* → *Send HTTP request*).
+  - **`seo_webhook_configs`, one row per client, holds the token** plus platform,
+    `blog_path` and `collection_id`. Everything is edited in Golden Eye, so the pasted
+    webhook never changes. That matters because Webflow can't edit a webhook, only delete and
+    recreate it, which is what made the first version slow.
+  - **The token is the credential:** 64 hex characters from two v4 UUIDs, which use a secure
+    random source. It's admin-only by RLS, and *Turn off* deletes the row, revoking the link at
+    once. A leaked token can only add fake article entries to that one client's changelog.
+  - **Blog path:** Webflow's payload has only a slug, so the path is needed to build the URL. The
+    panel suggests it from the most common first segment of the client's Search Console pages
+    at least two levels deep.
+  - **Blog collection:** Webflow sends publishes for every CMS collection. Until one is picked,
+    publishes are recorded as `needs_collection` and not logged. The panel groups them by
+    collection and shows their titles. Clicking *These are blog posts* saves the collection and
+    logs the held posts client-side, the same shape the webhook writes.
+  - **How entries are filed:** each article is logged once. `seo_changelog.source_ref`
+    (`webflow:<item id>` / `wix:<post id or URL>`) is unique per client and inserts are
+    first-write-wins, so a republish never duplicates it. A major update to an old article must
+    be logged by hand. A Wix post whose URL isn't on the token's client's domain is refused.
+    `live_date` is the publish day in America/Denver.
+  - **Wix's body isn't documented,** so the parser finds title, URL, id and date by field name at
+    any depth. **Check the first real Wix payload** in `seo_changelog_webhook_events`, where
+    every authenticated request is recorded with its outcome and a scrubbed payload. Only admins
+    can read it, and it's not in `rename_client.sql` because `client_name` there is
+    informational.
+  - **First-version URLs** (`?k=<SEO_WEBHOOK_SECRET>&source=&site=&path=&collection=`) still
+    work, matched to a client by domain. 3Sixty's Webflow webhook uses one.
+  - **Tests:** parsing is in dependency-free `parse.ts`. 38 checks (26 on the first version,
+    12 on the token path).
 - **Not yet built:** the keyword manager. `seo_keywords` is currently populated only by
   `seranking-sync`'s sync, with no admin-side add/retire form yet, even though its RLS already
   allows admin writes. The changelog isn't in the weekly report or the client portal yet either.
