@@ -91,7 +91,51 @@ alter table stage_templates
     add column if not exists auto_check       text;
 
 -- ---------------------------------------------------------------------------
--- onboarding_steps_for_client: THE rule for what a client gets
+-- onboarding_condition_matches: THE rule, in one place
+-- ---------------------------------------------------------------------------
+-- Does a step or checklist item with these tags apply to a client with these services and this
+-- website situation? Every function below calls this, whether for a real client, the Templates
+-- preview, or stage checklists. Nothing else, including app.js, reimplements it, so the preview can
+-- never promise something the portal or the handoff trigger won't do.
+create or replace function onboarding_condition_matches(
+    p_step_services text[], p_step_websites text[], p_services text[], p_website text
+)
+returns boolean
+language sql immutable
+as $$
+    select (cardinality(coalesce(p_step_websites, '{}')) = 0 or p_website = any (p_step_websites))
+       and (cardinality(coalesce(p_step_services, '{}')) = 0 or coalesce(p_step_services, '{}') && coalesce(p_services, '{}'));
+$$;
+grant execute on function onboarding_condition_matches(text[], text[], text[], text) to authenticated;
+
+-- What a hypothetical client would get, for the Templates editor's preview ("ads + SEO, existing
+-- site"). display_service_key follows the same "first matching service by sort order" rule as the
+-- real thing. Steps and stage checklist items both come back, told apart by source.
+create or replace function onboarding_preview(p_services text[], p_website text)
+returns table (source text, item_id text, title text, owner text, stage text, display_service_key text, auto_check text, sort_order integer)
+language sql stable
+set search_path = public
+as $$
+    select 'step', st.id::text, st.title, coalesce(st.owner, 'client'), 'Onboarding',
+           (select s.key from services s where s.key = any (st.service_keys) and s.key = any (coalesce(p_services, '{}'))
+             order by s.sort_order, s.key limit 1),
+           st.auto_check, coalesce(st.sort_order, 0)
+    from onboarding_steps st
+    where coalesce(st.active, true)
+      and onboarding_condition_matches(st.service_keys, st.website_statuses, p_services, p_website)
+    union all
+    select 'checklist', t.id::text, t.task_title, 'agency', t.stage,
+           (select s.key from services s where s.key = any (t.service_keys) and s.key = any (coalesce(p_services, '{}'))
+             order by s.sort_order, s.key limit 1),
+           t.auto_check, coalesce(t.sort_order, 0)
+    from stage_templates t
+    where onboarding_condition_matches(t.service_keys, t.website_statuses, p_services, p_website)
+    order by 1 desc, 5, 8;
+$$;
+grant execute on function onboarding_preview(text[], text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- onboarding_steps_for_client: what a real client gets
 -- ---------------------------------------------------------------------------
 -- The portal, the admin view and the onboarding-complete trigger all use this, so they can't
 -- disagree about what "done" means. That's the same reason the morning audit's engine lives in one file.
@@ -132,8 +176,8 @@ as $$
         from onboarding_steps st, c
         where coalesce(st.active, true)
           -- untagged steps are Base, which every client has, even with no add-ons
-          and (cardinality(st.website_statuses) = 0 or c.website_status = any (st.website_statuses))
-          and (cardinality(st.service_keys) = 0 or st.service_keys && (select array_agg(service_key) from mine))
+          and onboarding_condition_matches(st.service_keys, st.website_statuses,
+                                           (select array_agg(service_key) from mine), c.website_status)
     ),
     done as (
         select p.step_id
