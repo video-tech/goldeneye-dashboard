@@ -168,6 +168,13 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   transaction simulating a real client's JWT confirmed reads are scoped to their own
   rows and a write against another client's row affects 0 rows, and the admin
   Generate/Edit/Delete flow was confirmed still working from the live dashboard.
+- **`weekly_report_inputs`, added 2026-09-14** (`supabase/sql/weekly_report_inputs.sql`) holds
+  the notes typed into the Generate Report box, one row per report and keyed on
+  `report_id` (cascade delete). It's shown in the admin Reports list and read-only in Edit
+  Report. **It's a separate admin-only table, not a `weekly_reports` column, because the
+  client portal reads `weekly_reports` with `select('*')`.** RLS is per row, so any column
+  added there would be readable by the client. No `rename_client()` line is needed, since it
+  follows the report by id. Reports generated before this date have no saved notes.
 - **`tasks` policy, fixed 2026-09-10 — same read leak as the other two
   (`Allow authenticated users to read tasks`, `Auth Read Ads` both `USING (true)`;
   `Allow authenticated users to insert tasks` had `WITH CHECK (true)`, so any

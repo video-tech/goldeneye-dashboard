@@ -4205,15 +4205,29 @@ window.renderClientReports = async function() {
                     tbody.innerHTML = '<tr><td colspan="3" class="p-8 text-center text-gray-500 italic">No saved reports found for this client.</td></tr>';
                     return;
                 }
-                
+
+                // The notes typed when each report was generated. Admin-only table, so an error
+                // (including the table not existing yet) just means no notes are shown.
+                const notesById = {};
+                const { data: inputs, error: inputsErr } = await supabaseClient
+                    .from('weekly_report_inputs')
+                    .select('report_id, notes')
+                    .in('report_id', data.map(r => r.id));
+                if (inputsErr) console.warn("Couldn't load report notes:", inputsErr.message);
+                (inputs || []).forEach(i => { notesById[i.report_id] = i.notes; });
+                data.forEach(r => { r.typed_notes = notesById[r.id] || ''; });
+
                 let html = '';
                 data.forEach(r => {
                     const date = new Date(r.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
                     const snippet = r.report_body ? r.report_body.substring(0, 90).replace(/\n/g, ' ') + '...' : 'No text summary available';
-                    
+                    const notesLine = r.typed_notes
+                        ? `<div class="mt-2 text-amber-300/90 whitespace-pre-wrap"><i class="fa-solid fa-pen-to-square mr-1"></i><span class="font-bold">You typed:</span> ${escapeAttr(r.typed_notes)}</div>`
+                        : '';
+
                     html += `<tr class="hover:bg-white/5 transition border-b border-white/5">
-                        <td class="p-4 text-gray-300 font-bold whitespace-nowrap">${date}</td>
-                        <td class="p-4 text-gray-400 text-xs w-full">${escapeHTML(snippet)}</td>
+                        <td class="p-4 text-gray-300 font-bold whitespace-nowrap align-top">${date}</td>
+                        <td class="p-4 text-gray-400 text-xs w-full">${escapeAttr(snippet)}${notesLine}</td>
                         <td class="p-4 text-right whitespace-nowrap">
                             <button onclick="sendSavedReportToMake(${r.id}, this)" class="text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-1.5 rounded mr-2 transition" title="Send to Drafts"><i class="fa-solid fa-paper-plane text-xs mr-1"></i> Draft</button>
                             <button onclick="openEditReportModal(${r.id})" class="text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 rounded mr-2 transition"><i class="fa-solid fa-pen text-xs"></i> Edit</button>
@@ -4513,11 +4527,21 @@ const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, ''
                 document.getElementById('rpt-results').style.display = 'block'; 
 
                 try {
-                    await supabaseClient.from('weekly_reports').insert({
+                    const { data: saved, error: saveErr } = await supabaseClient.from('weekly_reports').insert({
                         client_name: cSelectedAccount,
                         report_body: result.email_summary,
                         html_body: result.html_report
-                    });
+                    }).select('id').single();
+                    if (saveErr) throw saveErr;
+                    // What was typed goes into its own admin-only table, never a weekly_reports
+                    // column: the client portal reads that table with select('*'). See
+                    // supabase/sql/weekly_report_inputs.sql. A failure here must not lose the
+                    // report itself, which is already saved.
+                    if (n && saved?.id != null) {
+                        const { error: notesErr } = await supabaseClient.from('weekly_report_inputs')
+                            .insert({ report_id: saved.id, notes: n });
+                        if (notesErr) console.warn("Report saved, but its notes weren't:", notesErr.message);
+                    }
                     if (!document.getElementById('c-view-reports').classList.contains('hidden')) {
                         window.renderClientReports();
                     }
@@ -5758,6 +5782,13 @@ window.openEditReportModal = function(id) {
     // Populate the text boxes with the saved data
     document.getElementById('edit-rpt-email').value = report.report_body || '';
     document.getElementById('edit-rpt-html').value = report.html_body || '';
+    // Read-only: what was typed in when this report was generated. Changing it now wouldn't
+    // change the report, so it isn't editable here.
+    const notesWrap = document.getElementById('edit-rpt-notes-wrap');
+    if (notesWrap) {
+        notesWrap.hidden = !report.typed_notes;
+        document.getElementById('edit-rpt-notes').innerText = report.typed_notes || '';
+    }
     
     // Tell the save button which ID to update
     document.getElementById('btn-save-edit-report').onclick = () => saveEditedReport(id);
