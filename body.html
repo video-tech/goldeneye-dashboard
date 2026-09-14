@@ -177,7 +177,7 @@
         
         .rpt-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin: 1.25rem 0; }
         .rpt-kpi-tile { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.9rem; padding: 0.85rem 1rem; }
-        #rpt-improving { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 0.9rem; color: inherit; padding: 1rem; min-height: 90px; margin-top: 0.5rem; outline: none; box-sizing: border-box; }
+        #rpt-improving, #rpt-next-week { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 0.9rem; color: inherit; padding: 1rem; min-height: 90px; margin-top: 0.5rem; outline: none; box-sizing: border-box; }
         .rpt-output-box { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 0.9rem; padding: 1.25rem; font-size: 0.85rem; line-height: 1.7; white-space: pre-wrap; max-height: 280px; overflow-y: auto; }
         #rpt-html-src { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 0.9rem; padding: 1rem; font-family: monospace; color: #a5f3fc; min-height: 130px; box-sizing: border-box; }
         @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
@@ -2176,6 +2176,8 @@
                 </div>
                 
                 <textarea id="rpt-improving" class="text-white" placeholder="What we did / What we're improving (Optional - AI will infer from data if left blank)..."></textarea>
+                <label for="rpt-next-week" class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-4">Next week's to-dos <span class="normal-case font-normal text-gray-600">— one per line. Each becomes a task for this client and is listed under "What We're Working On."</span></label>
+                <textarea id="rpt-next-week" class="text-white" style="min-height: 70px;" placeholder="Launch the 3 winning ads at a higher budget&#10;Rewrite the landing page headline"></textarea>
                 <button onclick="generateReport()" id="rpt-gen-btn" class="w-full bg-yellow-400 text-yellow-900 font-bold py-3 rounded-xl mt-4 hover:bg-yellow-300 transition">Generate Report</button>
                 
                 <div id="rpt-results" style="display:none; margin-top:24px;" class="space-y-6">

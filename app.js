@@ -4265,6 +4265,8 @@ window.renderClientReports = async function() {
     document.getElementById('rpt-kpi-cpc').innerText = '$' + (currentAdsStats.cpc || 0).toFixed(2); 
     
     document.getElementById('rpt-improving').value = '';
+    const nextWeekBox = document.getElementById('rpt-next-week');
+    if (nextWeekBox) nextWeekBox.value = '';
     document.getElementById('rpt-results').style.display = 'none'; 
     
     // Show the modal
@@ -4395,7 +4397,52 @@ Treat this period as a fresh starting point. State every number plainly as where
                 const d = new Date(t.updated_at);
                 return d >= s && d <= e;
             });
-            const openTasks = clientTasks.filter(t => t.status !== 'Complete');
+            // ---- Next week's to-dos, typed into the report window. Each becomes a real task now,
+            // before the model runs, so the report never promises work that isn't on the board.
+            // Deduped on title against this client's open tasks, so regenerating a report
+            // doesn't file the same to-do twice.
+            const todoKey = (t) => stripSlashEscapes(String(t || '')).toLowerCase().replace(/\s+/g, ' ').trim();
+            const plannedTodos = [];
+            for (const line of (document.getElementById('rpt-next-week')?.value || '').split('\n')) {
+                const title = line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim();
+                if (title && !plannedTodos.some(t => todoKey(t) === todoKey(title))) plannedTodos.push(title);
+            }
+            if (plannedTodos.length) {
+                const clientRow = globalClientsData.find(c => normalize(c.name) === wantClient);
+                const openKeys = new Set(globalTasksData
+                    .filter(t => normalize(t.client || '') === wantClient && t.status !== 'Complete')
+                    .map(t => todoKey(t.title)));
+                const due = new Date(); due.setDate(due.getDate() + 7);
+                const dueYmd = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+                const rows = plannedTodos.filter(t => !openKeys.has(todoKey(t))).map(title => ({
+                    client: clientRow?.name || cSelectedAccount,
+                    title,
+                    type: 'One-off',
+                    stage: clientRow?.current_stage || null,
+                    status: 'Not Started',
+                    assignee: 'Account Manager',
+                    p: 3, u: 4, e: 3,
+                    score: Math.round(((3 * 0.4) + (4 * 0.4) + ((6 - 3) * 0.2)) * 20),
+                    due: dueYmd,
+                    notes: `Planned in the weekly report for ${cSelectedAccount} (${dateRangeLabel}).`,
+                    updated_at: new Date().toISOString()
+                }));
+                if (rows.length) {
+                    const { data: createdTodos, error: todoErr } = await supabaseClient.from('tasks').insert(rows).select();
+                    if (todoErr) {
+                        // Stop here: a report listing to-dos that were never created is worse than no report
+                        alert("Couldn't create next week's tasks, so the report wasn't generated: " + todoErr.message);
+                        b.innerHTML = "Generate Report";
+                        b.disabled = false;
+                        return;
+                    }
+                    globalTasksData.push(...(createdTodos || []));
+                }
+            }
+            const plannedKeys = new Set(plannedTodos.map(todoKey));
+
+            // Planned to-dos are listed in their own block, so they aren't repeated in the open list
+            const openTasks = clientTasks.filter(t => t.status !== 'Complete' && !plannedKeys.has(todoKey(t.title)));
 
             // Never let the model imply an overdue task is still ahead of us — same
             // fix as client-summary's edge function, for the same reason: the model is
@@ -4417,6 +4464,15 @@ Treat this period as a fresh starting point. State every number plainly as where
             if (openTasks.length) {
                 workBlock += `\n\nCURRENTLY OPEN / STILL TO DO:\n${openTasks.map(t => `- ${stripSlashEscapes(t.title)}${dueTag(t.due)}`).join('\n')}`;
             }
+            if (plannedTodos.length) {
+                workBlock += `\n\nPLANNED FOR NEXT WEEK (set by the media buyer; already listed in the What We're Working On section below):\n${plannedTodos.map(t => `- ${t}`).join('\n')}`;
+            }
+
+            // The planned to-dos go into What We're Working On as fixed blocks, built here, so they
+            // can't be dropped or reworded
+            const plannedBlocksHtml = plannedTodos.map(t =>
+                `<div style="padding: 16px 0; border-bottom: 1px solid #e8e8ed;"><div style="font-size: 17px; font-weight: 600; color: #1d1d1f;">${escapeAttr(t)}</div></div>`
+            ).join('');
 
             // "What We're Working On" is always in the report. Without open tasks it would
             // otherwise be empty or invented, so the fallback wording is fixed here in code.
@@ -4571,6 +4627,10 @@ Treat this period as a fresh starting point. State every number plainly as where
             - The four KPI tiles, including their numbers and trend pills, are already filled in
               below. Copy them exactly as given. Never change a tile's number, pill text or colors.
             - The "What We're Working On" section ALWAYS appears. Never omit it. Fill it like this:
+              * If a PLANNED FOR NEXT WEEK list appears above, those items are already written into
+                the section in the template below. Copy them exactly, first, without rewording. Never
+                use the default text when they're present. Add more blocks only for other specific
+                work, and never a second block that repeats a planned item.
               * If the manual notes say what we're doing or doing next (for example "we're testing
                 new ads to find a winner"), that is a specific action. Use it, in the notes' own terms.
               * If the "CURRENTLY OPEN / STILL TO DO" list appears above, include what's coming up
@@ -4605,7 +4665,9 @@ Treat this period as a fresh starting point. State every number plainly as where
             [REQUIRED — this block is always included; see the "What We're Working On" rules above:]
             <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">What We're Working On</h2>
-            <div style="padding: 20px 0;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Working On Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Working On Details]</div></div>
+            ${plannedTodos.length ? `[COPY THESE PLANNED ITEMS EXACTLY. Then OPTIONALLY add blocks after them, in the same format as the block below, for open tasks or a specific action from the notes:]
+            ${plannedBlocksHtml}
+            ` : ''}<div style="padding: 20px 0;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Working On Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Working On Details]</div></div>
             </td></tr>
             </table></td></tr></table></body></html>
             `;
@@ -4633,7 +4695,9 @@ Treat this period as a fresh starting point. State every number plainly as where
                     const out = `${r?.email_summary || ''} ${r?.html_report || ''}`.toLowerCase().replace(/,/g, '');
                     const facts = [...new Set((n.match(/\$?\d[\d,]*(?:\.\d+)?\s?[km]?%?/gi) || [])
                         .map(x => x.replace(/\s/g, '').replace(/,/g, '').toLowerCase()))];
-                    return facts.filter(f => !out.includes(f));
+                    // Planned to-dos too: they're inserted as fixed HTML, so they must come back intact
+                    const todos = plannedTodos.filter(t => !out.includes(escapeAttr(t).toLowerCase().replace(/,/g, '')));
+                    return [...facts.filter(f => !out.includes(f)), ...todos.map(t => `"${t}"`)];
                 };
 
                 const messages = [{ role: "user", content: p }];
@@ -4642,7 +4706,7 @@ Treat this period as a fresh starting point. State every number plainly as where
                 if (missing.length) {
                     const retry = await askModel([...messages,
                         { role: "assistant", content: rawContent },
-                        { role: "user", content: `Your report left out these figures from the MEDIA BUYER'S NOTES: ${missing.join(', ')}. Every fact in the notes must appear in the report exactly as written (SEO facts go in the Organic Search section). Return the complete JSON object again with them included, changing nothing else.` }
+                        { role: "user", content: `Your report left out these items from the MEDIA BUYER'S NOTES or the PLANNED FOR NEXT WEEK list: ${missing.join(', ')}. Every fact in the notes must appear in the report exactly as written (SEO facts go in the Organic Search section), and every planned item must appear in What We're Working On exactly as written. Return the complete JSON object again with them included, changing nothing else.` }
                     ]).catch(() => null);
                     if (retry && missingNoteFacts(retry.parsed).length < missing.length) {
                         result = retry.parsed;
@@ -4650,7 +4714,7 @@ Treat this period as a fresh starting point. State every number plainly as where
                     }
                 }
                 if (missing.length) {
-                    alert(`Heads up: the report still leaves out these figures from your notes: ${missing.join(', ')}.\n\nAdd them with Edit before sending.`);
+                    alert(`Heads up: the report still leaves out these items from your notes or next week's to-dos: ${missing.join(', ')}.\n\nAdd them with Edit before sending.`);
                 }
 
                 document.getElementById('rpt-email-output').innerText = result.email_summary; 
@@ -4669,9 +4733,11 @@ Treat this period as a fresh starting point. State every number plainly as where
                     // column: the client portal reads that table with select('*'). See
                     // supabase/sql/weekly_report_inputs.sql. A failure here must not lose the
                     // report itself, which is already saved.
-                    if (n && saved?.id != null) {
+                    const typedInput = [n, plannedTodos.length ? `Next week's to-dos:\n${plannedTodos.map(t => `- ${t}`).join('\n')}` : '']
+                        .filter(Boolean).join('\n\n');
+                    if (typedInput && saved?.id != null) {
                         const { error: notesErr } = await supabaseClient.from('weekly_report_inputs')
-                            .insert({ report_id: saved.id, notes: n });
+                            .insert({ report_id: saved.id, notes: typedInput });
                         if (notesErr) console.warn("Report saved, but its notes weren't:", notesErr.message);
                     }
                     if (!document.getElementById('c-view-reports').classList.contains('hidden')) {
