@@ -20,7 +20,9 @@ select cron.schedule(
             'Content-Type',  'application/json',
             'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z250dHNxdWNldGxkbGxmZ29pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NzUyODcsImV4cCI6MjA4ODE1MTI4N30.OjUwMHZ-ZQLMtY__gktnY4RneMw7RWXLMKdHzcTWWgQ'
         ),
-        body    := '{"mode":"sync"}'::jsonb
+        body    := '{"mode":"sync"}'::jsonb,
+        -- pg_net gives up after 5s by default, far shorter than these functions run
+        timeout_milliseconds := 150000
     );
     $job$
 );
