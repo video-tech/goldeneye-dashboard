@@ -216,11 +216,23 @@
                         reportedEstimates: false,
                         reportedCloses: false,
                         reportedRevenue: false,
+                        // Jobs and revenue from the "google" source row (see CHECKIN_SOURCES).
+                        // reportedSources is false when nobody that week split by source.
+                        google_closes: 0,
+                        google_revenue: 0,
+                        reportedSources: false,
                         needsReview: false,
                         contributors: []
                     });
                 }
                 const w = byWeek.get(wk);
+
+                const g = c.closes_by_source && typeof c.closes_by_source === 'object' ? c.closes_by_source : null;
+                if (g) {
+                    w.reportedSources = true;
+                    w.google_closes += parseFloat(g.google?.closes) || 0;
+                    w.google_revenue += parseFloat(g.google?.revenue) || 0;
+                }
 
                 if (c.estimates_count !== null && c.estimates_count !== undefined) { w.estimates_count += parseFloat(c.estimates_count) || 0; w.reportedEstimates = true; }
                 if (c.closes_count    !== null && c.closes_count    !== undefined) { w.closes_count    += parseFloat(c.closes_count)    || 0; w.reportedCloses    = true; }
@@ -2105,9 +2117,56 @@ function weeklyCheckinOutstanding() {
 
 const money0 = n => '$' + Math.round(Number(n) || 0).toLocaleString();
 
+// Where a closed job came from. "google" is the SEO row: the SEO tab's "Jobs closed from
+// Google" reads it, and only it. The keys are stored in weekly_checkins.closes_by_source, so
+// don't rename them. See supabase/sql/weekly_checkins_closes_by_source.sql.
+const CHECKIN_SOURCES = [
+    { key: 'google',   label: 'Google search / your website', hint: 'Found you on Google, Google Maps or your website' },
+    { key: 'ads',      label: 'Facebook / Instagram ads',     hint: '' },
+    { key: 'referral', label: 'Referral or repeat customer',  hint: '' },
+    { key: 'other',    label: 'Other / not sure',             hint: '' }
+];
+
+// Keeps the running total under the source rows in step as they're typed
+window.updateCheckinSourceTotal = function(suffix) {
+    const el = document.getElementById(`wc-src-total-${suffix}`);
+    if (!el) return;
+    let jobs = 0, rev = 0, anyJobs = false, anyRev = false;
+    CHECKIN_SOURCES.forEach(s => {
+        const j = document.getElementById(`wc-src-${s.key}-jobs-${suffix}`)?.value.trim();
+        const r = document.getElementById(`wc-src-${s.key}-rev-${suffix}`)?.value.trim();
+        if (j) { jobs += Number(j) || 0; anyJobs = true; }
+        if (r) { rev += Number(r) || 0; anyRev = true; }
+    });
+    el.innerText = anyJobs || anyRev
+        ? `Total: ${jobs} job${jobs === 1 ? '' : 's'} · ${money0(rev)}`
+        : 'Leave blank if nothing closed. A zero week is fine, just enter 0.';
+};
+
 function weeklyCheckinFormHtml(suffix) {
     const existing = portalCheckinFor(currentActiveClient, reportingWeekStart());
     const v = f => existing?.[f] ?? '';
+
+    // Prefill each source row from a saved breakdown. A check-in saved before sources existed
+    // has only totals, so those go under "Other / not sure": they aren't lost, and they aren't
+    // guessed into Google.
+    const saved = existing?.closes_by_source && typeof existing.closes_by_source === 'object' ? existing.closes_by_source : null;
+    const legacy = !saved && existing && (existing.closes_count != null || existing.revenue_total != null)
+        ? { other: { closes: existing.closes_count, revenue: existing.revenue_total } } : null;
+    const src = saved || legacy || {};
+    const cellVal = (key, field) => src[key]?.[field] ?? '';
+
+    const sourceRows = CHECKIN_SOURCES.map(s => `
+                <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_6.5rem] gap-2 items-center">
+                    <div class="min-w-0">
+                        <span class="text-sm text-white">${s.label}</span>
+                        ${s.hint ? `<span class="block text-[11px] text-gray-500 leading-tight">${s.hint}</span>` : ''}
+                    </div>
+                    <input type="number" min="0" step="1" inputmode="numeric" id="wc-src-${s.key}-jobs-${suffix}" class="glass-input" placeholder="0"
+                        aria-label="${s.label}: jobs closed" value="${escapeAttr(cellVal(s.key, 'closes'))}" oninput="updateCheckinSourceTotal('${suffix}')">
+                    <input type="number" min="0" step="0.01" inputmode="decimal" id="wc-src-${s.key}-rev-${suffix}" class="glass-input" placeholder="$0"
+                        aria-label="${s.label}: revenue" value="${escapeAttr(cellVal(s.key, 'revenue'))}" oninput="updateCheckinSourceTotal('${suffix}')">
+                </div>`).join('');
 
     return `
         <div class="space-y-4">
@@ -2116,12 +2175,14 @@ function weeklyCheckinFormHtml(suffix) {
                 <input type="number" min="0" step="1" id="wc-estimates-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('estimates_count'))}">
             </div>
             <div>
-                <label class="modal-label">Jobs closed</label>
-                <input type="number" min="0" step="1" id="wc-closes-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('closes_count'))}">
-            </div>
-            <div>
-                <label class="modal-label">Revenue closed</label>
-                <input type="number" min="0" step="0.01" id="wc-revenue-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('revenue_total'))}">
+                <label class="modal-label">Jobs closed and revenue, by where the customer came from</label>
+                <div class="space-y-2 mt-1">
+                    <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_6.5rem] gap-2 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                        <span>Came from</span><span>Jobs</span><span>Revenue</span>
+                    </div>
+                    ${sourceRows}
+                    <p id="wc-src-total-${suffix}" class="text-xs text-gray-400 pt-1"></p>
+                </div>
             </div>
             <div>
                 <label class="modal-label">Leads that found you through the ads but came in another way</label>
@@ -2208,7 +2269,7 @@ window.renderWeeklyCheckin = function() {
     const existing = portalCheckinFor(currentActiveClient, week);
 
     const mount = document.getElementById('cp-checkin-form-mount');
-    if (mount) mount.innerHTML = weeklyCheckinFormHtml('tab');
+    if (mount) { mount.innerHTML = weeklyCheckinFormHtml('tab'); updateCheckinSourceTotal('tab'); }
 
     const head = document.getElementById('cp-checkin-heading');
     if (head) head.innerText = `Numbers for ${weekRangeLabel(week)}`;
@@ -2265,6 +2326,7 @@ window.renderWeeklyCheckin = function() {
                 <span class="text-gray-500">Estimates ${cell(w.reportedEstimates, w.estimates_count)}</span>
                 <span class="text-gray-500">Closed ${cell(w.reportedCloses, w.closes_count)}</span>
                 <span class="text-gray-500">Revenue ${cell(w.reportedRevenue, money0(w.revenue_total))}</span>
+                ${w.reportedSources ? `<span class="text-gray-500">From Google ${cell(true, `${w.google_closes} · ${money0(w.google_revenue)}`)}</span>` : ''}
                 <span class="text-gray-500">Ad-attributed ${cell(anyIndirect, indirect)}</span>
             </div>
             ${breakdown}
@@ -2281,21 +2343,39 @@ window.submitWeeklyCheckin = async function(suffix) {
         return raw === '' ? null : Number(raw);
     };
 
-    const row = {
+    // Closes and revenue are entered per source. The totals every other view reads are those
+    // rows summed, and each total stays null when no row has a value, so "not reported" still
+    // differs from a reported 0.
+    const bySource = {};
+    let closesTotal = null, revenueTotal = null;
+    CHECKIN_SOURCES.forEach(s => {
+        const closes = num(`src-${s.key}-jobs`), revenue = num(`src-${s.key}-rev`);
+        if (closes === null && revenue === null) return;
+        bySource[s.key] = { closes, revenue };
+        if (closes !== null) closesTotal = (closesTotal || 0) + closes;
+        if (revenue !== null) revenueTotal = (revenueTotal || 0) + revenue;
+    });
+
+    const numbers = {
         estimates_count: num('estimates'),
-        closes_count: num('closes'),
-        revenue_total: num('revenue'),
+        closes_count: closesTotal,
+        revenue_total: revenueTotal,
         indirect_leads: num('indirect')
     };
+    const row = { ...numbers, closes_by_source: Object.keys(bySource).length ? bySource : null };
+    const entered = [
+        numbers.estimates_count, numbers.indirect_leads,
+        ...Object.values(bySource).flatMap(x => [x.closes, x.revenue])
+    ].filter(v => v !== null);
 
     const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
     if (err) err.classList.add('hidden');
 
-    if (Object.values(row).every(v => v === null)) {
+    if (!entered.length) {
         show('Put a number in at least one box — a zero week is fine, just enter 0.');
         return;
     }
-    if (Object.values(row).some(v => v !== null && (!isFinite(v) || v < 0))) {
+    if (entered.some(v => !isFinite(v) || v < 0)) {
         show('Those need to be positive numbers.');
         return;
     }
@@ -2308,20 +2388,25 @@ window.submitWeeklyCheckin = async function(suffix) {
         const week = reportingWeekStart();
         const existing = portalCheckinFor(currentActiveClient, week);
 
-        if (existing) {
-            // Matched on the columns that identify it rather than an id, so this doesn't
-            // care whether the table has one. contact_name is part of that identity now:
-            // without it, one person's edit would overwrite a colleague's entry.
-            const { error } = await supabaseClient.from('weekly_checkins').update(row)
-                .eq('client_name', existing.client_name)
-                .eq('week_start', week)
-                .eq('source', 'portal')
-                .eq('contact_name', existing.contact_name);
-            if (error) throw error;
-            Object.assign(existing, row);
-        } else {
+        // If closes_by_source isn't in the database yet (weekly_checkins_closes_by_source.sql not
+        // run), save the totals without the split rather than losing the client's whole check-in.
+        const missingColumn = e => /closes_by_source/.test(`${e?.message || ''} ${e?.details || ''}`);
+        const save = async (values) => {
+            if (existing) {
+                // Matched on the columns that identify it rather than an id, so this doesn't
+                // care whether the table has one. contact_name is part of that identity now:
+                // without it, one person's edit would overwrite a colleague's entry.
+                const { error } = await supabaseClient.from('weekly_checkins').update(values)
+                    .eq('client_name', existing.client_name)
+                    .eq('week_start', week)
+                    .eq('source', 'portal')
+                    .eq('contact_name', existing.contact_name);
+                if (error) return error;
+                Object.assign(existing, values);
+                return null;
+            }
             const payload = {
-                ...row,
+                ...values,
                 client_name: currentActiveClient,
                 week_start: week,
                 source: 'portal',
@@ -2330,9 +2415,17 @@ window.submitWeeklyCheckin = async function(suffix) {
                 parse_confidence: 'high'
             };
             const { data, error } = await supabaseClient.from('weekly_checkins').insert([payload]).select();
-            if (error) throw error;
+            if (error) return error;
             if (data?.length) globalCheckinsData.push(...data);
+            return null;
+        };
+
+        let saveErr = await save(row);
+        if (saveErr && missingColumn(saveErr)) {
+            console.warn('weekly_checkins.closes_by_source is missing; saved totals without the source split.', saveErr);
+            saveErr = await save(numbers);
         }
+        if (saveErr) throw saveErr;
 
         closeWeeklyCheckinModal();
         renderWeeklyCheckin();
@@ -2374,7 +2467,7 @@ window.maybeShowWeeklyCheckin = function() {
     if (range) range.innerText = weekRangeLabel(reportingWeekStart());
 
     const mount = document.getElementById('cp-checkin-modal-mount');
-    if (mount) mount.innerHTML = weeklyCheckinFormHtml('modal');
+    if (mount) { mount.innerHTML = weeklyCheckinFormHtml('modal'); updateCheckinSourceTotal('modal'); }
 
     const m = document.getElementById('weekly-checkin-modal');
     if (m) m.style.display = 'flex';

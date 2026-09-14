@@ -1037,7 +1037,22 @@ real client data; see the Known gaps entry on that.
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
-tracked), `source`, `contact_name`. Reporting week is the **completed** Mon–Sun.
+tracked), `source`, `contact_name`.
+
+**Closes and revenue are entered by source (added 2026-09-14)**, in four rows: Google search /
+your website, Facebook / Instagram ads, Referral or repeat customer, Other / not sure
+(`CHECKIN_SOURCES` in app.js). The split is saved to `closes_by_source jsonb`
+(`supabase/sql/weekly_checkins_closes_by_source.sql`) as `{google: {closes, revenue}, ...}`, with
+only filled rows present. **`closes_count` / `revenue_total` are still written, as the row sums**,
+so every existing reader (reports, leaderboard, health, admin views) is unchanged. A total
+stays null when no row has a value, so "not reported" still differs from a reported 0. The
+`google` row is what the SEO tab's "Jobs closed from Google" reads. Don't rename the keys.
+- **Old check-ins:** editing one saved before sources existed prefills its totals under
+  *Other / not sure*, never Google.
+- **Text check-ins:** no breakdown (null). The SEO tab counts them as "source not given".
+- **Missing column:** if `closes_by_source` isn't in the database, the submit retries without
+  it, so a client's totals are never lost to a schema that's behind.
+- The check-in history shows "From Google" for weeks with a breakdown. 16 checks. Reporting week is the **completed** Mon–Sun.
 **One row per person** — several reps per client, totals sum them. Reports tab stays
 locked until the week's numbers are in. Reminder recipients come from `client_contacts`,
 which the `team` onboarding step writes to.
