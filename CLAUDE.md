@@ -64,10 +64,10 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
 6. **Admin alerts** — Supabase trigger on `Client Request` tasks → webhook → SMS to us.
    **Unfinished**: trigger + recipients live, Make scenario needs iterator + send modules
 7. **Report draft to Gmail** — the "Draft" button on a saved report (`sendSavedReportToMake`,
-   app.js) POSTs `{client, subject, full_email_html, to_email[]}` to
+   app.js) sends `{client, subject, full_email_html, to_email[]}` through **`make-relay`** to
    `hook.us2.make.com/apq7ghcun1hza8h5ayw1xysy81nddh8v`, which drafts the email
-8. **Ad previews** — `submitAdForApproval` / `refreshAdPreviews` POST
-   `{approval_id, ad_id, client_name, ad_name}` to
+8. **Ad previews** — `submitAdForApproval` / `refreshAdPreviews` send
+   `{approval_id, ad_id, client_name, ad_name}` (form-encoded) through **`make-relay`** to
    `hook.us2.make.com/2kan16ro46vkcxsubi90aaobv1ym1fxg` → three HTTP calls to
    `graph.facebook.com/v21.0/{ad_id}/previews` (one per placement) → upsert
    `ad_approvals`. See **Ad approvals** below
@@ -78,10 +78,11 @@ leads got an "onboarding complete" text (see `trg_onboarding_handoff`). So **eve
 filters on a `secret` field right after its webhook**, and every caller supplies it:
 - **Postgres functions** read it from Supabase Vault (`make_onboarding_hook_secret`).
 - **Edge functions** read the `MAKE_WEBHOOK_SECRET` secret. It's the same value.
-- **The browser must never call Make directly**, because a secret in `app.js` is public. That's
-  what `supabase/functions/make-relay` is for: admin-only, named hooks, allow-listed fields, and
-  it attaches the secret. **Built but not deployed yet**, so #7 and #8 still post straight from
-  the browser and can't be filtered until it lands.
+- **The browser never calls Make directly**, because a secret in `app.js` is public.
+  `callMakeRelay(hook, payload)` posts to `supabase/functions/make-relay`, which requires a
+  signed-in admin, forwards only named hooks and allow-listed fields, and attaches the
+  secret. A new browser-triggered scenario needs an entry in its `HOOKS` table.
+  **Deploy `make-relay` before pushing `app.js`.**
 
 **Audit of every live scenario, 2026-09-15**, read through the Make MCP connection (Claude can list
 and read scenarios, executions and blueprints; the Make account is `video@midasmediafirm.com`,

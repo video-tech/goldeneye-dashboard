@@ -193,10 +193,14 @@ async function sendCriticalAlert(db: any, signals: any[]) {
     // Never let a failed webhook lose the audit card already saved by the caller — log
     // and move on, exactly like the exception block in notify_admins_client_request().
     try {
+        // The hook URL is in this public repo, so Make's scenario filters on this secret (see
+        // CLAUDE.md, the 2026-09-11 onboarding-text incident). An unset secret still sends,
+        // and Make drops it, which is the safe direction for an alert to ourselves.
         const res = await fetch(ADMIN_ALERT_WEBHOOK, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+                secret: Deno.env.get("MAKE_WEBHOOK_SECRET") ?? "",
                 event: "morning_audit_critical",
                 kind: "morning_audit_critical",
                 message,

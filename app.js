@@ -1298,7 +1298,23 @@ window.obSaveTeam = async function(stepId, justMe) {
 // The preview URL carries a token, so Make fetches it server-side and writes the result
 // here — the browser never holds Meta credentials. Those URLs also expire, which is why
 // preview_fetched_at is recorded and stale rows can be re-requested.
-const AD_PREVIEW_HOOK = 'https://hook.us2.make.com/2kan16ro46vkcxsubi90aaobv1ym1fxg';
+// Make webhooks are never called from the browser directly. Their URLs would be in the page
+// source, and anyone holding one can run the scenario, which is how 10 leads got an
+// "onboarding complete" text (CLAUDE.md). make-relay checks the caller is an admin, adds
+// the secret Make's filters require, and forwards the request.
+const MAKE_RELAY_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/make-relay';
+async function callMakeRelay(hook, payload) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+    const res = await fetch(MAKE_RELAY_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ hook, payload })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || `the relay returned ${res.status}`);
+    return data;
+}
 
 // Meta's placement identifiers, with names a person would use
 const AD_PLACEMENT_LABELS = {
@@ -1411,25 +1427,14 @@ function adStatusBadge(status) {
 // status is deliberately absent: re-fetching previews must never overwrite a decision
 // the client has already made.
 async function requestAdPreviews(approvalId, adId, row) {
-    if (AD_PREVIEW_HOOK.includes('REPLACE_WITH')) {
-        console.warn('Ad preview webhook not configured yet — row saved, previews will stay empty.');
-        return;
-    }
-    // Form-encoded, not JSON. Make's webhooks send no CORS headers, so this has to be a
-    // no-cors request — and no-cors permits only a few Content-Type values. Setting
-    // application/json there gets silently downgraded to text/plain, which Make can't
-    // parse: the whole body arrives as a single field called "value" instead of named
-    // fields. URLSearchParams sends a Content-Type that survives, so Make sees the keys.
+    // Through make-relay, which still sends Make form-encoded fields, so the scenario's
+    // mappings are unchanged
     try {
-        await fetch(AD_PREVIEW_HOOK, {
-            method: 'POST',
-            mode: 'no-cors',
-            body: new URLSearchParams({
-                approval_id: String(approvalId),
-                ad_id: String(adId),
-                client_name: row?.client_name || '',
-                ad_name: row?.ad_name || ''
-            })
+        await callMakeRelay('ad_preview', {
+            approval_id: String(approvalId),
+            ad_id: String(adId),
+            client_name: row?.client_name || '',
+            ad_name: row?.ad_name || ''
         });
     } catch (e) {
         console.error('Could not reach the preview webhook:', e);
@@ -5291,15 +5296,7 @@ Treat this period as a fresh starting point. State every number plainly as where
             };
 
             try {
-                const webhookUrl = 'https://hook.us2.make.com/apq7ghcun1hza8h5ayw1xysy81nddh8v';
-                
-                const response = await fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) throw new Error("Webhook failed");
+                await callMakeRelay('report_draft', payload);
 
                 btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i> Draft Created!';
                 btn.classList.replace('bg-blue-600', 'bg-green-600');
@@ -7346,14 +7343,7 @@ window.openEditReportModal = function(id) {
                     to_email: emailArray // Using the Array format that works perfectly with your scenario
                 };
 
-                const webhookUrl = 'https://hook.us2.make.com/apq7ghcun1hza8h5ayw1xysy81nddh8v';
-                const response = await fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) throw new Error("Make.com rejected the webhook. Check your scenario history.");
+                await callMakeRelay('report_draft', payload);
 
                 // Success visual feedback on the button
                 btn.innerHTML = '<i class="fa-solid fa-check"></i> Sent';
