@@ -5074,7 +5074,7 @@ Treat this period as a fresh starting point. State every number plainly as where
                  <div class="flex flex-wrap items-center gap-2">
                      <span class="text-[10px] font-bold uppercase tracking-widest" style="color:${kind.color}">${kind.label}</span>
                      <span class="text-[11px] text-gray-500">${escapeAttr(date)}</span>
-                     ${['webflow', 'wix', 'git'].includes(x.created_by) ? `<span class="text-[9px] uppercase tracking-widest text-gray-400 border border-white/15 rounded px-1" title="Logged automatically when the article was published">auto · ${({ webflow: 'Webflow', wix: 'Wix', git: 'Git' })[x.created_by]}</span>` : ''}
+                     ${SEO_PLATFORM_LABEL[x.created_by] ? `<span class="text-[9px] uppercase tracking-widest text-gray-400 border border-white/15 rounded px-1" title="Logged automatically when the article was published">auto · ${SEO_PLATFORM_LABEL[x.created_by]}</span>` : ''}
                  </div>
                  <div class="text-sm text-white font-semibold break-words">${escapeAttr(x.title)}</div>
                  ${safeUrl ? `<a href="${escapeAttr(safeUrl)}" target="_blank" rel="noopener" class="text-xs text-blue-400 hover:underline break-all">${escapeAttr(safeUrl)}</a>` : ''}
@@ -5202,7 +5202,7 @@ Treat this period as a fresh starting point. State every number plainly as where
      document.querySelectorAll('.seo-al-webflow').forEach(el => el.classList.toggle('hidden', platform === 'wix'));
      document.querySelectorAll('.seo-al-git').forEach(el => el.classList.toggle('hidden', platform !== 'git'));
  };
- const SEO_PLATFORM_LABEL = { webflow: 'Webflow', wix: 'Wix', git: 'Git' };
+ const SEO_PLATFORM_LABEL = { webflow: 'Webflow', wix: 'Wix', git: 'Git', sanity: 'Sanity' };
 
  async function fillSeoAutologPanel() {
      const cfg = seoAutologConfig;
@@ -5246,7 +5246,14 @@ Treat this period as a fresh starting point. State every number plainly as where
      box.classList.toggle('hidden', !cfg);
      if (!cfg) return;
      document.getElementById('seo-al-url').value = `${SEO_WEBHOOK_FN}?t=${cfg.token}`;
-     const steps = cfg.platform === 'git'
+     const steps = cfg.platform === 'sanity'
+         ? ['Copy the link above.',
+            'Open <b>sanity.io/manage</b>, pick the project the articles are written into, then <b>API → Webhooks → Create webhook</b>.',
+            'URL: paste the link. Dataset: <b>production</b>. Trigger on: <b>Create</b> only. HTTP method: <b>POST</b>. Leave drafts and versions off.',
+            'Filter: <code class="font-mono text-gray-300">_type == "post"</code>',
+            'Projection: <code class="font-mono text-gray-300">{_id, title, "slug": coalesce(slug.current, slug), "publishedAt": coalesce(publishedAt, _createdAt)}</code>',
+            'Save. The next article published into Sanity appears here with an "auto · Sanity" badge.']
+         : cfg.platform === 'git'
          ? ['Copy the link above.',
             'In the site\'s GitHub repo, open Settings → <b>Webhooks</b> → <b>Add webhook</b>.',
             'Payload URL: paste the link. Content type: <b>application/json</b>. Events: <b>Just the push event</b>. Save.',

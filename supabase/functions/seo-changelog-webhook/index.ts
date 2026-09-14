@@ -27,9 +27,9 @@
 // Schema:  schema.sql in this folder, then supabase/sql/rename_client.sql.
 // Secret:  SEO_WEBHOOK_SECRET, only needed by ?k= URLs.
 
-import { checkTokenClient, domainOf, liveDateOf, parseGitPush, parseWebflow, parseWix, resolveClient, siteHost, titleFromSource, type Article } from "./parse.ts";
+import { checkTokenClient, domainOf, liveDateOf, parseGitPush, parseSanity, parseWebflow, parseWix, resolveClient, siteHost, titleFromSource, type Article } from "./parse.ts";
 
-type Config = { client_name: string; platform: "webflow" | "wix" | "git"; blog_path: string | null; collection_id: string | null; content_path: string | null };
+type Config = { client_name: string; platform: "webflow" | "wix" | "git" | "sanity"; blog_path: string | null; collection_id: string | null; content_path: string | null };
 
 // A Git push lists file paths, not titles. Fetch each new file and use its own title. Public repos
 // need nothing, and a private repo needs a GITHUB_TOKEN secret with read access. On any failure
@@ -194,7 +194,7 @@ Deno.serve(async (req: Request) => {
             path: url.searchParams.get("path"),
             collection: url.searchParams.get("collection"),
         };
-    const source = params.source === "wix" || params.source === "webflow" || params.source === "git"
+    const source = params.source === "wix" || params.source === "webflow" || params.source === "git" || params.source === "sanity"
         ? params.source
         : (body && typeof body === "object" && "triggerType" in body ? "webflow" : "wix");
 
@@ -220,6 +220,9 @@ Deno.serve(async (req: Request) => {
 
         const parsed = source === "webflow"
             ? parseWebflow(body, { site: params.site, path: params.path, collection: params.collection })
+            : source === "sanity"
+            ? (config ? parseSanity(body, { site: params.site, path: params.path })
+                      : { ok: false as const, reason: "Sanity sites need a per-client link from the SEO tab" })
             : source === "git"
             // Git only through a per-client token: its content folder lives in the config
             ? (config ? parseGitPush(body, req.headers.get("x-github-event"), { site: params.site, path: params.path, contentPath: config.content_path })

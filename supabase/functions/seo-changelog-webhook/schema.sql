@@ -90,7 +90,9 @@ notify pgrst, 'reload schema';
 alter table seo_webhook_configs add column if not exists content_path text;
 alter table seo_webhook_configs drop constraint if exists seo_webhook_configs_platform_check;
 alter table seo_webhook_configs add constraint seo_webhook_configs_platform_check
-    check (platform in ('webflow', 'wix', 'git'));
+    check (platform in ('webflow', 'wix', 'git', 'sanity'));
+-- 'sanity' added the same day, for sites whose articles live in Sanity (Midas's own site, where
+-- Cuppa writes posts into the "midas cuppa" project). Re-running this block is all it needs.
 
 notify pgrst, 'reload schema';
 

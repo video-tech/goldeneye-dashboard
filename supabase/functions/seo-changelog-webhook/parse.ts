@@ -17,7 +17,7 @@
 // exactly what arrived.
 
 export interface Article {
-    source: "webflow" | "wix" | "git";
+    source: "webflow" | "wix" | "git" | "sanity";
     ref: string;          // stable per article, so a republish can't log it twice
     title: string;
     url: string | null;
@@ -161,6 +161,40 @@ export function parseWix(body: any): ParseResult {
             url,
             host: hostOf(url),
             published_at: str(findKey(body, ["firstPublishedDate", "publishedDate", "lastPublishedDate", "publishDate", "published_at"])),
+        }],
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Sanity (a headless CMS feeding a static site, e.g. Midas's own Eleventy site)
+// ---------------------------------------------------------------------------
+// A Sanity GROQ webhook, triggered on Create, filtered to posts. The setup steps give it this
+// projection, so the body is small and predictable:
+//   {_id, title, "slug": coalesce(slug.current, slug), "publishedAt": coalesce(publishedAt, _createdAt)}
+// Without a projection Sanity sends the whole document, which is also accepted. slug can be
+// Sanity's usual {current} object or a plain string. Midas's Cuppa-written posts use a string,
+// checked against the live dataset on 2026-09-14. Some posts have no publishedAt, so
+// _createdAt is the fallback. Draft and release-version ids never went live, so they're ignored.
+export function parseSanity(body: any, params: { site: string | null; path: string | null }): ParseResult {
+    if (!body || typeof body !== "object") return { ok: false, reason: "Sanity body is not JSON" };
+    const id = str(body._id);
+    if (!id) return { ok: false, reason: "no _id in the Sanity payload (add the projection from the setup steps)" };
+    if (/^(drafts|versions)\./.test(id)) return { ok: false, reason: "a draft, not a published document" };
+    const title = str(body.title);
+    if (!title) return { ok: false, reason: "no title in the Sanity payload" };
+    const slug = str(typeof body.slug === "object" && body.slug ? body.slug.current : body.slug);
+    const host = siteHost(params.site);
+    const prefix = str(params.path) === "/" ? "" : (str(params.path)?.replace(/^\/*/, "/").replace(/\/+$/, "") ?? null);
+    return {
+        ok: true,
+        articles: [{
+            source: "sanity",
+            ref: `sanity:${id}`,
+            title: title.slice(0, 200),
+            url: host && slug && prefix !== null ? `https://${host}${prefix}/${slug}` : null,
+            host,
+            published_at: str(body.publishedAt) ?? str(body._createdAt),
+            slug,
         }],
     };
 }

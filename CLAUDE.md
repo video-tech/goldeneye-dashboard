@@ -970,7 +970,7 @@ real client data; see the Known gaps entry on that.
   lands on the first plotted day on or after its date, and same-day markers stack. URLs are
   only linked when they're http(s). No SQL was needed, since the table and its admin write
   policy already existed from `seranking-sync/schema.sql`.
-- **Articles published on Webflow, Wix or a GitHub-based site log themselves (built 2026-09-14).** Setup
+- **Articles published on Webflow, Wix, Sanity or a GitHub-based site log themselves (built 2026-09-14).** Setup
   is on the SEO tab: **Auto-log articles**, on the changelog panel.
   `supabase/functions/seo-changelog-webhook/` takes the site's own publish event, not Cuppa's.
   Cuppa only stages a Webflow post, and the changelog records when work went live.
@@ -1003,6 +1003,18 @@ real client data; see the Known gaps entry on that.
     every authenticated request is recorded with its outcome and a scrubbed payload. Only admins
     can read it, and it's not in `rename_client.sql` because `client_name` there is
     informational.
+  - **Sanity, added 2026-09-14. Midas's own site uses it.** midasmediafirm.com is Eleventy
+    (`src/_data/posts.js` fetches, `src/post.njk` renders), with articles in the Sanity project
+    **"midas cuppa"** (`n37ohuk0`, dataset `production`, type `post`, 42 posts as of
+    2026-09-14). Cuppa writes posts there, and they're served at `/resources/<slug>`. The repo has
+    no article files, so the Git option can't see new posts for this site. Setup is a Sanity
+    webhook (manage → API → Webhooks) to the client's `?t=` link: trigger **Create**, filter
+    `_type == "post"`, projection
+    `{_id, title, "slug": coalesce(slug.current, slug), "publishedAt": coalesce(publishedAt, _createdAt)}`.
+    Cuppa's posts store `slug` as a plain string, not Sanity's usual `{current}`, and some have
+    no `publishedAt`, both checked against the live dataset. `drafts.`/`versions.` ids are
+    ignored. `source_ref` is `sanity:<_id>`. The older "midas" project (`30tk2q5k`) is
+    disabled. 9 checks.
   - **Git (Jamstack sites), added 2026-09-14:** a GitHub repo webhook (push event,
     application/json) to the same `?t=` link. A new article is a `.md/.mdx/.markdown/.html`
     file **added** under the client's `content_path` in a push to the repo's default branch.
@@ -1017,7 +1029,7 @@ real client data; see the Known gaps entry on that.
   - **First-version URLs** (`?k=<SEO_WEBHOOK_SECRET>&source=&site=&path=&collection=`) still
     work, matched to a client by domain. 3Sixty's Webflow webhook uses one.
   - **Tests:** parsing is in dependency-free `parse.ts`. 38 checks (26 on the first version,
-    12 on the token path, 22 on Git).
+    12 on the token path, 22 on Git, 9 on Sanity).
 - **Not yet built:** the keyword manager. `seo_keywords` is currently populated only by
   `seranking-sync`'s sync, with no admin-side add/retire form yet, even though its RLS already
   allows admin writes. The changelog isn't in the weekly report or the client portal yet either.
