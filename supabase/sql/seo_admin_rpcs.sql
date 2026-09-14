@@ -114,7 +114,9 @@ returns table (
     keyword text, target_page text,
     rank int, map_rank int, rank_date date, ranking_url text,
     prior_rank int, prior_map_rank int,
-    gsc_clicks bigint, gsc_impressions bigint, gsc_position numeric
+    gsc_clicks bigint, gsc_impressions bigint, gsc_position numeric,
+    -- added 2026-09-14 (needs seo_client_tab.sql first): SE Ranking's monthly searches and CPC
+    search_volume integer, cpc numeric
 )
 language sql stable
 set search_path = public
@@ -123,7 +125,8 @@ as $$
         k.keyword, k.target_page,
         cur.organic_rank, cur.map_rank, cur.date, cur.ranking_url,
         pri.organic_rank, pri.map_rank,
-        coalesce(q.clicks, 0), coalesce(q.impressions, 0), q.weighted_position
+        coalesce(q.clicks, 0), coalesce(q.impressions, 0), q.weighted_position,
+        k.search_volume, k.cpc
     from seo_keywords k
     left join lateral (
         select src.date,

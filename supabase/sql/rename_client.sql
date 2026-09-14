@@ -106,6 +106,8 @@ begin
     -- Added 2026-09-14 with article auto-logging (seo-changelog-webhook/schema.sql). Run that
     -- schema first: this table must exist before a rename runs.
     update seo_webhook_configs        set client_name = new_name where client_name = old_name;
+    -- Added 2026-09-14 with the client SEO tab data (supabase/sql/seo_client_tab.sql):
+    update seo_project_daily          set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users

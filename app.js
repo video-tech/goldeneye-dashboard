@@ -7773,6 +7773,8 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-gbp-location').value = c.gbp_location_id || '';
     document.getElementById('edit-client-ghl-location').value = c.ghl_location_id || '';
     document.getElementById('edit-client-seranking-site').value = c.seranking_site_id || '';
+    document.getElementById('edit-client-seo-start').value = c.seo_start_date || '';
+    document.getElementById('edit-client-seo-fee').value = c.seo_monthly_fee ?? '';
     // Cleared on open, not left showing the previous client's verdict — a stale green
     // "Connected" against a different client is worse than no answer at all.
     document.getElementById('seo-connection-result').innerHTML = '';
@@ -8048,10 +8050,20 @@ window.saveClientEdits = async function(e) {
             ghl_location_id: document.getElementById('edit-client-ghl-location').value.trim() || null,
             // SE Ranking's project id is purely numeric — parseInt over Number so a stray
             // trailing character (a pasted URL fragment) doesn't turn the whole value NaN.
-            seranking_site_id: parseInt(document.getElementById('edit-client-seranking-site').value, 10) || null
+            seranking_site_id: parseInt(document.getElementById('edit-client-seranking-site').value, 10) || null,
+            seo_start_date: document.getElementById('edit-client-seo-start').value || null,
+            // Blank means no fee on record, which hides the return-per-dollar figure. 0 is a real value.
+            seo_monthly_fee: (() => { const v = document.getElementById('edit-client-seo-fee').value.trim(); return v === '' || !isFinite(Number(v)) || Number(v) < 0 ? null : Number(v); })()
         };
 
-        const { error } = await supabaseClient.from('clients').update(payload).eq('id', id);
+        let { error } = await supabaseClient.from('clients').update(payload).eq('id', id);
+        // Before supabase/sql/seo_client_tab.sql has run, the two SEO columns don't exist, and
+        // PostgREST rejects the whole update. Save everything else rather than block every client edit.
+        if (error && /seo_start_date|seo_monthly_fee/.test(`${error.message || ''} ${error.details || ''}`)) {
+            console.warn('clients.seo_start_date / seo_monthly_fee missing: run seo_client_tab.sql. Saved without them.', error);
+            const { seo_start_date, seo_monthly_fee, ...rest } = payload;
+            ({ error } = await supabaseClient.from('clients').update(rest).eq('id', id));
+        }
         if (error) throw error;
 
         // After the rename, so contacts are filed under the client's current name

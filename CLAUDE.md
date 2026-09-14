@@ -892,6 +892,36 @@ string does.
   the day a keyword was added, not 16 months ago, so a rolling 35-day window on every run
   is enough to never miss a day even after a missed run — there's no month-by-month walk
   to build.
+- **Added 2026-09-14 for the client SEO tab** (`supabase/sql/seo_client_tab.sql`; run it before
+  deploying the sync, since the sync writes the new columns):
+  - **Keyword metrics:** the positions response's `volume`, `cpc` (falling back to `suggested_bid`)
+    and `competition` are saved on `seo_keywords`. SE Ranking reports volume 0 for searches too
+    small to measure, which is stored as null.
+  - **Ranking pages:** positions are requested with `with_landing_pages=1`. Without it SE Ranking
+    omits landing pages, and every `ranking_url` was null even after the parser fix.
+  - **Daily snapshot:** `/sites/summary` goes into `seo_project_daily` (visibility %, top-5/10/30,
+    avg position, authority from `domain_trust` or the documented `da`, pages indexed).
+  - **Room to grow:** `/analytics/seo-potential?top_n=3` (extra traffic and its ad value) is fetched
+    at most once every 7 days.
+  - **Failure handling:** a snapshot failure doesn't fail the rank sync. It's reported as
+    `snapshot error: …` in `last_error`.
+  - **Unit cost:** baseline before the first run with these was 23,000 units left, so check what
+    the daily snapshot costs before adding more.
+- **Client tab calculations** in the same file, all SECURITY INVOKER so client RLS applies:
+  - `seo_client_overview` returns, in one row: visits, leads from Google (`lead_sources` organic,
+    Denver day), jobs and revenue from Google (`weekly_checkins.closes_by_source->'google'`,
+    normalized name match), the ROI multiple (Google revenue ÷ `seo_monthly_fee` pro-rated to the
+    window), target searches on page 1 (organic 1–10 or map pack, on each keyword's latest check day),
+    ad-equivalent value (matched query clicks × keyword CPC plus remaining clicks × median CPC), and
+    the latest snapshot and room to grow.
+  - `seo_since_start` compares the 30 days before `clients.seo_start_date` with the latest 30
+    finalized days.
+  - `seo_keyword_distribution` gives weekly position buckets, where a map pack spot counts at its
+    pack position.
+  - `seo_keyword_summary` now also returns `search_volume` and `cpc`.
+  - **Tests:** 28 known-answer checks run the real SQL in PGlite (in-memory Postgres). Parser: 12 more.
+- `clients.seo_start_date` and `clients.seo_monthly_fee` are edited in Edit Client. A client save
+  retries without them if the columns aren't there yet.
 - Scheduled at `0 19 * * *` (`seranking-sync/schedule.sql`) — an hour after `seo-sync`'s
   daily pull, so the admin tab's GSC and SE Ranking numbers for a given day are never a mix
   of one finished run and one partial one.

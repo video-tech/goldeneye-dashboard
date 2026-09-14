@@ -18,7 +18,7 @@
 // Schema:  seranking-sync/schema.sql, then supabase/sql/rename_client.sql
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { parseKeywords, parsePositions, parseSearchEngines } from "./parse.ts";
+import { parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, type KeywordMetricRow } from "./parse.ts";
 
 const API_BASE = "https://api.seranking.com/v1/project-management";
 
@@ -114,11 +114,22 @@ async function syncClient(db: any, key: string, client: { name: string; serankin
     const dateFrom = new Date(Date.now() - HISTORY_DAYS * 86400000).toISOString().slice(0, 10);
 
     let checksWritten = 0;
+    const metricsByKeyword = new Map<string, KeywordMetricRow>();
     for (const engine of engines) {
+        // with_landing_pages=1: SE Ranking only includes each keyword's ranking page when asked.
+        // Without it, every ranking_url is stored null.
         const raw = await seRankingGet(
             key,
-            `/sites/positions?site_id=${siteId}&site_engine_id=${engine.site_engine_id}&date_from=${dateFrom}&date_to=${dateTo}`,
+            `/sites/positions?site_id=${siteId}&site_engine_id=${engine.site_engine_id}&date_from=${dateFrom}&date_to=${dateTo}&with_landing_pages=1`,
         );
+        // Volume and CPC ride along in the same response. Across locations, the highest figure wins.
+        for (const m of parseKeywordMetrics(raw, keywordById)) {
+            const prev = metricsByKeyword.get(m.keyword);
+            const hi = (a: number | null, b: number | null) => a == null ? b : b == null ? a : Math.max(a, b);
+            metricsByKeyword.set(m.keyword, prev
+                ? { keyword: m.keyword, search_volume: hi(prev.search_volume, m.search_volume), cpc: hi(prev.cpc, m.cpc), competition: hi(prev.competition, m.competition) }
+                : m);
+        }
         const checks = parsePositions(raw, keywordById);
         if (!checks.length) continue;
         await upsertChunked(db, "seo_rank_checks", checks.map((c) => ({
@@ -133,7 +144,55 @@ async function syncClient(db: any, key: string, client: { name: string; serankin
         checksWritten += checks.length;
     }
 
-    return { engines: engines.length, keywords: keywords.length, rank_checks: checksWritten };
+    if (metricsByKeyword.size) {
+        const now = new Date().toISOString();
+        await upsertChunked(db, "seo_keywords", [...metricsByKeyword.values()].map((m) => ({
+            client_name: client.name,
+            keyword: m.keyword,
+            search_volume: m.search_volume,
+            cpc: m.cpc,
+            competition: m.competition,
+            metrics_updated_at: now,
+        })), "client_name,keyword");
+    }
+
+    // The daily snapshot is extra: a failure here must not undo a rank sync that already
+    // succeeded, so it reports its own error instead of throwing.
+    let snapshot: string = "ok";
+    try {
+        snapshot = await syncProjectSnapshot(db, key, client, siteId);
+    } catch (err) {
+        snapshot = `error: ${String((err as Error)?.message ?? err).slice(0, 300)}`;
+    }
+
+    return { engines: engines.length, keywords: keywords.length, rank_checks: checksWritten, keyword_metrics: metricsByKeyword.size, snapshot };
+}
+
+// One row a day per client: SE Ranking's visibility and authority, for the SEO tab's trend lines.
+// SEO potential ("room to grow") changes slowly and may cost API units, so it's fetched at most
+// once every 7 days, and days between keep null in those columns.
+async function syncProjectSnapshot(db: any, key: string, client: { name: string }, siteId: number): Promise<string> {
+    const today = new Date().toISOString().slice(0, 10);
+    const summary = parseSummary(await seRankingGet(key, `/sites/summary?site_id=${siteId}`));
+    const row: Record<string, unknown> = { client_name: client.name, date: today, ...summary, synced_at: new Date().toISOString() };
+
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const { data: recent, error } = await db.from("seo_project_daily")
+        .select("date").eq("client_name", client.name).gte("date", weekAgo)
+        .not("seo_potential_value", "is", null).limit(1);
+    if (error) throw new Error(`seo_project_daily read: ${error.message}`);
+
+    let potential = "skipped (fetched in the last 7 days)";
+    if (!recent?.length) {
+        const p = parsePotential(await seRankingGet(key, `/analytics/seo-potential?site_id=${siteId}&top_n=3`));
+        row.seo_potential_traffic = p.traffic;
+        row.seo_potential_value = p.value;
+        potential = "fetched";
+    }
+
+    const { error: upErr } = await db.from("seo_project_daily").upsert([row], { onConflict: "client_name,date" });
+    if (upErr) throw new Error(`seo_project_daily: ${upErr.message}`);
+    return `ok (potential ${potential})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +269,10 @@ Deno.serve(async (req: Request) => {
         for (const c of clients) {
             try {
                 const counts = await syncClient(db, key, c);
-                await saveState(db, c.name, { last_daily_run: new Date().toISOString().slice(0, 10), last_error: null });
+                // Rank data synced. A snapshot failure is still surfaced in last_error, marked so
+                // it's clearly not the rank sync failing.
+                const snapErr = String(counts.snapshot).startsWith("error:") ? `snapshot ${counts.snapshot}` : null;
+                await saveState(db, c.name, { last_daily_run: new Date().toISOString().slice(0, 10), last_error: snapErr });
                 results[c.name] = counts;
             } catch (err) {
                 // One client's rate limit or a shape SE Ranking changed must never stop the

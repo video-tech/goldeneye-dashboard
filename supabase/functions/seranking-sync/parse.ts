@@ -127,3 +127,94 @@ export function parsePositions(raw: unknown, keywordById: Map<number, string>): 
     }
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// Keyword metrics: search volume and cost per click
+// ---------------------------------------------------------------------------
+// The positions response already carries these per keyword, and the first version threw them
+// away. Real 3Sixty response (2026-09-14): {"volume":170,"competition":0.95,"suggested_bid":13.5,
+// "cpc":13.5,...}. SE Ranking's docs show only suggested_bid, so cpc falls back to it. Volume 0
+// is how SE Ranking reports a search too small to measure, so it's stored as null (unknown), not
+// as "nobody searches this". A keyword tracked in several locations keeps its highest figures.
+export interface KeywordMetricRow {
+    keyword: string;
+    search_volume: number | null;
+    cpc: number | null;
+    competition: number | null;
+}
+
+export function parseKeywordMetrics(raw: unknown, keywordById: Map<number, string>): KeywordMetricRow[] {
+    const byKeyword = new Map<string, KeywordMetricRow>();
+    const pos = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
+    const max = (a: number | null, b: number | null) => a == null ? b : b == null ? a : Math.max(a, b);
+    for (const engine of asArray(raw)) {
+        for (const kw of Array.isArray(engine?.keywords) ? engine.keywords : []) {
+            const keyword = keywordById.get(Number(kw?.id));
+            if (!keyword) continue;
+            const row = {
+                keyword,
+                search_volume: pos(kw?.volume),
+                cpc: pos(kw?.cpc) ?? pos(kw?.suggested_bid),
+                competition: pos(kw?.competition),
+            };
+            const prev = byKeyword.get(keyword);
+            byKeyword.set(keyword, prev ? {
+                keyword,
+                search_volume: max(prev.search_volume, row.search_volume),
+                cpc: max(prev.cpc, row.cpc),
+                competition: max(prev.competition, row.competition),
+            } : row);
+        }
+    }
+    return [...byKeyword.values()];
+}
+
+// ---------------------------------------------------------------------------
+// Project summary: one daily snapshot of visibility and authority
+// ---------------------------------------------------------------------------
+// GET /sites/summary?site_id=. Real 3Sixty response (2026-09-14): {"site_id":12904139,"process":40,
+// "today_avg":71,"yesterday_avg":63,"top5":0,"top10":0,"top30":1,"visibility":0,
+// "visibility_percent":0,"index_google":"102","domain_trust":7}. SE Ranking's docs name the
+// authority field "da" instead, so both are read. index_google arrives as a string.
+export interface ProjectSnapshot {
+    visibility_percent: number | null;
+    visibility: number | null;
+    top5: number | null;
+    top10: number | null;
+    top30: number | null;
+    avg_position: number | null;
+    domain_trust: number | null;
+    pages_indexed: number | null;
+}
+
+export function parseSummary(raw: unknown): ProjectSnapshot {
+    const body: any = Array.isArray(raw) ? raw[0] : (raw && typeof raw === "object" && (raw as any).data && !Array.isArray((raw as any).data) ? (raw as any).data : raw);
+    if (!body || typeof body !== "object") throw new Error(`expected a project summary, got: ${JSON.stringify(raw).slice(0, 300)}`);
+    const n = (v: unknown) => { if (v === null || v === undefined || v === "") return null; const x = Number(v); return Number.isFinite(x) ? x : null; };
+    return {
+        visibility_percent: n(body.visibility_percent),
+        visibility: n(body.visibility),
+        top5: n(body.top5),
+        top10: n(body.top10),
+        top30: n(body.top30),
+        // 0 means no ranked keywords to average, not position 0
+        avg_position: n(body.today_avg) || null,
+        domain_trust: n(body.domain_trust) ?? n(body.da),
+        pages_indexed: n(body.index_google),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// SEO potential: extra traffic and its ad value if every tracked keyword reached the top N
+// ---------------------------------------------------------------------------
+// GET /analytics/seo-potential?site_id=&top_n=3. Real 3Sixty response (2026-09-14):
+// {"data":[{"site_engine_id":389452,"traffic":42,"traffic_value":403.92,"leads_qty":0,"leads_price":0}]}.
+// One row per tracked location, summed for the client.
+export function parsePotential(raw: unknown): { traffic: number; value: number } {
+    let traffic = 0, value = 0;
+    for (const r of asArray(raw)) {
+        traffic += Number(r?.traffic) || 0;
+        value += Number(r?.traffic_value) || 0;
+    }
+    return { traffic: Math.round(traffic), value: Math.round(value * 100) / 100 };
+}

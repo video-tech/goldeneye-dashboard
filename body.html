@@ -2167,6 +2167,16 @@
                             <input type="number" id="edit-client-seranking-site" class="glass-input" placeholder="12898862">
                             <p class="text-[10px] text-gray-500 mt-1">The numeric id in the project's SE Ranking URL. Keywords stay managed in SE Ranking &mdash; this only tells Golden Eye which project to pull tracked rank from.</p>
                         </div>
+                        <div>
+                            <label class="modal-label">SEO Start Date</label>
+                            <input type="date" id="edit-client-seo-start" class="glass-input">
+                            <p class="text-[10px] text-gray-500 mt-1">When SEO work began. "Since SEO started" on their SEO tab compares against the month before this.</p>
+                        </div>
+                        <div>
+                            <label class="modal-label">SEO Monthly Fee ($)</label>
+                            <input type="number" min="0" step="0.01" id="edit-client-seo-fee" class="glass-input" placeholder="1500">
+                            <p class="text-[10px] text-gray-500 mt-1">What they pay for SEO only. Their tab shows a return-per-dollar figure only once revenue from Google beats this.</p>
+                        </div>
                         <div class="col-span-2">
                             <button type="button" id="btn-test-seo-connection" onclick="testSeoConnection()" class="glass-pill px-4 py-2 text-xs font-bold">
                                 <i class="fa-solid fa-plug-circle-check mr-1"></i> Test Search Console
