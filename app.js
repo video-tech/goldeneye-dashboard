@@ -5074,6 +5074,7 @@ Treat this period as a fresh starting point. State every number plainly as where
                  <div class="flex flex-wrap items-center gap-2">
                      <span class="text-[10px] font-bold uppercase tracking-widest" style="color:${kind.color}">${kind.label}</span>
                      <span class="text-[11px] text-gray-500">${escapeAttr(date)}</span>
+                     ${x.created_by === 'webflow' || x.created_by === 'wix' ? `<span class="text-[9px] uppercase tracking-widest text-gray-400 border border-white/15 rounded px-1" title="Logged automatically when the article was published">auto · ${x.created_by === 'wix' ? 'Wix' : 'Webflow'}</span>` : ''}
                  </div>
                  <div class="text-sm text-white font-semibold break-words">${escapeAttr(x.title)}</div>
                  ${safeUrl ? `<a href="${escapeAttr(safeUrl)}" target="_blank" rel="noopener" class="text-xs text-blue-400 hover:underline break-all">${escapeAttr(safeUrl)}</a>` : ''}

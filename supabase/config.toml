@@ -418,3 +418,8 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # verify_jwt = true.
 [functions.ghl-lead-webhook]
 verify_jwt = false
+
+# Same reason: Webflow's webhooks and Wix Automations can't send the gateway JWT. The
+# SEO_WEBHOOK_SECRET check inside the function is the gate, and it fails closed if unset.
+[functions.seo-changelog-webhook]
+verify_jwt = false

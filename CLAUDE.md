@@ -970,6 +970,29 @@ real client data; see the Known gaps entry on that.
   lands on the first plotted day on or after its date, and same-day markers stack. URLs are
   only linked when they're http(s). No SQL was needed, since the table and its admin write
   policy already existed from `seranking-sync/schema.sql`.
+- **Articles published on Webflow or Wix log themselves (built 2026-09-14, not yet tested live).**
+  `supabase/functions/seo-changelog-webhook/` takes the site's own publish event, not Cuppa's.
+  Cuppa only stages a Webflow post, and the changelog records when work went live. Setup:
+  `schema.sql`, the `SEO_WEBHOOK_SECRET` secret, and deploy (`verify_jwt = false` is in
+  `config.toml`). Then, per client:
+  - **Webflow:** a "Collection Item Published" webhook to
+    `...?source=webflow&site=<domain>&path=/blog&collection=<blog collection id>&k=<secret>`.
+    The payload has no domain or URL, hence `site` and `path`. Without `collection`, every
+    CMS collection's publishes arrive, team members included.
+  - **Wix:** an Automation, "Blog post published" → "Send HTTP request", to
+    `...?source=wix&site=<domain>&k=<secret>`. Wix doesn't document the body, so the parser
+    finds title, URL, id and date by field name wherever they're nested. **Check the first
+    real payload** in `seo_changelog_webhook_events`.
+  - **How entries are filed:** each article goes under the one client whose `gsc_property`
+    domain matches its URL (or `site`), and a URL/`site` mismatch is refused. It's logged
+    once, because `seo_changelog.source_ref` (`webflow:<item id>` / `wix:<post id or URL>`) is
+    unique per client and inserts are first-write-wins. So a republish never duplicates it,
+    but a major update to an old article must be logged by hand. `live_date` is the publish
+    day in America/Denver.
+  - **Every authenticated request is recorded** in `seo_changelog_webhook_events` with its
+    outcome and a scrubbed payload. RLS is on with no policies, so only the SQL Editor can
+    read it. It's deliberately not in `rename_client.sql`, since `client_name` there is
+    informational. Parsing is in dependency-free `parse.ts`. 26 checks.
 - **Not yet built:** the keyword manager. `seo_keywords` is currently populated only by
   `seranking-sync`'s sync, with no admin-side add/retire form yet, even though its RLS already
   allows admin writes. The changelog isn't in the weekly report or the client portal yet either.

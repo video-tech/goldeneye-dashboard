@@ -1,0 +1,184 @@
+// SEO changelog webhook: logs a published article to seo_changelog automatically.
+//
+// Articles are written in Cuppa and published on each client's Webflow or Wix site. The site's
+// own publish event is used, not Cuppa's: Cuppa only stages a Webflow post, which isn't live
+// until the site is published, and the changelog is about when work went LIVE. It also catches
+// articles published without Cuppa.
+//
+//   Webflow  Site settings → Webhooks → "Collection Item Published", URL:
+//            .../seo-changelog-webhook?source=webflow&site=example.com&path=/blog&collection=<blog collection id>&k=<secret>
+//   Wix      Automations → trigger "Blog post published" → action "Send HTTP request" (POST), URL:
+//            .../seo-changelog-webhook?source=wix&site=example.com&k=<secret>
+//
+// Each article is filed under the one client whose Search Console domain matches it, and
+// logged once: seo_changelog's unique (client_name, source_ref) with first-write-wins means a
+// republish or a retry never duplicates it. Every authenticated request, logged or not, is
+// recorded in seo_changelog_webhook_events with its outcome, readable from the SQL Editor.
+// That's how the first real Wix payload gets checked.
+//
+// Deploy:  supabase functions deploy seo-changelog-webhook --project-ref hugnttsqucetldllfgoi
+//          verify_jwt = false comes from supabase/config.toml, since neither sender can send the
+//          gateway JWT, so the secret is the ONLY gate.
+// Schema:  schema.sql in this folder.
+// Secret:  SEO_WEBHOOK_SECRET, as ?k= or an x-webhook-secret header.
+
+import { liveDateOf, parseWebflow, parseWix, resolveClient, siteHost, type Article } from "./parse.ts";
+
+function service() {
+    const base = Deno.env.get("SUPABASE_URL");
+    const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!base || !key) throw new Error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+    return { base, headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json" } };
+}
+
+async function loadClients(): Promise<{ name: string; gsc_property: string | null }[]> {
+    const { base, headers } = service();
+    const res = await fetch(`${base}/rest/v1/clients?select=name,gsc_property&gsc_property=not.is.null`, { headers });
+    if (!res.ok) throw new Error(`clients lookup failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    return await res.json();
+}
+
+// true = a new entry, false = this article was already logged
+async function logArticle(client: string, a: Article): Promise<boolean> {
+    const { base, headers } = service();
+    const res = await fetch(`${base}/rest/v1/seo_changelog?on_conflict=client_name,source_ref`, {
+        method: "POST",
+        headers: { ...headers, "Prefer": "resolution=ignore-duplicates,return=representation" },
+        body: JSON.stringify({
+            client_name: client,
+            live_date: liveDateOf(a.published_at),
+            kind: "content",
+            title: a.title,
+            url: a.url,
+            notes: null,
+            created_by: a.source,
+            source_ref: a.ref,
+        }),
+    });
+    if (!res.ok) throw new Error(`seo_changelog insert failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    const rows = await res.json().catch(() => []);
+    return Array.isArray(rows) && rows.length > 0;
+}
+
+// Blog payloads carry no customer data, but a Wix automation can be mapped to include anything,
+// so emails, phone numbers and credentials are stripped before a copy is kept.
+function scrub(value: unknown, secret: string, key = "", depth = 0): unknown {
+    if (depth > 8) return "[too deep]";
+    if (value === null || value === undefined) return value;
+    if (Array.isArray(value)) return value.slice(0, 50).map((v) => scrub(v, secret, key, depth + 1));
+    if (typeof value === "object") {
+        return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, scrub(v, secret, k, depth + 1)]));
+    }
+    if (/(secret|token|password|api[_-]?key|authori[sz]ation)/i.test(key)) return "[redacted-secret]";
+    if (typeof value === "string") {
+        if (secret && value.trim() === secret) return "[redacted-secret]";
+        if (/[^\s@]+@[^\s@]+\.[^\s@]+/.test(value)) return "[redacted-email]";
+        if (!/^\d{4}-\d{2}-\d{2}/.test(value) && /^\+?[\d\s().-]{7,}$/.test(value.trim()) && value.replace(/\D/g, "").length >= 10) return "[redacted-phone]";
+        return value.length > 1000 ? value.slice(0, 1000) + "…" : value;
+    }
+    return value;
+}
+
+async function recordEvent(row: Record<string, unknown>): Promise<void> {
+    try {
+        const { base, headers } = service();
+        const res = await fetch(`${base}/rest/v1/seo_changelog_webhook_events`, {
+            method: "POST",
+            headers: { ...headers, "Prefer": "return=minimal" },
+            body: JSON.stringify(row),
+        });
+        if (!res.ok) console.error("seo-changelog-webhook: event not recorded", res.status, (await res.text()).slice(0, 200));
+    } catch (err) {
+        // Never fail the webhook over the debug record
+        console.error("seo-changelog-webhook: event not recorded", String(err));
+    }
+}
+
+// Same gate as ghl-lead-webhook: constant-time, both sides trimmed and unquoted.
+function safeEqual(a: string, b: string): boolean {
+    const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
+    let diff = x.length ^ y.length;
+    for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
+    return diff === 0;
+}
+function normaliseSecret(s: string | null | undefined): string {
+    let t = String(s ?? "").trim();
+    if (t.length >= 2 && ((t[0] === '"' && t.at(-1) === '"') || (t[0] === "'" && t.at(-1) === "'"))) t = t.slice(1, -1).trim();
+    return t;
+}
+
+Deno.serve(async (req: Request) => {
+    if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+
+    // Fail closed: with verify_jwt off, no secret would leave this open to anyone with the URL
+    const expected = normaliseSecret(Deno.env.get("SEO_WEBHOOK_SECRET"));
+    if (!expected) return new Response("not configured", { status: 500 });
+
+    const url = new URL(req.url);
+    const given = normaliseSecret(req.headers.get("x-webhook-secret") ?? url.searchParams.get("k"));
+    if (!safeEqual(given, expected)) {
+        console.warn("seo-changelog-webhook REFUSED", JSON.stringify({ given_length: given.length, expected_length: expected.length }));
+        return new Response("unauthorized", { status: 401 });
+    }
+
+    const raw = await req.text();
+    let body: any = null;
+    try { body = JSON.parse(raw); } catch { body = Object.fromEntries(new URLSearchParams(raw)); }
+
+    const params = {
+        source: url.searchParams.get("source"),
+        site: url.searchParams.get("site"),
+        path: url.searchParams.get("path"),
+        collection: url.searchParams.get("collection"),
+    };
+    const source = params.source === "wix" || params.source === "webflow"
+        ? params.source
+        : (body && typeof body === "object" && "triggerType" in body ? "webflow" : "wix");
+
+    const event: Record<string, unknown> = {
+        source,
+        query: { site: params.site, path: params.path, collection: params.collection },
+        payload: scrub(body, expected),
+    };
+
+    try {
+        const parsed = source === "webflow"
+            ? parseWebflow(body, { site: params.site, path: params.path, collection: params.collection })
+            : parseWix(body);
+        if (!parsed.ok) {
+            await recordEvent({ ...event, outcome: "skipped", reason: parsed.reason });
+            // 200, not an error: an ignored event (another collection, a draft) is normal, and a
+            // failing webhook can get disabled by the sender
+            return Response.json({ ok: true, logged: 0, reason: parsed.reason });
+        }
+
+        const clients = await loadClients();
+        const paramHost = siteHost(params.site);
+        const results: { ref: string; client: string | null; outcome: string; reason?: string }[] = [];
+        for (const a of parsed.articles) {
+            const r = resolveClient(clients, a.host, paramHost);
+            if ("reason" in r) { results.push({ ref: a.ref, client: null, outcome: "skipped", reason: r.reason }); continue; }
+            const isNew = await logArticle(r.client, a);
+            results.push({ ref: a.ref, client: r.client, outcome: isNew ? "logged" : "duplicate" });
+        }
+
+        const logged = results.filter((r) => r.outcome === "logged").length;
+        const outcome = logged ? "logged" : results.every((r) => r.outcome === "duplicate") ? "duplicate" : "skipped";
+        await recordEvent({
+            ...event,
+            outcome,
+            reason: results.find((r) => r.reason)?.reason ?? null,
+            client_name: results.find((r) => r.client)?.client ?? null,
+            results,
+        });
+        console.log("seo-changelog-webhook", JSON.stringify({ source, outcome, results }));
+        return Response.json({ ok: true, logged, results });
+    } catch (err) {
+        // The database is the problem, not the article. 500 lets the sender retry, and the insert
+        // is first-write-wins, so a retry can never duplicate.
+        const msg = String((err as Error)?.message ?? err);
+        console.error("seo-changelog-webhook FAILED", msg);
+        await recordEvent({ ...event, outcome: "error", reason: msg.slice(0, 500) });
+        return Response.json({ ok: false, error: msg }, { status: 500 });
+    }
+});
