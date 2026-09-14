@@ -4444,42 +4444,30 @@ Treat this period as a fresh starting point. State every number plainly as where
             // Planned to-dos are listed in their own block, so they aren't repeated in the open list
             const openTasks = clientTasks.filter(t => t.status !== 'Complete' && !plannedKeys.has(todoKey(t.title)));
 
-            // Never let the model imply an overdue task is still ahead of us — same
-            // fix as client-summary's edge function, for the same reason: the model is
-            // never told what "today" is, so it must never be asked to judge a date.
-            const dueTag = (due) => {
-                if (!due) return '';
-                const d = new Date(due + 'T12:00:00');
-                const today = new Date(); today.setHours(0, 0, 0, 0);
-                const diffDays = Math.round((d - today) / 86400000);
-                if (diffDays < 0) return ` (OVERDUE — was due ${due})`;
-                if (diffDays <= 3) return ` (DUE SOON — ${due})`;
-                return ` (DUE ${due})`;
-            };
-
+            // Task TITLES only. Due dates, assignees, priorities and types are internal bookkeeping,
+            // and the client report explains the work in plain language without them. (Due labels
+            // used to be passed so the model couldn't call an overdue task "on track". Now it never
+            // talks about timing at all, which removes that risk too.)
             let workBlock = '';
             if (completedTasks.length) {
-                workBlock += `\n\nCOMPLETED THIS PERIOD:\n${completedTasks.map(t => `- ${stripSlashEscapes(t.title)}`).join('\n')}`;
+                workBlock += `\n\nCOMPLETED THIS PERIOD (internal task titles):\n${completedTasks.map(t => `- ${stripSlashEscapes(t.title)}`).join('\n')}`;
             }
             if (openTasks.length) {
-                workBlock += `\n\nCURRENTLY OPEN / STILL TO DO:\n${openTasks.map(t => `- ${stripSlashEscapes(t.title)}${dueTag(t.due)}`).join('\n')}`;
+                workBlock += `\n\nCURRENTLY OPEN / STILL TO DO (internal task titles):\n${openTasks.map(t => `- ${stripSlashEscapes(t.title)}`).join('\n')}`;
             }
             if (plannedTodos.length) {
-                workBlock += `\n\nPLANNED FOR NEXT WEEK (set by the media buyer; already listed in the What We're Working On section below):\n${plannedTodos.map(t => `- ${t}`).join('\n')}`;
+                workBlock += `\n\nPLANNED FOR NEXT WEEK (internal to-dos set by the media buyer; EVERY one must be covered in "working_on"):\n${plannedTodos.map(t => `- ${t}`).join('\n')}`;
             }
 
-            // The planned to-dos go into What We're Working On as fixed blocks, built here, so they
-            // can't be dropped or reworded
-            const plannedBlocksHtml = plannedTodos.map(t =>
-                `<div style="padding: 16px 0; border-bottom: 1px solid #e8e8ed;"><div style="font-size: 17px; font-weight: 600; color: #1d1d1f;">${escapeAttr(t)}</div></div>`
-            ).join('');
-
-            // "What We're Working On" is always in the report. Without open tasks it would
-            // otherwise be empty or invented, so the fallback wording is fixed here in code.
-            // The model only copies it and never writes its own version of "we're watching the
-            // account", which is exactly the filler the rules below ban everywhere else.
+            // "What We're Working On" is always in the report, and it's built in code from the
+            // model's "working_on" list, not written into the HTML by the model. The model rewrites
+            // each task for the client and names which to-dos an item covers, so code can prove
+            // every planned to-do made it in, and the wording can still be natural. With nothing
+            // to list, the fixed default below is used, and the model never writes its own
+            // "we're watching the account" filler.
             const WORKING_ON_DEFAULT_HEADLINE = 'Managing Your Campaigns';
             const WORKING_ON_DEFAULT_DETAILS = "We're actively monitoring and managing your ads — keeping a close eye on lead volume, cost per lead, and how each ad is performing, and making adjustments as the numbers call for them.";
+            const WORKING_ON_MARKER = '{{WORKING_ON_BLOCKS}}';
 
             // ---- SEO, from seo_daily (Search Console via seo-sync), only for a client connected to
             // it. This used to read globalSeoData, the legacy seo_metrics table from Make #2. That
@@ -4540,7 +4528,31 @@ Treat this period as a fresh starting point. State every number plainly as where
             "${n || 'No manual notes provided this week. Draw the highlights and action plan from the data above rather than waiting for more.'}"
 
             YOUR TASK:
-            Return ONLY a JSON object with two keys: "email_summary" and "html_report".
+            Return ONLY a JSON object with three keys: "email_summary", "html_report" and "working_on".
+
+            RULES FOR "working_on" (this becomes the What We're Working On section; code builds it):
+            - An array of items, each {"headline": "...", "details": "...", "covers": ["..."]}.
+            - Rewrite the work for the CLIENT. Internal task titles are shorthand for our own team,
+              so turn each into what we're doing for them and why it helps, in plain, friendly
+              language. Headline: a few words. Details: one or two sentences. Example: the internal
+              to-do "Launch the 3 winning ads at a higher budget" becomes headline "Scaling your best
+              ads", details "Three of the new ads brought in leads well below your average cost, so
+              we're putting more of your budget behind them."
+            - Never mention due dates, deadlines, days of the week, assignees, who on our team is doing
+              it, priority, task types, scores or internal tool names. Explain the work, not the
+              bookkeeping.
+            - Never invent specifics a task doesn't imply. Explaining why it helps is fine, but
+              don't add numbers, results or promises that aren't in the task, the data or the notes.
+            - What goes in: EVERY item from PLANNED FOR NEXT WEEK, then open tasks from CURRENTLY OPEN /
+              STILL TO DO that are worth telling a client about (skip pure internal admin), then any
+              specific next step from the notes. Related items can share one entry.
+            - "covers": the exact text of each PLANNED FOR NEXT WEEK item the entry covers, copied
+              character for character. Use an empty array for entries that cover none. Every planned
+              item must appear in some entry's "covers".
+            - If there is nothing specific at all (no planned items, no open tasks worth mentioning,
+              no next step in the notes), return an empty array. The fixed default text is added for you.
+            - In "html_report", leave the ${WORKING_ON_MARKER} marker exactly where it is in the
+              template. Don't write that section's content into the HTML yourself.
 
             THE MEDIA BUYER'S NOTES WIN — follow this exactly:
             - The notes are written by the person running the account, and they know things the data
@@ -4559,9 +4571,11 @@ Treat this period as a fresh starting point. State every number plainly as where
               skip the topic of completed work entirely and move straight to what's still to do
               or to ad performance. Silence on a topic is not the same as bad news, so do not
               apologize for it or draw attention to its absence.
-            - A "CURRENTLY OPEN / STILL TO DO" list above means say what's still in motion,
-              repeating any OVERDUE / DUE SOON / DUE label exactly as given — never as "scheduled"
-              or "on track" for anything marked OVERDUE.
+            - A "CURRENTLY OPEN / STILL TO DO" list above means work is still in motion. It goes in
+              "working_on", rewritten for the client, with no dates or timing.
+            - Task titles in these lists are internal shorthand. Wherever you mention work (highlights,
+              email_summary), describe it in plain client language, never as a pasted task title, and
+              never with due dates, assignees or priorities.
             - If NEITHER list appears above, there is nothing to report on work or tasks at all
               this period. Do not mention tasks, work, or projects anywhere in the report — go
               straight from ad performance into the notes or action plan. The one exception is
@@ -4587,8 +4601,8 @@ Treat this period as a fresh starting point. State every number plainly as where
             Phrases like "we'll continue to analyze trends," "adjust our strategy accordingly,"
             "monitor performance closely," or any other sentence that could be pasted into any
             report regardless of what happened are banned outright. A closing priority or action
-            step must name something SPECIFIC: an actual open task from the list above (with its
-            OVERDUE/DUE SOON/DUE label if it has one), an actual metric that moved and what will
+            step must name something SPECIFIC: an actual open task from the list above (explained
+            for the client), an actual metric that moved and what will
             be done about it, or a specific manual note. If none of those give you something
             concrete — no open tasks, no meaningful shift in the numbers, no manual notes — do
             not manufacture a closing action step at all. A report that ends after stating the
@@ -4626,22 +4640,10 @@ Treat this period as a fresh starting point. State every number plainly as where
             - Output a complete, copy-safe HTML string based on the data and notes.
             - The four KPI tiles, including their numbers and trend pills, are already filled in
               below. Copy them exactly as given. Never change a tile's number, pill text or colors.
-            - The "What We're Working On" section ALWAYS appears. Never omit it. Fill it like this:
-              * If a PLANNED FOR NEXT WEEK list appears above, those items are already written into
-                the section in the template below. Copy them exactly, first, without rewording. Never
-                use the default text when they're present. Add more blocks only for other specific
-                work, and never a second block that repeats a planned item.
-              * If the manual notes say what we're doing or doing next (for example "we're testing
-                new ads to find a winner"), that is a specific action. Use it, in the notes' own terms.
-              * If the "CURRENTLY OPEN / STILL TO DO" list appears above, include what's coming up
-                next from that list, with any OVERDUE / DUE SOON / DUE label exactly as given.
-              * A metric that really moved, and what's being done about it, can sit alongside either.
-              * Only if the notes, the open list and the metrics give you nothing specific at all, use
-                exactly this headline and text, word for word, with nothing added:
-                Headline: ${WORKING_ON_DEFAULT_HEADLINE}
-                Details: ${WORKING_ON_DEFAULT_DETAILS}
-                That fixed text is the only exception to NO GENERIC FILLER above. Do not reword it,
-                and do not write any other version of it anywhere in the report.
+            - The "What We're Working On" section is built from "working_on" (rules above). Keep the
+              section and its ${WORKING_ON_MARKER} marker exactly as in the template. If the manual
+              notes say what we're doing next (for example "we're testing new ads to find a winner"),
+              that belongs in "working_on" as an entry too.
             - Use this EXACT structure and inline styling, but replace the placeholders, highlights, and improvements to match this week's reality:
 
             <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background-color: #f5f5f7;">
@@ -4665,9 +4667,7 @@ Treat this period as a fresh starting point. State every number plainly as where
             [REQUIRED — this block is always included; see the "What We're Working On" rules above:]
             <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">What We're Working On</h2>
-            ${plannedTodos.length ? `[COPY THESE PLANNED ITEMS EXACTLY. Then OPTIONALLY add blocks after them, in the same format as the block below, for open tasks or a specific action from the notes:]
-            ${plannedBlocksHtml}
-            ` : ''}<div style="padding: 20px 0;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Working On Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Working On Details]</div></div>
+            ${WORKING_ON_MARKER}
             </td></tr>
             </table></td></tr></table></body></html>
             `;
@@ -4691,28 +4691,65 @@ Treat this period as a fresh starting point. State every number plainly as where
                 // Every number typed in the notes must survive into the report. Prompt rules alone
                 // didn't hold (see includeSeoSection above), so this is checked, not requested: one
                 // retry naming exactly what was dropped, then a visible warning if it's still missing.
-                const missingNoteFacts = (r) => {
-                    const out = `${r?.email_summary || ''} ${r?.html_report || ''}`.toLowerCase().replace(/,/g, '');
+                // What We're Working On, built from the model's "working_on" list. Text is escaped:
+                // it's model output going into an email.
+                const workingOnBlock = (headline, details, last) =>
+                    `<div style="padding: 20px 0;${last ? '' : ' border-bottom: 1px solid #e8e8ed;'}"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">${escapeAttr(headline)}</div>${details ? `<div style="font-size: 15px; color: #515154; line-height: 1.6;">${escapeAttr(details)}</div>` : ''}</div>`;
+                const finalizeReport = (parsed) => {
+                    const items = (Array.isArray(parsed?.working_on) ? parsed.working_on : [])
+                        .filter(i => i && String(i.headline || '').trim());
+                    const blocks = items.length
+                        ? items.map((i, k) => workingOnBlock(String(i.headline).trim(), String(i.details || '').trim(), k === items.length - 1)).join('')
+                        : workingOnBlock(WORKING_ON_DEFAULT_HEADLINE, WORKING_ON_DEFAULT_DETAILS, true);
+                    const html = String(parsed?.html_report || '');
+                    // A planned to-do counts as covered when an entry names it. Compared loosely
+                    // (case, spacing, one containing the other), since "character for character"
+                    // is asked for but not always delivered.
+                    const covers = items.flatMap(i => Array.isArray(i.covers) ? i.covers : []).map(todoKey).filter(Boolean);
+                    const uncovered = plannedTodos.filter(t => {
+                        const k = todoKey(t);
+                        return !covers.some(c => c === k || c.includes(k) || k.includes(c));
+                    });
+                    return {
+                        report: { ...parsed, html_report: html.split(WORKING_ON_MARKER).join(blocks) },
+                        hasMarker: html.includes(WORKING_ON_MARKER),
+                        uncovered
+                    };
+                };
+
+                // Every number typed in the notes must survive into the report, and every planned
+                // to-do must be covered. Prompt rules alone didn't hold (see includeSeoSection
+                // above), so this is checked, not requested: one retry naming exactly what was
+                // dropped, then a visible warning if it's still missing.
+                const problemsWith = (parsed) => {
+                    const f = finalizeReport(parsed);
+                    const out = `${f.report.email_summary || ''} ${f.report.html_report}`.toLowerCase().replace(/,/g, '');
                     const facts = [...new Set((n.match(/\$?\d[\d,]*(?:\.\d+)?\s?[km]?%?/gi) || [])
                         .map(x => x.replace(/\s/g, '').replace(/,/g, '').toLowerCase()))];
-                    // Planned to-dos too: they're inserted as fixed HTML, so they must come back intact
-                    const todos = plannedTodos.filter(t => !out.includes(escapeAttr(t).toLowerCase().replace(/,/g, '')));
-                    return [...facts.filter(f => !out.includes(f)), ...todos.map(t => `"${t}"`)];
+                    return {
+                        f,
+                        missing: [
+                            ...facts.filter(x => !out.includes(x)),
+                            ...f.uncovered.map(t => `the to-do "${t}"`),
+                            ...(f.hasMarker ? [] : ['the What We\'re Working On section'])
+                        ]
+                    };
                 };
 
                 const messages = [{ role: "user", content: p }];
-                let { raw: rawContent, parsed: result } = await askModel(messages);
-                let missing = missingNoteFacts(result);
+                let { raw: rawContent, parsed } = await askModel(messages);
+                let { f: finalized, missing } = problemsWith(parsed);
                 if (missing.length) {
                     const retry = await askModel([...messages,
                         { role: "assistant", content: rawContent },
-                        { role: "user", content: `Your report left out these items from the MEDIA BUYER'S NOTES or the PLANNED FOR NEXT WEEK list: ${missing.join(', ')}. Every fact in the notes must appear in the report exactly as written (SEO facts go in the Organic Search section), and every planned item must appear in What We're Working On exactly as written. Return the complete JSON object again with them included, changing nothing else.` }
+                        { role: "user", content: `Your answer left out: ${missing.join(', ')}. Every figure in the MEDIA BUYER'S NOTES must appear in the report exactly as written (SEO facts go in the Organic Search section). Every PLANNED FOR NEXT WEEK item must be named in some "working_on" entry's "covers", rewritten for the client in headline and details. html_report must keep the ${WORKING_ON_MARKER} marker. Return the complete JSON object again with these fixed, changing nothing else.` }
                     ]).catch(() => null);
-                    if (retry && missingNoteFacts(retry.parsed).length < missing.length) {
-                        result = retry.parsed;
-                        missing = missingNoteFacts(result);
+                    if (retry) {
+                        const second = problemsWith(retry.parsed);
+                        if (second.missing.length < missing.length) ({ f: finalized, missing } = second);
                     }
                 }
+                const result = finalized.report;
                 if (missing.length) {
                     alert(`Heads up: the report still leaves out these items from your notes or next week's to-dos: ${missing.join(', ')}.\n\nAdd them with Edit before sending.`);
                 }
