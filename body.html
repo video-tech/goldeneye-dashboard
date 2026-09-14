@@ -756,6 +756,56 @@
                                 </div>
 
                                 <div class="glass p-6">
+                                    <div class="flex items-start justify-between gap-4 mb-4">
+                                        <div>
+                                            <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">SEO Changelog</h3>
+                                            <p class="text-xs text-gray-500">Log SEO work on the day it went live. Numbered entries show as markers on the chart above, so you can see what caused a change.</p>
+                                        </div>
+                                        <button type="button" onclick="openSeoChangelogForm()" class="shrink-0 text-xs font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-2 rounded-lg transition"><i class="fa-solid fa-plus mr-1"></i> Log work</button>
+                                    </div>
+
+                                    <form id="seo-changelog-form" class="hidden space-y-3 mb-5 p-4 rounded-xl border border-white/10" onsubmit="saveSeoChangelogEntry(event)">
+                                        <input type="hidden" id="seo-cl-id">
+                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            <div>
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-date">Went live</label>
+                                                <input type="date" id="seo-cl-date" class="glass-input" required>
+                                            </div>
+                                            <div>
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-kind">Kind</label>
+                                                <select id="seo-cl-kind" class="glass-input" required>
+                                                    <option value="content">Content (new or updated page/article)</option>
+                                                    <option value="onpage">On-page (titles, headings, internal links)</option>
+                                                    <option value="technical">Technical (speed, indexing, schema)</option>
+                                                    <option value="gbp">Google Business Profile</option>
+                                                    <option value="migration">Site migration / redesign</option>
+                                                    <option value="other">Other</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-url">Page URL <span class="normal-case font-normal text-gray-600">(optional)</span></label>
+                                                <input type="url" id="seo-cl-url" class="glass-input" placeholder="https://...">
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-title">What went live</label>
+                                            <input type="text" id="seo-cl-title" class="glass-input" required maxlength="200" placeholder="Published 'Deck Repair vs Replacement' article">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-notes">Notes <span class="normal-case font-normal text-gray-600">(optional). Clients may see these later, so write them for the client.</span></label>
+                                            <textarea id="seo-cl-notes" class="glass-input" rows="2"></textarea>
+                                        </div>
+                                        <p id="seo-cl-error" class="text-xs text-red-400 hidden"></p>
+                                        <div class="flex gap-2 justify-end">
+                                            <button type="button" onclick="closeSeoChangelogForm()" class="text-xs font-bold text-gray-400 hover:text-white px-3 py-2 rounded-lg transition">Cancel</button>
+                                            <button type="submit" id="seo-cl-save" class="text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition">Save</button>
+                                        </div>
+                                    </form>
+
+                                    <div id="seo-changelog-list"></div>
+                                </div>
+
+                                <div class="glass p-6">
                                     <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">What Moved</h3>
                                     <div id="seo-movers-list"></div>
                                 </div>

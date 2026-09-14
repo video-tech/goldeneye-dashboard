@@ -961,9 +961,18 @@ real client data; see the Known gaps entry on that.
   impressions ≥ 50 in either window so a 3-impression page can't read as a 300% swing —
   same noise guard as the weekly report's ban on narrating small-count swings as trends. No
   model call.
-- **Not yet built:** the changelog UI (add/edit entries, chart annotations) and the keyword
-  manager — `seo_keywords` is currently populated only by `seranking-sync`'s sync, with no
-  admin-side add/retire form yet, even though its RLS already allows admin writes.
+- **SEO Changelog (added 2026-09-14)** is the panel under the chart. Admins log work on the
+  day it went live (date, kind, title, optional URL, and notes written for the client), and
+  can edit or delete entries. Entries inside the selected range are numbered oldest-first,
+  and `seoChangelogChartPlugin` draws the same numbers as dashed lines on the trend chart.
+  It's an inline Chart.js plugin rather than `chartjs-plugin-annotation`, because adding a CDN
+  script means re-pasting `goldeneye.html` into GHL. `seo_daily` can skip a day, so a marker
+  lands on the first plotted day on or after its date, and same-day markers stack. URLs are
+  only linked when they're http(s). No SQL was needed, since the table and its admin write
+  policy already existed from `seranking-sync/schema.sql`.
+- **Not yet built:** the keyword manager. `seo_keywords` is currently populated only by
+  `seranking-sync`'s sync, with no admin-side add/retire form yet, even though its RLS already
+  allows admin writes. The changelog isn't in the weekly report or the client portal yet either.
 
 ## Weekly check-in
 

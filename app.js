@@ -5022,7 +5022,170 @@ Treat this period as a fresh starting point. State every number plainly as where
      }).join('');
  }
 
- function renderSeoChart(daily, s, e) {
+ // ---- SEO changelog: what work went live, and when. seo_changelog, admin-written. ----
+ // A trend line can always be redrawn from history, but why it moved can't be reconstructed
+ // later if nobody wrote down when a page went live. Entries inside the selected range are
+ // numbered oldest-first, and the same numbers mark the chart.
+ let seoChangelogEntries = [];
+ let seoChangelogClient = null;
+ const SEO_CHANGELOG_KINDS = {
+     content:   { label: 'Content',   color: '#60a5fa' },
+     onpage:    { label: 'On-page',   color: '#34d399' },
+     technical: { label: 'Technical', color: '#fb923c' },
+     gbp:       { label: 'GBP',       color: '#f87171' },
+     migration: { label: 'Migration', color: '#c084fc' },
+     other:     { label: 'Other',     color: '#9ca3af' }
+ };
+ const seoLocalYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+ // In-range entries, oldest first, each with its marker number
+ function seoChangelogMarkers(entries, s, e) {
+     const from = seoLocalYmd(s), to = seoLocalYmd(e);
+     return entries
+         .filter(x => x.live_date >= from && x.live_date <= to)
+         .sort((a, b) => a.live_date.localeCompare(b.live_date) || Number(a.id) - Number(b.id))
+         .map((x, i) => ({ ...x, n: i + 1 }));
+ }
+
+ function renderSeoChangelogList(entries, markers, loadFailed) {
+     const el = document.getElementById('seo-changelog-list');
+     if (!el) return;
+     if (loadFailed) {
+         el.innerHTML = '<p class="text-sm text-amber-400">Couldn\'t load the changelog. Check that supabase/functions/seranking-sync/schema.sql has been run.</p>';
+         return;
+     }
+     if (!entries.length) {
+         el.innerHTML = '<p class="text-sm text-gray-500">Nothing logged yet. Next time a page goes live or a fix ships, log it here to see its effect on the chart.</p>';
+         return;
+     }
+     const numberById = new Map(markers.map(m => [String(m.id), m.n]));
+     el.innerHTML = [...entries].sort((a, b) => b.live_date.localeCompare(a.live_date)).map(x => {
+         const kind = SEO_CHANGELOG_KINDS[x.kind] || SEO_CHANGELOG_KINDS.other;
+         const n = numberById.get(String(x.id));
+         const badge = n
+             ? `<span class="shrink-0 w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center text-black" style="background:${kind.color}" title="Marker ${n} on the chart">${n}</span>`
+             : '<span class="shrink-0 w-6 h-6 rounded-full border border-white/10 flex items-center justify-center text-[9px] text-gray-600" title="Outside the selected date range">·</span>';
+         const date = new Date(x.live_date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+         let safeUrl = '';
+         try { const u = new URL(x.url); if (u.protocol === 'https:' || u.protocol === 'http:') safeUrl = u.href; } catch (_) {}
+         return `<div class="flex items-start gap-3 py-3 border-b border-white/5 last:border-0">
+             ${badge}
+             <div class="min-w-0 flex-1">
+                 <div class="flex flex-wrap items-center gap-2">
+                     <span class="text-[10px] font-bold uppercase tracking-widest" style="color:${kind.color}">${kind.label}</span>
+                     <span class="text-[11px] text-gray-500">${escapeAttr(date)}</span>
+                 </div>
+                 <div class="text-sm text-white font-semibold break-words">${escapeAttr(x.title)}</div>
+                 ${safeUrl ? `<a href="${escapeAttr(safeUrl)}" target="_blank" rel="noopener" class="text-xs text-blue-400 hover:underline break-all">${escapeAttr(safeUrl)}</a>` : ''}
+                 ${x.notes ? `<div class="text-xs text-gray-400 mt-1 whitespace-pre-wrap break-words">${escapeAttr(x.notes)}</div>` : ''}
+             </div>
+             <div class="shrink-0 flex gap-1">
+                 <button type="button" onclick="openSeoChangelogForm('${escapeAttr(String(x.id))}')" class="text-gray-500 hover:text-blue-400 px-2 py-1 transition" title="Edit"><i class="fa-solid fa-pen text-xs"></i></button>
+                 <button type="button" onclick="deleteSeoChangelogEntry('${escapeAttr(String(x.id))}')" class="text-gray-500 hover:text-red-400 px-2 py-1 transition" title="Delete"><i class="fa-solid fa-trash text-xs"></i></button>
+             </div>
+         </div>`;
+     }).join('');
+ }
+
+ window.openSeoChangelogForm = function(id) {
+     if (currentUserRole !== 'admin') return;
+     const form = document.getElementById('seo-changelog-form');
+     if (!form) return;
+     const entry = id ? seoChangelogEntries.find(x => String(x.id) === String(id)) : null;
+     document.getElementById('seo-cl-id').value = entry ? String(entry.id) : '';
+     document.getElementById('seo-cl-date').value = entry ? entry.live_date : seoLocalYmd(new Date());
+     document.getElementById('seo-cl-kind').value = entry ? entry.kind : 'content';
+     document.getElementById('seo-cl-title').value = entry ? entry.title : '';
+     document.getElementById('seo-cl-url').value = entry?.url || '';
+     document.getElementById('seo-cl-notes').value = entry?.notes || '';
+     document.getElementById('seo-cl-error').classList.add('hidden');
+     form.classList.remove('hidden');
+     document.getElementById('seo-cl-title').focus();
+ };
+
+ window.closeSeoChangelogForm = function() {
+     document.getElementById('seo-changelog-form')?.classList.add('hidden');
+ };
+
+ window.saveSeoChangelogEntry = async function(ev) {
+     ev.preventDefault();
+     if (currentUserRole !== 'admin' || !seoChangelogClient) return;
+     const btn = document.getElementById('seo-cl-save');
+     const errEl = document.getElementById('seo-cl-error');
+     const id = document.getElementById('seo-cl-id').value;
+     const row = {
+         client_name: seoChangelogClient,
+         live_date: document.getElementById('seo-cl-date').value,
+         kind: document.getElementById('seo-cl-kind').value,
+         title: document.getElementById('seo-cl-title').value.trim(),
+         url: document.getElementById('seo-cl-url').value.trim() || null,
+         notes: document.getElementById('seo-cl-notes').value.trim() || null
+     };
+     if (!row.live_date || !row.title) return;
+     btn.disabled = true; btn.innerText = 'Saving...';
+     try {
+         let error;
+         if (id) {
+             ({ error } = await supabaseClient.from('seo_changelog').update(row).eq('id', id));
+         } else {
+             const { data: { session } } = await supabaseClient.auth.getSession();
+             ({ error } = await supabaseClient.from('seo_changelog').insert({ ...row, created_by: session?.user?.email || null }));
+         }
+         if (error) throw error;
+         closeSeoChangelogForm();
+         await window.renderAdminSeo();
+     } catch (err) {
+         errEl.innerText = 'Could not save: ' + (err.message || err);
+         errEl.classList.remove('hidden');
+     } finally {
+         btn.disabled = false; btn.innerText = 'Save';
+     }
+ };
+
+ window.deleteSeoChangelogEntry = async function(id) {
+     if (currentUserRole !== 'admin') return;
+     const entry = seoChangelogEntries.find(x => String(x.id) === String(id));
+     if (!entry || !confirm(`Delete "${entry.title}" from the changelog?`)) return;
+     const { error } = await supabaseClient.from('seo_changelog').delete().eq('id', id);
+     if (error) { alert('Could not delete: ' + error.message); return; }
+     await window.renderAdminSeo();
+ };
+
+ // Draws a dashed line and numbered dot per changelog entry. Kept inline rather than adding
+ // chartjs-plugin-annotation: a new CDN script means re-pasting goldeneye.html into GHL.
+ const seoChangelogChartPlugin = {
+     id: 'seoChangelogMarkers',
+     afterDatasetsDraw(chart, _args, opts) {
+         const markers = opts?.markers || [];
+         const labels = chart.data.labels || [];
+         const xScale = chart.scales.x;
+         const area = chart.chartArea;
+         if (!markers.length || !labels.length || !xScale) return;
+         const g = chart.ctx;
+         // Entries sharing a plotted day stack their dots instead of overlapping
+         const stackAt = {};
+         markers.forEach(m => {
+             // seo_daily can skip a day, so a marker lands on the first plotted day on or after it
+             const idx = labels.findIndex(l => l >= m.live_date);
+             if (idx < 0) return;
+             const x = xScale.getPixelForValue(idx);
+             if (x < area.left || x > area.right) return;   // panned or zoomed out of view
+             const color = (SEO_CHANGELOG_KINDS[m.kind] || SEO_CHANGELOG_KINDS.other).color;
+             const slot = stackAt[idx] = (stackAt[idx] || 0) + 1;
+             const y = area.top + 10 + (slot - 1) * 20;
+             g.save();
+             g.strokeStyle = color; g.globalAlpha = 0.55; g.lineWidth = 1.5; g.setLineDash([4, 4]);
+             g.beginPath(); g.moveTo(x, area.top); g.lineTo(x, area.bottom); g.stroke();
+             g.globalAlpha = 1; g.setLineDash([]);
+             g.fillStyle = color; g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.fill();
+             g.fillStyle = '#000'; g.font = 'bold 10px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+             g.fillText(String(m.n), x, y + 0.5);
+             g.restore();
+         });
+     }
+ };
+
+ function renderSeoChart(daily, s, e, markers = []) {
      const inRange = daily.filter(r => { const rd = new Date(r.date + 'T12:00:00'); return rd >= s && rd <= e; });
      const labels = inRange.map(r => r.date);
      if (adminSeoChart) adminSeoChart.destroy();
@@ -5030,6 +5193,7 @@ Treat this period as a fresh starting point. State every number plainly as where
      if (!ctx) return;
      adminSeoChart = new Chart(ctx.getContext('2d'), {
          type: 'line',
+         plugins: [seoChangelogChartPlugin],
          data: {
              labels,
              datasets: [
@@ -5040,7 +5204,10 @@ Treat this period as a fresh starting point. State every number plainly as where
          options: {
              maintainAspectRatio: false,
              scales: { y: { position: 'left' }, y1: { position: 'right', grid: { display: false } } },
-             plugins: { zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } } }
+             plugins: {
+                 zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } },
+                 seoChangelogMarkers: { markers }
+             }
          }
      });
  }
@@ -5100,7 +5267,18 @@ Treat this period as a fresh starting point. State every number plainly as where
          setTile('seo-kpi-pos', cur.position != null ? cur.position.toFixed(1) : '—', seoDeltaPill(cur.position, pri.position, { invert: true }));
          setTile('seo-kpi-leads', curLeads.toLocaleString(), seoDeltaPill(curLeads, priLeads));
 
-         renderSeoChart(daily, s, e);
+         // Changelog first, so the chart can draw its markers. A client's entries number in the
+         // dozens, not the thousands, so they're read whole.
+         const { data: changelog, error: changelogErr } = await supabaseClient
+             .from('seo_changelog').select('*').eq('client_name', clientName)
+             .order('live_date', { ascending: false });
+         if (changelogErr) console.error('seo_changelog failed:', changelogErr);
+         seoChangelogEntries = changelog || [];
+         seoChangelogClient = clientName;
+         const markers = seoChangelogMarkers(seoChangelogEntries, s, e);
+         renderSeoChangelogList(seoChangelogEntries, markers, !!changelogErr);
+
+         renderSeoChart(daily, s, e, markers);
 
          const iso = seoIso;
          // At least ~1 impression a day, never under 10: enough to be a real search, without a
