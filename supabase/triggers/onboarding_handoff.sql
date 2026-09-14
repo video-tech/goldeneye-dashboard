@@ -72,6 +72,7 @@ declare
   v_stage    text;
   v_total    int;
   v_done     int;
+  v_secret   text;
 begin
   if NEW.completed_at is null then
     return NEW;
@@ -149,6 +150,21 @@ begin
 
   -- A Make outage must never roll back the client's own progress save
   begin
+    -- The hook URL is public (this file is in a public repo), and on 2026-09-11 an EMPTY
+    -- request to it, not sent by this trigger, texted 10 leads. So Make only acts when the body
+    -- carries this secret. It lives in Supabase Vault, never in the repo. With it missing,
+    -- nothing is sent: an unannounced completion is recoverable, a text to the wrong person
+    -- isn't.
+    select s.decrypted_secret into v_secret
+    from vault.decrypted_secrets s
+    where s.name = 'make_onboarding_hook_secret'
+    limit 1;
+
+    if coalesce(v_secret, '') = '' then
+      raise warning 'onboarding handoff: vault secret make_onboarding_hook_secret missing, text not requested for %', v_client;
+      return NEW;
+    end if;
+
     perform net.http_post(
       url     := v_hook,
       headers := '{"Content-Type": "application/json"}'::jsonb,
@@ -156,7 +172,8 @@ begin
                    'event',        'onboarding_complete',
                    'client',       v_client,
                    'client_email', v_email,
-                   'completed_at', NEW.completed_at
+                   'completed_at', NEW.completed_at,
+                   'secret',       v_secret
                  )
     );
   exception when others then

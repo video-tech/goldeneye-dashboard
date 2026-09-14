@@ -88,14 +88,22 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
     promises no notification).
   - `client_email` is stripped with `\s`, not `btrim` — the hidden `\r\n` in Known gaps
     would otherwise make Make's GHL contact lookup miss.
-  - **It never calls Make without a well-formed email** (added 2026-09-14). The task is still
-    raised. **Incident, 2026-09-14:** one real completion made scenario #4's GHL contact
-    search, which is fuzzy, return 10 contacts. Make tagged all 10, and the GHL onboarding
-    workflow texted "onboarding complete" to 10 leads. Two guards now: this trigger, and
-    Make filters (`client_email` not empty, search limited to 1 result, and the found
-    contact's email must exactly equal `client_email` before tagging). **Never let a Make
-    step act on a GHL search result without an exact-match filter**, because GHL search
-    returns near-misses.
+  - **Incident: 10 leads were texted "onboarding complete" (found 2026-09-14).** On
+    2026-09-11 at 18:36 MDT, scenario #4 ran on a **completely empty** request. Golden Eye
+    didn't send it, since this trigger always sends `event`, `client` and `completed_at`. The
+    hook URL had been committed to this **public** repo three hours earlier. With no email,
+    Make's GHL contact search returned the sub-account's first 10 contacts, Make tagged them
+    all, and the GHL workflow texted them. Three guards now:
+    - **Make:** `client_email` not empty, `secret` equals the vault value, search limited to 1
+      result, and the found contact's email exactly equals `client_email` before tagging.
+    - **This trigger never sends without a well-formed email.**
+    - **This trigger never sends without the `make_onboarding_hook_secret` Vault secret**,
+      which goes in the body as `secret`. The secret is in Supabase Vault, not the repo.
+    Two rules from it:
+    - **Never let a Make step act on a GHL search result without an exact-match filter.**
+      GHL search is fuzzy, and an empty query returns everyone.
+    - **Every Make webhook URL in this repo or in `app.js` is public.** Any scenario that
+      texts, tags or writes needs a secret filter.
   - `onboarding_handoff_tests.sql` holds four rolled-back tests. Each attaches the trigger
     inside its own transaction, then ends in a deliberate `raise exception` that prints
     the results and makes a commit impossible.
