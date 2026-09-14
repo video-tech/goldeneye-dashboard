@@ -4452,6 +4452,19 @@ Treat this period as a fresh starting point. State every number plainly as where
                 console.warn('Report: Search Console data unavailable, SEO will come from the notes only.', err);
             }
 
+            // SEO gets its own required section whenever there's anything to say, decided here
+            // rather than left to the model. On 2026-09-14 a report dropped SEO entirely even
+            // though the notes said "for seo, we got 32 clicks and 2.25K impressions": it filled
+            // its two or three highlights with ads and moved on.
+            const notesMentionSeo = /\b(seo|organic|search console|impressions?|rank(ing|ed|s)?|keywords?|google search|ai (mentions?|overviews?|search)|mentioned)\b/i.test(n);
+            const includeSeoSection = !!seoBlock || notesMentionSeo;
+            const seoSectionTemplate = includeSeoSection ? `
+            [REQUIRED — Organic Search section. Every SEO fact from the MEDIA BUYER'S NOTES goes here, exactly as written (clicks, impressions, AI mentions, rankings, anything), plus the ORGANIC SEO data above for anything the notes don't cover. One div block per fact or closely related group:]
+            <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
+            <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">Organic Search</h2>
+            <div style="padding: 20px 0; border-bottom: 1px solid #e8e8ed;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[SEO Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[SEO Details]</div></div>
+            </td></tr>` : '';
+
             const p = `You are an expert, highly transparent Senior Media Buyer writing a weekly update for a client.
 
             CLIENT DATA:
@@ -4588,7 +4601,7 @@ Treat this period as a fresh starting point. State every number plainly as where
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">Highlights</h2>
             [GENERATE 2-3 DIV BLOCKS HERE. Each block format:]
             <div style="padding: 20px 0; border-bottom: 1px solid #e8e8ed;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[Explanation]</div></div>
-            </td></tr>
+            </td></tr>${seoSectionTemplate}
             [REQUIRED — this block is always included; see the "What We're Working On" rules above:]
             <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">What We're Working On</h2>
@@ -4597,24 +4610,49 @@ Treat this period as a fresh starting point. State every number plainly as where
             </table></td></tr></table></body></html>
             `;
 
-            try { 
-                const res = await fetch("https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ai-chat", {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json', 
-                        'Authorization': `Bearer ${wrapper.dataset.supaKey}` 
-                    },
-                    body: JSON.stringify({ 
-    messages: [{ role: "user", content: p }]
-})
-                }); 
-                
-                const j = await res.json(); 
-                if(j.error) throw new Error(j.error.message); 
-                
-                let rawContent = j.choices[0].message.content;
-const result = JSON.parse(rawContent.replace(/```json/gi, '').replace(/```/g, '').trim()); 
-                
+            try {
+                const askModel = async (messages) => {
+                    const res = await fetch("https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ai-chat", {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${wrapper.dataset.supaKey}`
+                        },
+                        body: JSON.stringify({ messages })
+                    });
+                    const j = await res.json();
+                    if (j.error) throw new Error(j.error.message);
+                    const raw = j.choices[0].message.content;
+                    return { raw, parsed: JSON.parse(raw.replace(/```json/gi, '').replace(/```/g, '').trim()) };
+                };
+
+                // Every number typed in the notes must survive into the report. Prompt rules alone
+                // didn't hold (see includeSeoSection above), so this is checked, not requested: one
+                // retry naming exactly what was dropped, then a visible warning if it's still missing.
+                const missingNoteFacts = (r) => {
+                    const out = `${r?.email_summary || ''} ${r?.html_report || ''}`.toLowerCase().replace(/,/g, '');
+                    const facts = [...new Set((n.match(/\$?\d[\d,]*(?:\.\d+)?\s?[km]?%?/gi) || [])
+                        .map(x => x.replace(/\s/g, '').replace(/,/g, '').toLowerCase()))];
+                    return facts.filter(f => !out.includes(f));
+                };
+
+                const messages = [{ role: "user", content: p }];
+                let { raw: rawContent, parsed: result } = await askModel(messages);
+                let missing = missingNoteFacts(result);
+                if (missing.length) {
+                    const retry = await askModel([...messages,
+                        { role: "assistant", content: rawContent },
+                        { role: "user", content: `Your report left out these figures from the MEDIA BUYER'S NOTES: ${missing.join(', ')}. Every fact in the notes must appear in the report exactly as written (SEO facts go in the Organic Search section). Return the complete JSON object again with them included, changing nothing else.` }
+                    ]).catch(() => null);
+                    if (retry && missingNoteFacts(retry.parsed).length < missing.length) {
+                        result = retry.parsed;
+                        missing = missingNoteFacts(result);
+                    }
+                }
+                if (missing.length) {
+                    alert(`Heads up: the report still leaves out these figures from your notes: ${missing.join(', ')}.\n\nAdd them with Edit before sending.`);
+                }
+
                 document.getElementById('rpt-email-output').innerText = result.email_summary; 
                 document.getElementById('rpt-html-src').value = result.html_report; 
                 document.getElementById('rpt-html-preview').srcdoc = result.html_report;
