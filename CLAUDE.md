@@ -108,14 +108,28 @@ team "My Team" 1498711):
 | #4 txt to client after onboarding | ✅ | Plus the exact-email check, from the 10-lead incident |
 | #5 txt reminder twice a day | ✅ 2026-09-15 | Limit 1 + exact phone match added at the same time |
 | #6 txt notification to us | ✅ 2026-09-15 | Filter sits before the router, so it covers both routes. Limit 1 + exact phone on both |
-| #7 REPORTS GE to gmail | ❌ | Anyone with the URL can create Gmail drafts. `make-relay` is deployed, so the filter is the last step |
-| #8 ads approval | ❌ | Anyone with the URL can upsert `ad_approvals` rows (overwrite a client's decision) and make us call Meta. `make-relay` is deployed, so the filter is the last step |
+| #7 REPORTS GE to gmail | ✅ 2026-09-15 | Filter on the Gmail module; the Draft button goes through `make-relay` |
+| #8 ads approval | ✅ 2026-09-15 | Filter after the webhook; form-encoded, so the relay sends `secret` as a form field |
 | #2 seo for golden eye | n/a | **Already switched off**, so Make's old SEO pull is retired |
 
 **Credentials live in plain text inside blueprints:** a GHL private integration token (#5, #6) and a
-Meta access token (three copies in #8). Reading those blueprints puts the values in whatever tool
-reads them, so **rotate both, then paste the new values in Make**, and prefer a Make connection or
-custom variable over typing tokens into HTTP modules.
+Meta access token (three copies in #8). Reading a blueprint copies those values wherever the reader
+puts them, so **read blueprints through a masking filter, never raw**, and prefer a Make connection
+over typing a token into an HTTP module. Nothing here is in git: the repo holds the hook URLs, never
+the tokens.
+
+**Order that works for every one of these** (learned the hard way on #5 and #6):
+1. Make every caller send `secret` — Postgres functions from Vault, edge functions from
+   `MAKE_WEBHOOK_SECRET`. Make ignores an unknown field, so nothing breaks yet.
+2. Prove it arrives with a request that does nothing: an empty `contacts` / `recipients` list runs
+   the scenario but texts nobody.
+3. **Redetermine data structure** on the webhook, or `secret` can't be mapped in a filter.
+4. Add the filter, as early in the flow as possible (before a router, it covers every route).
+5. Test both ways: a wrong secret should stop at 1 operation, a real one should go the whole way.
+   **Operation count is the proof** — it tells you exactly where a run stopped.
+
+**A scenario with two callers needs both sending the secret first.** #6 is the example: the trigger
+and `morning-audit` share a hook, so the filter went in only after that function was deployed.
 
 ## Database objects we added
 
