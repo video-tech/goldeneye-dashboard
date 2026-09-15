@@ -1311,6 +1311,30 @@ real client data; see the Known gaps entry on that.
     work, matched to a client by domain. 3Sixty's Webflow webhook uses one.
   - **Tests:** parsing is in dependency-free `parse.ts`. 38 checks (26 on the first version,
     12 on the token path, 22 on Git, 9 on Sanity).
+- **Wrong-page alerts (built 2026-09-15).** Each keyword's target page is set **in SE Ranking**
+  ("Target URL", `link` in the API). `seranking-sync` stores it in `seo_keywords.target_page`, and
+  `seo_keyword_summary` returns it beside `ranking_url`.
+  - **When it flags:** `seoWrongPage()` flags a keyword that is ranking (organic or map pack) where the
+    two differ, compared with `seoSamePage()` (protocol, `www.`, trailing slash, query and case
+    ignored). Not ranking, or no target set, never flags.
+  - **Where it shows:** a warning icon on the row, plus a banner above Tracked Keywords listing every
+    mismatch, including rows collapsed behind View all.
+  - **Scope:** admin tab only.
+  - **Tests:** 12 jsdom checks on real 3Sixty cases.
+  - **Keep "strict matching" off in SE Ranking.** It counts only the target page's position, which
+    hides exactly the mismatch this is for.
+- **Keywords removed in SE Ranking are retired, not deleted** (`keywordsToRetire()` in `parse.ts`):
+  the sync marks them `active = false` and keeps their stored history. It never retires anything when
+  SE Ranking returns an empty keyword list, so a bad response can't wipe a client's list.
+- **3Sixty's project was rebuilt 2026-09-15** with the method in the Updates entry. Worth copying for
+  the next local client:
+  - **Locations:** 5 cities (Eagle Mountain, Lehi, Saratoga Springs, American Fork, Draper), each with
+    map pack on and the GBP business name and phone.
+  - **Keywords:** 53 checks, each with a target page. SE Ranking counts one check per keyword per city,
+    so only the six "near me" / generic searches run in all 5 cities. A search naming a city runs only
+    from that city, and Utah-wide and article searches run from Eagle Mountain.
+  - **Pages:** city searches target the city service-area page, service searches the service page,
+    and question searches a blog post.
 - **Not yet built:** the keyword manager. `seo_keywords` is currently populated only by
   `seranking-sync`'s sync, with no admin-side add/retire form yet, even though its RLS already
   allows admin writes. The changelog isn't in the weekly report or the client portal yet either.

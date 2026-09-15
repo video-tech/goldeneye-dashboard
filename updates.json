@@ -4,6 +4,13 @@
     {
       "date": "2026-09-15",
       "area": "SEO",
+      "title": "Wrong-page alerts",
+      "what": "The SEO tab now warns when Google ranks a different page than the one you set as the target in SE Ranking, for example the blog list showing up instead of the deck repair page. Flagged keywords get a warning icon, and a summary above Tracked Keywords lists every mismatch with the page that is ranking and the page that should be.",
+      "note": "3Sixty is set up for this: 5 cities tracked (Eagle Mountain, Lehi, Saratoga Springs, American Fork, Draper) and 53 keywords, each with a target page."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "SEO",
       "title": "Keywords follow your SE Ranking list",
       "what": "Keywords you remove in SE Ranking now drop off the SEO tab and reports on the next sync (their history is kept). Each keyword's target page is also brought in from SE Ranking, ready for the wrong-page alerts.",
       "action": "Deploy seranking-sync."

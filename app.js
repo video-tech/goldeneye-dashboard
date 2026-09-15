@@ -5537,9 +5537,59 @@ async function buildReportSeoBlock(clientName, s, e) {
      seoShowMore(tbody.closest('table'), [...tbody.rows], 'pages', 'pages');
  }
 
+ // ---- Wrong-page alerts ----
+ // A keyword has a target page set in SE Ranking (the page we want ranking) and a ranking_url (the
+ // page Google actually shows). When a keyword is ranking and the two differ, Google prefers a
+ // different page: usually a blog or list page outranking the service or city page built for it.
+ // Same comparison as samePage() in seranking-sync/parse.ts: protocol, www, trailing slash, query and
+ // case don't make a different page.
+ function seoSamePage(a, b) {
+     const norm = u => {
+         if (!u) return '';
+         let s = String(u).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '');
+         s = s.split('#')[0].split('?')[0];
+         return s.replace(/\/+$/, '');
+     };
+     const x = norm(a), y = norm(b);
+     return !!x && x === y;
+ }
+
+ function seoWrongPage(r) {
+     if (!r.target_page || !r.ranking_url) return false;
+     if (r.rank == null && r.map_rank == null) return false;   // not ranking: nothing ranks, so nothing is wrong
+     return !seoSamePage(r.target_page, r.ranking_url);
+ }
+
+ // Just the path, for reading at a glance: "/services/pergola-builds", "/" for the home page
+ function seoPagePath(u) {
+     try { const p = new URL(u).pathname.replace(/\/+$/, ''); return p || '/'; }
+     catch (_) { return String(u || ''); }
+ }
+
+ function renderSeoWrongPageAlerts(rows) {
+     const box = document.getElementById('seo-wrong-page-alerts');
+     if (!box) return;
+     const wrong = rows.filter(seoWrongPage);
+     box.classList.toggle('hidden', !wrong.length);
+     if (!wrong.length) { box.innerHTML = ''; return; }
+     box.innerHTML = `
+         <div class="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3">
+             <p class="text-xs font-bold text-amber-300 mb-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Wrong page ranking for ${wrong.length} keyword${wrong.length === 1 ? '' : 's'}</p>
+             <p class="text-[11px] text-gray-400 mb-2">Google is showing a different page than the target set in SE Ranking. Usually the fix is to strengthen the target page for that search, or link to it from the page that's ranking.</p>
+             <ul class="space-y-1.5">
+                 ${wrong.map(r => `<li class="text-xs text-gray-300">
+                     <span class="font-bold text-white">${escapeAttr(r.keyword)}</span>
+                     <span class="text-gray-500">— ranking</span> <span class="text-amber-300" title="${escapeAttr(r.ranking_url)}">${escapeAttr(seoPagePath(r.ranking_url))}</span>
+                     <span class="text-gray-500">instead of</span> <span class="text-emerald-300" title="${escapeAttr(r.target_page)}">${escapeAttr(seoPagePath(r.target_page))}</span>
+                 </li>`).join('')}
+             </ul>
+         </div>`;
+ }
+
  function renderSeoKeywordsTable(rows) {
      const tbody = document.getElementById('seo-keywords-tbody');
      if (!tbody) return;
+     renderSeoWrongPageAlerts(rows);
      if (!rows.length) {
          tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No keywords tracked yet — add some in SE Ranking, they show up here on the next sync.</td></tr>';
          seoShowMore(tbody.closest('table'), [], 'keywords', 'keywords');
@@ -5555,11 +5605,14 @@ async function buildReportSeoBlock(clientName, s, e) {
          const mapCell = r.map_rank != null
              ? `#${r.map_rank} ${r.prior_map_rank != null ? seoDeltaPill(r.map_rank, r.prior_map_rank, { invert: true }) : ''}`
              : dash;
-         const keywordTitle = r.ranking_url ? `${r.keyword}\nRanking page: ${r.ranking_url}` : r.keyword;
+         const wrong = seoWrongPage(r);
+         const keywordTitle = [r.keyword,
+             r.ranking_url ? `Ranking page: ${r.ranking_url}` : '',
+             r.target_page ? `Target page: ${r.target_page}` : ''].filter(Boolean).join('\n');
          const notRanking = r.rank == null && r.map_rank == null;
          return `
          <tr class="hover:bg-white/5 transition">
-             <td class="py-2 pr-2 text-gray-300 truncate max-w-[200px]" title="${escapeAttr(keywordTitle)}">${escapeAttr(r.keyword)}</td>
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[200px]" title="${escapeAttr(keywordTitle)}">${wrong ? '<i class="fa-solid fa-triangle-exclamation text-amber-400 text-[10px] mr-1" aria-label="Wrong page ranking"></i>' : ''}${escapeAttr(r.keyword)}</td>
              ${notRanking
                  ? '<td colspan="2" class="py-2 text-right text-gray-500">not ranking</td>'
                  : `<td class="py-2 text-right text-yellow-400">${organicCell}</td><td class="py-2 text-right text-purple-400">${mapCell}</td>`}
