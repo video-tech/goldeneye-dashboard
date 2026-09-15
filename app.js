@@ -5489,10 +5489,44 @@ async function buildReportSeoBlock(clientName, s, e) {
      return { daily: dailyRes.data || [], leads: leadsRes.data || [] };
  }
 
+ // Long lists on the admin SEO tab show their first few rows, with a button to see the rest.
+ // Open/closed is remembered per list for the session, so changing the date range doesn't keep
+ // collapsing a list someone just opened.
+ const SEO_LIST_PREVIEW = 3;
+ const seoListOpen = {};
+ function seoShowMore(host, items, key, noun) {
+     if (!host) return;
+     const btnId = `seo-more-${key}`;
+     let btn = document.getElementById(btnId);
+     if (items.length <= SEO_LIST_PREVIEW) {
+         items.forEach(el => el.classList.remove('hidden'));
+         if (btn) btn.remove();
+         return;
+     }
+     const open = !!seoListOpen[key];
+     items.forEach((el, i) => el.classList.toggle('hidden', !open && i >= SEO_LIST_PREVIEW));
+     if (!btn) {
+         btn = document.createElement('button');
+         btn.id = btnId;
+         btn.type = 'button';
+         btn.className = 'mt-3 text-xs font-bold text-blue-400 hover:text-blue-300 transition';
+         host.after(btn);
+     }
+     btn.innerHTML = open
+         ? '<i class="fa-solid fa-chevron-up mr-1"></i>Show fewer'
+         : `<i class="fa-solid fa-chevron-down mr-1"></i>View all ${items.length} ${noun}`;
+     btn.setAttribute('aria-expanded', String(open));
+     btn.onclick = () => { seoListOpen[key] = !open; seoShowMore(host, items, key, noun); };
+ }
+
  function renderSeoPagesTable(rows) {
      const tbody = document.getElementById('seo-pages-tbody');
      if (!tbody) return;
-     if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No page data for this range.</td></tr>'; return; }
+     if (!rows.length) {
+         tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No page data for this range.</td></tr>';
+         seoShowMore(tbody.closest('table'), [], 'pages', 'pages');
+         return;
+     }
      tbody.innerHTML = rows.map(r => `
          <tr class="hover:bg-white/5 transition">
              <td class="py-2 pr-2 text-gray-300 truncate max-w-[220px]" title="${escapeAttr(r.page)}">${escapeAttr(r.page)}</td>
@@ -5500,6 +5534,7 @@ async function buildReportSeoBlock(clientName, s, e) {
              <td class="py-2 text-right text-gray-400">${Number(r.impressions).toLocaleString()}</td>
              <td class="py-2 text-right text-yellow-400">${r.weighted_position != null ? Number(r.weighted_position).toFixed(1) : '—'}</td>
          </tr>`).join('');
+     seoShowMore(tbody.closest('table'), [...tbody.rows], 'pages', 'pages');
  }
 
  function renderSeoKeywordsTable(rows) {
@@ -5507,6 +5542,7 @@ async function buildReportSeoBlock(clientName, s, e) {
      if (!tbody) return;
      if (!rows.length) {
          tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No keywords tracked yet — add some in SE Ranking, they show up here on the next sync.</td></tr>';
+         seoShowMore(tbody.closest('table'), [], 'keywords', 'keywords');
          return;
      }
      tbody.innerHTML = rows.map(r => {
@@ -5531,6 +5567,7 @@ async function buildReportSeoBlock(clientName, s, e) {
              <td class="py-2 text-right text-gray-400">${Number(r.gsc_impressions || 0).toLocaleString()}</td>
          </tr>`;
      }).join('');
+     seoShowMore(tbody.closest('table'), [...tbody.rows], 'keywords', 'keywords');
  }
 
  function renderSeoMoversPanel(rows) {
@@ -5612,10 +5649,12 @@ async function buildReportSeoBlock(clientName, s, e) {
      if (!el) return;
      if (loadFailed) {
          el.innerHTML = '<p class="text-sm text-amber-400">Couldn\'t load the changelog. Check that supabase/functions/seranking-sync/schema.sql has been run.</p>';
+         seoShowMore(el, [], 'changelog', 'entries');
          return;
      }
      if (!entries.length) {
          el.innerHTML = '<p class="text-sm text-gray-500">Nothing logged yet. Next time a page goes live or a fix ships, log it here to see its effect on the chart.</p>';
+         seoShowMore(el, [], 'changelog', 'entries');
          return;
      }
      const numberById = new Map(markers.map(m => [String(m.id), m.n]));
@@ -5646,6 +5685,8 @@ async function buildReportSeoBlock(clientName, s, e) {
              </div>
          </div>`;
      }).join('');
+     // Newest first, so the three shown are the latest work
+     seoShowMore(el, [...el.children], 'changelog', 'entries');
  }
 
  window.openSeoChangelogForm = function(id) {

@@ -3,6 +3,18 @@
   "updates": [
     {
       "date": "2026-09-15",
+      "area": "SEO",
+      "title": "A tidier SEO tab",
+      "what": "The SEO Changelog, Top Pages and Tracked Keywords now show their first three rows, with a View all button to open the rest. A list you open stays open while you change the date range."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "Settings",
+      "title": "This Updates page",
+      "what": "Every change to Golden Eye in plain English, newest first, with anything still needing a SQL run or deploy marked Action needed. The tab shows a count of what's new since you last looked."
+    },
+    {
+      "date": "2026-09-15",
       "area": "Reports",
       "title": "Weekly reports now include real SEO results",
       "what": "A report for an SEO client gets an Organic Search section built from the same numbers their SEO tab shows: visits and leads from Google, jobs they reported closing from Google, which searches moved up, searches sitting on page 2, and the articles and fixes that went live that week. Small numbers stay plain counts instead of being spun as percentages.",
