@@ -46,8 +46,21 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
    `{event, client, client_email, completed_at}` to
    `hook.us2.make.com/hucrpp6hm43ps165n7wxut8v9rn3dksu` → tag GHL contact → GHL workflow
    texts the client
-5. **Weekly check-in reminder** — pg_cron → webhook with outstanding clients + contacts →
-   iterate → find by phone → SMS
+5. **Weekly check-in reminder** ("txt reminder twice a day") — pg_cron → `send_weekly_checkin_reminders()`
+   → webhook with outstanding clients + contacts → iterate → find by phone → SMS.
+   **Secured 2026-09-15**, the first scenario done after #4, and the pattern for the rest:
+   - The function sends `secret` from Vault (`supabase/sql/checkin_reminder_secret.sql`). Missing
+     secret means nothing is sent, and a warning says so.
+   - **Filter right after the webhook:** `secret` equals the value. A wrong secret stops the run at
+     1 operation, before the GHL search.
+   - **Search Contacts limit 1** (was 10) and the SMS module also requires
+     `found phone = the phone we sent`. Before this, one reminder could text up to 10 contacts —
+     the same flaw that texted 10 leads through #4.
+   - **Order that keeps it working:** update the database first, prove the secret arrives (a request
+     with an empty `contacts` list runs the scenario but texts nobody), redetermine the webhook's
+     data structure so `secret` is mappable, then add the filter.
+   - **Verified** by operation count: wrong secret = 1 op, real secret + a real contact = 4 ops and
+     a text.
 6. **Admin alerts** — Supabase trigger on `Client Request` tasks → webhook → SMS to us.
    **Unfinished**: trigger + recipients live, Make scenario needs iterator + send modules
 7. **Report draft to Gmail** — the "Draft" button on a saved report (`sendSavedReportToMake`,
@@ -58,6 +71,35 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
    `hook.us2.make.com/2kan16ro46vkcxsubi90aaobv1ym1fxg` → three HTTP calls to
    `graph.facebook.com/v21.0/{ad_id}/previews` (one per placement) → upsert
    `ad_approvals`. See **Ad approvals** below
+
+**Every Make webhook URL is public.** They're in this public repo, and before 2026-09-14 some
+were also in `app.js`'s page source. Anyone holding one can run the scenario, and that's how 10
+leads got an "onboarding complete" text (see `trg_onboarding_handoff`). So **every scenario
+filters on a `secret` field right after its webhook**, and every caller supplies it:
+- **Postgres functions** read it from Supabase Vault (`make_onboarding_hook_secret`).
+- **Edge functions** read the `MAKE_WEBHOOK_SECRET` secret. It's the same value.
+- **The browser must never call Make directly**, because a secret in `app.js` is public. That's
+  what `supabase/functions/make-relay` is for: admin-only, named hooks, allow-listed fields, and
+  it attaches the secret. **Built but not deployed yet**, so #7 and #8 still post straight from
+  the browser and can't be filtered until it lands.
+
+**Audit of every live scenario, 2026-09-15**, read through the Make MCP connection (Claude can list
+and read scenarios, executions and blueprints; the Make account is `video@midasmediafirm.com`,
+team "My Team" 1498711):
+
+| Scenario | Secret filter | Notes |
+|---|---|---|
+| #4 txt to client after onboarding | ✅ | Plus the exact-email check, from the 10-lead incident |
+| #5 txt reminder twice a day | ✅ 2026-09-15 | Limit 1 + exact phone match added at the same time |
+| #6 txt notification to us | ❌ | Same shape as #5: sends SMS to any number in the payload, searches GHL with limit 10 and no exact-phone check. Needs `notify_admins_client_request()` to send the secret first |
+| #7 REPORTS GE to gmail | ❌ | Anyone with the URL can create Gmail drafts. Waiting on `make-relay` |
+| #8 ads approval | ❌ | Anyone with the URL can upsert `ad_approvals` rows (overwrite a client's decision) and make us call Meta. Waiting on `make-relay` |
+| #2 seo for golden eye | n/a | **Already switched off**, so Make's old SEO pull is retired |
+
+**Credentials live in plain text inside blueprints:** a GHL private integration token (#5, #6) and a
+Meta access token (three copies in #8). Reading those blueprints puts the values in whatever tool
+reads them, so **rotate both, then paste the new values in Make**, and prefer a Make connection or
+custom variable over typing tokens into HTTP modules.
 
 ## Database objects we added
 
