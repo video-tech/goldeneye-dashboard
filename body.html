@@ -168,6 +168,13 @@
         .kanban-card, .cp-kanban-card { cursor: grab; }
         .kanban-card:active, .cp-kanban-card:active { cursor: grabbing; }
         .sortable-ghost { opacity: 0.4; }
+        /* Tag toggles on onboarding steps and checklist items (who a step applies to) */
+        .ob-chip { padding: 0.15rem 0.6rem; font-size: 0.7rem; font-weight: 600; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12); color: #94a3b8; background: transparent; transition: 0.15s; }
+        .ob-chip:hover { color: #e2e8f0; border-color: rgba(255,255,255,0.25); }
+        .ob-chip[aria-pressed="true"] { background: rgba(59,130,246,0.18); border-color: rgba(96,165,250,0.5); color: #bfdbfe; }
+        .ob-chip.ob-chip-web[aria-pressed="true"] { background: rgba(16,185,129,0.15); border-color: rgba(52,211,153,0.45); color: #a7f3d0; }
+        .ob-chip.ob-chip-off { border-style: dashed; }
+        .ob-chip:focus-visible { outline: 2px solid #60a5fa; outline-offset: 1px; }
         .view-btn { padding: 0.4rem 1rem; font-size: 0.8rem; font-weight: bold; border-radius: 0.5rem; transition: 0.2s; color: #94a3b8; }
         .view-btn.active { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
 
@@ -1123,6 +1130,7 @@
                     
                     <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2 overflow-x-auto">
                         <button id="tab-btn-tpl-recurring" onclick="switchTemplateView('recurring')" class="whitespace-nowrap pb-3 text-sm font-bold text-blue-400 border-b-2 border-blue-400">Recurring Templates</button>
+                        <button id="tab-btn-tpl-services" onclick="switchTemplateView('services')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Services</button>
                         <button id="tab-btn-tpl-stage" onclick="switchTemplateView('stage')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Stage Checklists</button>
                         <button id="tab-btn-tpl-onboarding" onclick="switchTemplateView('onboarding')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Client Onboarding</button>
                     </div>
@@ -1153,6 +1161,34 @@
                                         </tr>
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="t-view-services" class="space-y-6 hidden">
+                        <div class="glass p-6">
+                            <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
+                                <div>
+                                    <h3 class="text-lg font-bold text-white">Services</h3>
+                                    <p class="text-xs text-gray-400 mt-1">The add-ons a client can buy on top of Base. Onboarding steps and checklist items are tagged with these, so a client only gets the steps for what they bought.</p>
+                                </div>
+                                <button onclick="addServiceRow()" class="bg-blue-600 hover:bg-blue-500 text-white btn btn-sm text-xs shadow-lg transition">
+                                    <i class="fa-solid fa-plus mr-1"></i> Add Service
+                                </button>
+                            </div>
+                            <div class="hidden md:grid grid-cols-12 gap-2 text-[10px] uppercase tracking-widest text-gray-500 px-1 mb-2">
+                                <div class="col-span-1"></div>
+                                <div class="col-span-3">Name</div>
+                                <div class="col-span-2">Key</div>
+                                <div class="col-span-4">What's included</div>
+                                <div class="col-span-2 text-center">Offered</div>
+                            </div>
+                            <div id="services-container" class="space-y-2"></div>
+                            <div class="flex flex-wrap justify-between items-center gap-3 mt-6 pt-4 border-t border-white/10">
+                                <p class="text-[11px] text-gray-500 max-w-xl">Base (website, missed-call text-back, reviews, follow-up, portal) isn't listed: every client has it, and untagged steps are Base. Switch a service off to stop offering it. Clients who have it keep their history. The key can't change once saved, because steps are tagged with it.</p>
+                                <button onclick="saveServices()" id="btn-save-services" class="bg-green-600 hover:bg-green-500 text-white btn text-sm shadow-lg transition">
+                                    Save Services
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1212,6 +1248,23 @@
                                     Save Steps
                                 </button>
                             </div>
+                        </div>
+
+                        <div class="glass p-6">
+                            <div class="mb-4">
+                                <h3 class="text-lg font-bold text-white">Preview a Client</h3>
+                                <p class="text-xs text-gray-400 mt-1">Pick what a client bought and their website situation to see exactly which steps and tasks they'd get. Uses the saved steps, so save your changes first.</p>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-3 mb-4">
+                                <div id="ob-preview-services" class="flex flex-wrap gap-2"></div>
+                                <select id="ob-preview-website" class="glass-input !py-1.5 !w-56" onchange="runOnboardingPreview()">
+                                    <option value="">Website: not set yet</option>
+                                    <option value="new_build">Website: we're building it</option>
+                                    <option value="existing">Website: they have one</option>
+                                    <option value="none">Website: none</option>
+                                </select>
+                            </div>
+                            <div id="ob-preview-result" class="text-sm"></div>
                         </div>
                     </div>
                 </div>
@@ -2133,6 +2186,21 @@
                             <p class="text-[10px] text-gray-500 mt-1">Grants portal access and receives reports. Separate multiple with commas.</p>
                         </div>
                         <div class="col-span-2">
+                            <label class="modal-label">Add-ons</label>
+                            <div id="new-client-services" class="flex flex-wrap gap-x-4 gap-y-2"></div>
+                            <p class="text-[10px] text-gray-500 mt-1">Every client gets Base. Their Get Started steps and our onboarding tasks follow what's ticked here.</p>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Website</label>
+                            <select id="new-client-website-status" class="glass-input">
+                                <option value="">Not sure yet</option>
+                                <option value="new_build">We're building their site</option>
+                                <option value="existing">They already have a site</option>
+                                <option value="none">No website</option>
+                            </select>
+                            <p class="text-[10px] text-gray-500 mt-1">Steps that depend on the website, like giving us access to it, are skipped until this is set.</p>
+                        </div>
+                        <div class="col-span-2">
                             <p class="text-[10px] text-gray-500 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
                                 <i class="fa-solid fa-comment-sms mr-1 text-emerald-400"></i>
                                 Add the people who should receive the weekly check-in text via <strong class="text-gray-300">Edit</strong> once this client is created &mdash; you can list several.
@@ -2204,6 +2272,20 @@
                         <div class="col-span-2">
                             <label class="modal-label">Client Email(s)</label>
                             <input type="text" id="edit-client-email" class="glass-input" placeholder="owner@acme.com, manager@acme.com">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Add-ons</label>
+                            <div id="edit-client-services" class="flex flex-wrap gap-x-4 gap-y-2"></div>
+                            <p class="text-[10px] text-gray-500 mt-1">Ticking a new add-on starts its onboarding: its steps show on their Get Started. Unticking ends it, and its history stays.</p>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Website</label>
+                            <select id="edit-client-website-status" class="glass-input">
+                                <option value="">Not sure yet</option>
+                                <option value="new_build">We're building their site</option>
+                                <option value="existing">They already have a site</option>
+                                <option value="none">No website</option>
+                            </select>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">Check-in Contacts</label>

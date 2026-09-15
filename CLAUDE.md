@@ -364,7 +364,23 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
     Search Console or SE Ranking connected also get `seo`.
   - **Nothing reads these yet:** app.js and `trg_onboarding_handoff` still use the global list until
     later steps switch them.
-  - **Tests:** 28 PGlite checks.
+  - **Tests:** 35 PGlite checks.
+- **`onboarding_condition_matches()` is THE rule** for whether tags apply. `onboarding_preview()`
+  and `onboarding_steps_for_client()` both call it, and app.js never re-implements it.
+  `onboarding_auto_checks(null)` returns every check with its label, which is the editor's picker list.
+- **Editor (built 2026-09-15):**
+  - **Templates → Services** manages add-ons. Keys are read-only once saved, because steps are
+    tagged with them. Services are switched off, never deleted.
+  - **Tags:** every onboarding step and stage checklist row has service chips, website-situation
+    pills and, on our own tasks, an auto-check picker.
+  - **Preview:** Client Onboarding has **Preview a Client**, which calls `onboarding_preview`.
+  - **Add / Edit Client** have add-on checkboxes and a Website select. A newly ticked add-on becomes
+    `onboarding`, an unticked one becomes `ended` (after a confirm), and re-ticking an ended one
+    restarts it.
+  - **Tests:** 26 jsdom checks.
+- **Not switched yet:** the portal's Get Started, stage task generation and `trg_onboarding_handoff`
+  still ignore the tags. Auto-checks are labels only until the reconcile is built. Don't add
+  add-on-only steps until the portal switch lands, or every client will see them.
 
 Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5× default
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of

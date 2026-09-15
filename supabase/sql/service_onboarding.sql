@@ -238,6 +238,8 @@ grant execute on function service_onboarding_status(text) to authenticated;
 -- ---------------------------------------------------------------------------
 -- A task (or checklist item) with auto_check = one of these keys is completed automatically once
 -- the check passes. Add a check here and pick it in the Templates editor, and no other code changes.
+-- Called with null, it returns every check with passed = false: that's the Templates editor's picker
+-- list, so the keys and labels live only here. An unknown client name still returns nothing.
 create or replace function onboarding_auto_checks(p_client text)
 returns table (check_key text, label text, passed boolean)
 language sql stable
@@ -245,7 +247,9 @@ set search_path = public
 as $$
     with c as (select * from clients where name = p_client limit 1)
     select v.check_key, v.label, coalesce(v.passed, false)
-    from c cross join lateral (values
+    from (select 1) one
+    left join c on true
+    cross join lateral (values
         ('ad_account_set',      'Meta ad account ID saved',
             nullif(regexp_replace(coalesce(c.ad_account_id, ''), '\D', '', 'g'), '') is not null),
         -- daily_reports came from a Google Sheet via Make, so spend is read as text and converted,
@@ -276,7 +280,8 @@ as $$
             exists (select 1 from lead_sources l where l.client_name = c.name and l.source = 'organic')),
         ('website_status_set',  'Website situation recorded',
             c.website_status is not null)
-    ) as v (check_key, label, passed);
+    ) as v (check_key, label, passed)
+    where p_client is null or exists (select 1 from c);
 $$;
 grant execute on function onboarding_auto_checks(text) to authenticated;
 

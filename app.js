@@ -26,6 +26,8 @@
         let globalContactsData = [];
         let globalOnboardingSteps = [];
         let globalOnboardingProgress = [];
+        let globalServices = [];          // add-ons on top of Base, from services
+        let globalClientServices = [];    // which add-ons each client has, from client_services
         // Delays the manual "mark it done" fallback on form steps until the webhook has had a chance
         let obManualRevealTimer = null;
         let allRawSeo = [];
@@ -2931,14 +2933,18 @@ window.submitClientRequest = async function() {
     let obStepsQ = supabaseClient.from('onboarding_steps').select('*').order('sort_order');
     let obProgQ  = supabaseClient.from('client_onboarding_progress').select('*');
 
+    // Add-on services and which ones each client has (service_onboarding.sql)
+    let servicesQ = supabaseClient.from('services').select('*').order('sort_order');
+    let clientServicesQ = supabaseClient.from('client_services').select('*');
+
     if (allowedClients && currentUserRole !== 'admin') {
         clientsQ = clientsQ.in('name', allowedClients); healthQ = healthQ.in('client_name', allowedClients); tasksQ = tasksQ.in('client', allowedClients); crQ = crQ.in('client_name', allowedClients); seoQ = seoQ.in('client_name', allowedClients);
         checkinsQ = checkinsQ.in('client_name', allowedClients);
         contactsQ = contactsQ.in('client_name', allowedClients);
+        clientServicesQ = clientServicesQ.in('client_name', allowedClients);
     }
 
-    // 👇 2. ADD auditsQ TO THE END OF THIS ARRAY 👇
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ ]);
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ, servicesQ, clientServicesQ ]);
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
     
@@ -2965,8 +2971,8 @@ window.submitClientRequest = async function() {
     globalStageTemplates = results[9].status === 'fulfilled' ? (results[9].value.data || []) : [];
     globalOnboardingSteps = results[10].status === 'fulfilled' ? (results[10].value.data || []) : [];
     globalOnboardingProgress = results[11].status === 'fulfilled' ? (results[11].value.data || []) : [];
-
-    // ... the rest of the function continues as normal ...
+    globalServices = results[12].status === 'fulfilled' ? (results[12].value.data || []) : [];
+    globalClientServices = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
 
             if (allowedClients && currentUserRole !== 'admin') {
                 const normAllowed = allowedClients.map(a => normalize(a));
@@ -6158,7 +6164,7 @@ Treat this period as a fresh starting point. State every number plainly as where
 
         window.switchTemplateView = function(view) {
             // Hide both views initially
-            ['recurring', 'stage', 'onboarding'].forEach(v => {
+            ['recurring', 'services', 'stage', 'onboarding'].forEach(v => {
                 const el = document.getElementById(`t-view-${v}`);
                 const btn = document.getElementById(`tab-btn-tpl-${v}`);
                 if (el) el.classList.add('hidden');
@@ -6168,7 +6174,8 @@ Treat this period as a fresh starting point. State every number plainly as where
             // Show selected view and highlight active tab
             document.getElementById(`t-view-${view}`).classList.remove('hidden');
             if (view === 'stage') initStageTemplateEditor();
-            if (view === 'onboarding') renderOnboardingSteps();
+            if (view === 'onboarding') { renderOnboardingSteps(); renderOnboardingPreviewControls(); }
+            if (view === 'services') renderServices();
             const activeBtn = document.getElementById(`tab-btn-tpl-${view}`);
             
             if(activeBtn) {
@@ -7506,6 +7513,317 @@ window.updateTransitionTaskCount = function() {
     }
 };
 
+// ---- Service tags on steps and checklist items ----
+// Which clients a step applies to is decided in SQL (onboarding_condition_matches in
+// service_onboarding.sql) and nowhere else. This editor only reads and writes the tags; it
+// never works out applicability itself, so the preview can't disagree with the portal.
+const WEBSITE_STATUS_LABELS = {
+    new_build: "We're building it",
+    existing: 'They have one',
+    none: 'No website'
+};
+
+function serviceName(key) {
+    return globalServices.find(s => s.key === key)?.name || key;
+}
+
+// Every check onboarding_auto_checks() knows, for the picker. Fetched once; the keys and
+// labels live only in that SQL function.
+let autoCheckCatalog = null;
+let autoCheckCatalogPromise = null;
+function loadAutoCheckCatalog() {
+    if (!autoCheckCatalogPromise) {
+        autoCheckCatalogPromise = supabaseClient.rpc('onboarding_auto_checks', { p_client: null })
+            .then(({ data, error }) => {
+                if (error) { console.warn('Could not load the automatic check list:', error); autoCheckCatalogPromise = null; return []; }
+                autoCheckCatalog = (data || []).map(r => ({ key: r.check_key, label: r.label }));
+                return autoCheckCatalog;
+            });
+    }
+    return autoCheckCatalogPromise;
+}
+
+function autoCheckOptions(selected) {
+    const list = autoCheckCatalog || [];
+    // Keep a saved value selectable even before the list loads, or if the check was removed
+    // from SQL, so re-saving the editor never silently drops it.
+    const known = list.some(c => c.key === selected);
+    return `<option value="">A person ticks it off</option>`
+        + list.map(c => `<option value="${escapeAttr(c.key)}" ${c.key === selected ? 'selected' : ''}>Done when: ${escapeAttr(c.label)}</option>`).join('')
+        + (selected && !known ? `<option value="${escapeAttr(selected)}" selected>Done when: ${escapeAttr(selected)}</option>` : '');
+}
+
+function refreshAutoCheckSelects() {
+    document.querySelectorAll('select.ob-autocheck').forEach(sel => {
+        sel.innerHTML = autoCheckOptions(sel.value || sel.dataset.saved || '');
+    });
+}
+
+// The tag line under a step or checklist item. Nothing ticked = everyone.
+function conditionEditorHtml(item) {
+    const services = item?.service_keys || [];
+    const websites = item?.website_statuses || [];
+    // Offered services, plus any retired one this item is still tagged with, so the tag
+    // stays visible and removable rather than hidden but still in force
+    const shown = globalServices.filter(s => s.active !== false || services.includes(s.key));
+    const serviceChips = shown.map(s => `
+        <button type="button" class="ob-chip ob-chip-svc ${s.active === false ? 'ob-chip-off' : ''}" data-key="${escapeAttr(s.key)}"
+            aria-pressed="${services.includes(s.key)}" onclick="toggleConditionChip(this)"
+            title="${s.active === false ? 'Not offered any more' : 'Applies to clients with ' + escapeAttr(s.name)}">${escapeAttr(s.name)}</button>`).join('');
+    const webChips = Object.entries(WEBSITE_STATUS_LABELS).map(([k, label]) => `
+        <button type="button" class="ob-chip ob-chip-web" data-key="${k}" aria-pressed="${websites.includes(k)}" onclick="toggleConditionChip(this)">${label}</button>`).join('');
+
+    return `
+        <div class="ob-conditions flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
+            <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">For</span>
+                ${serviceChips}
+                <span class="ob-svc-summary text-[10px] text-gray-500"></span>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">Website</span>
+                ${webChips}
+                <span class="ob-web-summary text-[10px] text-gray-500"></span>
+            </div>
+            <select class="glass-input !py-1 !text-xs !w-auto max-w-xs ob-autocheck" data-saved="${escapeAttr(item?.auto_check || '')}">${autoCheckOptions(item?.auto_check || '')}</select>
+        </div>`;
+}
+
+window.toggleConditionChip = function(btn) {
+    btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    updateConditionSummary(btn.closest('.ob-conditions'));
+};
+
+function updateConditionSummary(wrap) {
+    if (!wrap) return;
+    const anySvc = wrap.querySelector('.ob-chip-svc[aria-pressed="true"]');
+    const anyWeb = wrap.querySelector('.ob-chip-web[aria-pressed="true"]');
+    wrap.querySelector('.ob-svc-summary').innerText = anySvc ? '' : 'Everyone (Base)';
+    wrap.querySelector('.ob-web-summary').innerText = anyWeb ? '' : 'Any';
+}
+
+function readConditions(row) {
+    const pressed = sel => [...row.querySelectorAll(`${sel}[aria-pressed="true"]`)].map(b => b.dataset.key);
+    return {
+        service_keys: pressed('.ob-chip-svc'),
+        website_statuses: pressed('.ob-chip-web'),
+        auto_check: row.querySelector('.ob-autocheck')?.value || null
+    };
+}
+
+// ---- Services editor (Templates → Services) ----
+window.renderServices = function() {
+    const container = document.getElementById('services-container');
+    if (!container) return;
+    container.innerHTML = '';
+    [...globalServices].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)).forEach(s => addServiceRow(s));
+    if (typeof Sortable !== 'undefined') {
+        if (container._sortable) container._sortable.destroy();
+        container._sortable = new Sortable(container, { handle: '.svc-drag-handle', animation: 150, ghostClass: 'sortable-ghost' });
+    }
+};
+
+window.addServiceRow = function(svc) {
+    const container = document.getElementById('services-container');
+    if (!container) return;
+    const saved = !!svc?.key;
+    const row = document.createElement('div');
+    row.className = 'svc-row grid grid-cols-12 gap-2 items-center';
+    row.dataset.saved = saved ? 'true' : 'false';
+    row.innerHTML = `
+        <span class="svc-drag-handle col-span-1 cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-300 px-1" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></span>
+        <input type="text" class="glass-input !py-1.5 col-span-3 svc-name" placeholder="e.g. Video" value="${escapeAttr(svc?.name || '')}" ${saved ? '' : 'oninput="suggestServiceKey(this)"'}>
+        <input type="text" class="glass-input !py-1.5 col-span-2 svc-key font-mono !text-xs" placeholder="video" value="${escapeAttr(svc?.key || '')}" ${saved ? 'readonly title="Steps are tagged with this key, so it can\'t change"' : ''}>
+        <input type="text" class="glass-input !py-1.5 col-span-4 svc-desc" placeholder="What's included" value="${escapeAttr(svc?.description || '')}">
+        <label class="col-span-2 flex items-center justify-center gap-2 text-[11px] text-gray-400 cursor-pointer">
+            <input type="checkbox" class="row-checkbox svc-active" ${svc?.active === false ? '' : 'checked'}> Offered
+        </label>`;
+    container.appendChild(row);
+    if (!saved) row.querySelector('.svc-name').focus();
+};
+
+window.suggestServiceKey = function(input) {
+    const keyInput = input.closest('.svc-row').querySelector('.svc-key');
+    if (keyInput.dataset.touched) return;
+    keyInput.value = input.value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    keyInput.oninput = () => { keyInput.dataset.touched = '1'; };
+};
+
+window.saveServices = async function() {
+    if (currentUserRole !== 'admin') return;
+    const btn = document.getElementById('btn-save-services');
+    const rows = [...document.querySelectorAll('#services-container .svc-row')];
+    const entered = rows.map((r, i) => ({
+        key: r.querySelector('.svc-key').value.trim(),
+        name: r.querySelector('.svc-name').value.trim(),
+        description: r.querySelector('.svc-desc').value.trim() || null,
+        active: r.querySelector('.svc-active').checked,
+        sort_order: i + 1
+    })).filter(s => s.key || s.name);
+
+    const bad = entered.find(s => !s.name || !/^[a-z0-9_]+$/.test(s.key));
+    if (bad) { alert(`"${bad.name || bad.key}" needs a name and a key made of lowercase letters, numbers or underscores.`); return; }
+    const keys = entered.map(s => s.key);
+    const dupe = keys.find((k, i) => keys.indexOf(k) !== i);
+    if (dupe) { alert(`Two services use the key "${dupe}".`); return; }
+
+    // Services are never deleted from here: client_services and step tags point at the key.
+    // A row an admin removes from view is simply left as it is.
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
+    btn.disabled = true;
+    try {
+        const { error } = await supabaseClient.from('services').upsert(entered, { onConflict: 'key' });
+        if (error) throw error;
+        const { data, error: loadErr } = await supabaseClient.from('services').select('*').order('sort_order');
+        if (loadErr) throw loadErr;
+        globalServices = data || [];
+        renderServices();
+    } catch (err) {
+        alert('Could not save services: ' + err.message);
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+};
+
+// ---- Preview (Templates → Client Onboarding) ----
+window.renderOnboardingPreviewControls = function() {
+    const wrap = document.getElementById('ob-preview-services');
+    if (!wrap) return;
+    const checked = new Set([...wrap.querySelectorAll('.ob-chip[aria-pressed="true"]')].map(b => b.dataset.key));
+    // First visit: preview the most common client, ads only
+    if (!wrap.dataset.ready && globalServices.some(s => s.key === 'ads')) checked.add('ads');
+    wrap.dataset.ready = '1';
+    wrap.innerHTML = globalServices.filter(s => s.active !== false).map(s => `
+        <button type="button" class="ob-chip" data-key="${escapeAttr(s.key)}" aria-pressed="${checked.has(s.key)}"
+            onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true'); runOnboardingPreview();">${escapeAttr(s.name)}</button>`).join('');
+    runOnboardingPreview();
+};
+
+let obPreviewSeq = 0;
+window.runOnboardingPreview = async function() {
+    const out = document.getElementById('ob-preview-result');
+    if (!out) return;
+    const services = [...document.querySelectorAll('#ob-preview-services .ob-chip[aria-pressed="true"]')].map(b => b.dataset.key);
+    const website = document.getElementById('ob-preview-website').value || null;
+    const seq = ++obPreviewSeq;
+    out.innerHTML = '<span class="text-gray-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading…</span>';
+
+    const [{ data, error }] = await Promise.all([
+        supabaseClient.rpc('onboarding_preview', { p_services: services, p_website: website }),
+        loadAutoCheckCatalog()
+    ]);
+    if (seq !== obPreviewSeq) return;   // a newer click already asked
+    if (error) {
+        out.innerHTML = `<span class="text-red-400">Couldn't load the preview: ${escapeAttr(error.message)}. Has supabase/sql/service_onboarding.sql been run?</span>`;
+        return;
+    }
+
+    const checkLabel = key => autoCheckCatalog?.find(c => c.key === key)?.label || key;
+    const item = r => `
+        <li class="flex items-start gap-2 py-1">
+            <i class="fa-solid ${r.owner === 'agency' ? 'fa-list-check text-gray-500' : 'fa-circle-user text-blue-400/70'} mt-1 text-xs"></i>
+            <span class="text-gray-200">${escapeAttr(r.title)}</span>
+            ${r.auto_check ? `<span class="text-[10px] text-emerald-400/90 whitespace-nowrap mt-0.5" title="Golden Eye ticks this off itself"><i class="fa-solid fa-bolt mr-0.5"></i>${escapeAttr(checkLabel(r.auto_check))}</span>` : ''}
+        </li>`;
+    const group = (title, rows, note) => rows.length ? `
+        <div class="min-w-0">
+            <h4 class="text-[10px] uppercase tracking-widest text-gray-400 font-bold mb-1">${title} <span class="text-gray-600 font-normal normal-case tracking-normal">${rows.length}</span></h4>
+            ${note ? `<p class="text-[10px] text-gray-500 mb-1">${note}</p>` : ''}
+            <ul>${rows.map(item).join('')}</ul>
+        </div>` : '';
+
+    const rows = data || [];
+    const steps = rows.filter(r => r.source === 'step');
+    const clientSteps = steps.filter(r => r.owner !== 'agency');
+    // Headings the portal will use: shared steps first, then one per service in services order
+    const headings = [null, ...globalServices.map(s => s.key)];
+    const clientGroups = headings.map(k => group(
+        k ? escapeAttr(serviceName(k)) : 'Getting started',
+        clientSteps.filter(r => (r.display_service_key || null) === k)
+    )).join('');
+    const stages = [...new Set(rows.filter(r => r.source === 'checklist').map(r => r.stage))];
+
+    out.innerHTML = rows.length ? `
+        <div class="grid gap-6 md:grid-cols-2">
+            <div class="space-y-4">
+                <h3 class="text-xs font-bold text-white">They see on Get Started</h3>
+                ${clientGroups || '<p class="text-gray-500 text-xs">Nothing.</p>'}
+            </div>
+            <div class="space-y-4">
+                <h3 class="text-xs font-bold text-white">We get as tasks</h3>
+                ${group('When they finish onboarding', steps.filter(r => r.owner === 'agency'))}
+                ${stages.map(st => group(escapeAttr(st), rows.filter(r => r.source === 'checklist' && r.stage === st))).join('')}
+            </div>
+        </div>
+        ${!website ? '<p class="text-[11px] text-amber-400/80 mt-4"><i class="fa-solid fa-circle-info mr-1"></i>With the website not set, steps tagged for a website situation are left out.</p>' : ''}`
+        : '<p class="text-gray-500 text-xs">No steps or checklist items apply.</p>';
+};
+
+// ---- Add-ons on Add / Edit Client ----
+function renderClientServicePicker(containerId, clientName) {
+    const wrap = document.getElementById(containerId);
+    if (!wrap) return;
+    const mine = clientName ? globalClientServices.filter(cs => cs.client_name === clientName) : [];
+    const statusOf = key => mine.find(cs => cs.service_key === key)?.status;
+    const STATUS_NOTE = { onboarding: 'onboarding', paused: 'paused' };
+    // Offered services, plus any retired one this client still has
+    const shown = globalServices.filter(s => s.active !== false || ['onboarding', 'active', 'paused'].includes(statusOf(s.key)));
+    wrap.innerHTML = shown.length ? shown.map(s => {
+        const st = statusOf(s.key);
+        const has = ['onboarding', 'active', 'paused'].includes(st);
+        return `
+            <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                <input type="checkbox" class="row-checkbox client-service-box" value="${escapeAttr(s.key)}" ${has ? 'checked' : ''}>
+                ${escapeAttr(s.name)}
+                ${STATUS_NOTE[st] ? `<span class="text-[10px] text-gray-500">(${STATUS_NOTE[st]})</span>` : ''}
+            </label>`;
+    }).join('') : '<span class="text-[11px] text-gray-500">No services set up yet. Add them in Templates → Services.</span>';
+}
+
+// Newly ticked → onboarding (or back to onboarding if it had ended). Unticked → ended.
+// Paused stays paused while ticked. Rows are never deleted, so history survives.
+// cachedName is the name the rows are filed under in globalClientServices (the name before
+// any rename in this save); plan it before writing anything, so the "end it?" question can
+// be asked before other edits are saved.
+function planClientServiceChanges(cachedName, containerId) {
+    const wrap = document.getElementById(containerId);
+    const plan = { add: [], restart: [], end: [] };
+    if (!wrap) return plan;
+    const ticked = new Set([...wrap.querySelectorAll('.client-service-box:checked')].map(b => b.value));
+    const existing = cachedName ? globalClientServices.filter(cs => cs.client_name === cachedName) : [];
+    const live = cs => ['onboarding', 'active', 'paused'].includes(cs.status);
+    ticked.forEach(key => {
+        const row = existing.find(cs => cs.service_key === key);
+        if (!row) plan.add.push(key);
+        else if (!live(row)) plan.restart.push(key);
+    });
+    existing.filter(cs => live(cs) && !ticked.has(cs.service_key)).forEach(cs => plan.end.push(cs.service_key));
+    return plan;
+}
+
+async function applyClientServiceChanges(clientName, plan) {
+    const { add: addKeys, restart, end } = plan;
+    const inserts = addKeys.map(key => ({ client_name: clientName, service_key: key, status: 'onboarding' }));
+    if (inserts.length) {
+        const { error } = await supabaseClient.from('client_services').insert(inserts);
+        if (error) throw error;
+    }
+    if (restart.length) {
+        const { error } = await supabaseClient.from('client_services')
+            .update({ status: 'onboarding', started_at: new Date().toISOString(), onboarded_at: null })
+            .eq('client_name', clientName).in('service_key', restart);
+        if (error) throw error;
+    }
+    if (end.length) {
+        const { error } = await supabaseClient.from('client_services')
+            .update({ status: 'ended' })
+            .eq('client_name', clientName).in('service_key', end);
+        if (error) throw error;
+    }
+}
+
 // ---- Stage checklist editor (Templates → Stage Checklists) ----
 window.initStageTemplateEditor = function() {
     const picker = document.getElementById('tpl-stage-picker');
@@ -7543,9 +7861,10 @@ window.addStageTemplateRow = function(tpl) {
 
     const types = ['Checklist', 'Milestone', 'One-off', 'Recurring'];
     const row = document.createElement('div');
-    row.className = 'tpl-stage-row grid grid-cols-12 gap-2 items-center';
+    row.className = 'tpl-stage-row bg-black/20 border border-white/5 rounded-xl p-2 space-y-1';
     row.dataset.tplId = tpl?.id || '';
     row.innerHTML = `
+        <div class="grid grid-cols-12 gap-2 items-center">
         <input type="text" class="glass-input !py-1.5 col-span-4 tpl-title" placeholder="e.g. Build campaign structure" value="${escapeAttr(stripSlashEscapes(tpl?.task_title))}">
         <input type="text" class="glass-input !py-1.5 col-span-2 tpl-assignee" placeholder="Assignee" value="${escapeAttr(stripSlashEscapes(tpl?.assignee))}">
         <input type="text" class="glass-input !py-1.5 col-span-2 tpl-group" placeholder="Optional" value="${escapeAttr(stripSlashEscapes(tpl?.checklist_group))}">
@@ -7555,8 +7874,12 @@ window.addStageTemplateRow = function(tpl) {
         </select>
         <button type="button" onclick="this.closest('.tpl-stage-row').remove()" class="col-span-1 text-red-500/60 hover:text-red-400" title="Remove">
             <i class="fa-solid fa-xmark"></i>
-        </button>`;
+        </button>
+        </div>
+        ${conditionEditorHtml(tpl)}`;
     container.appendChild(row);
+    updateConditionSummary(row.querySelector('.ob-conditions'));
+    if (!autoCheckCatalog) loadAutoCheckCatalog().then(refreshAutoCheckSelects);
 };
 
 // Given an array whose rows have differing keys, PostgREST builds a single INSERT from
@@ -7592,7 +7915,8 @@ window.saveStageTemplates = async function() {
         checklist_group: r.querySelector('.tpl-group').value.trim() || null,
         due_days: parseInt(r.querySelector('.tpl-days').value) || 0,
         task_type: r.querySelector('.tpl-type').value,
-        sort_order: i + 1
+        sort_order: i + 1,
+        ...readConditions(r)
     })).filter(t => t.task_title);
 
     const original = btn.innerHTML;
@@ -7618,7 +7942,10 @@ window.saveStageTemplates = async function() {
                     checklist_group: t.checklist_group,
                     due_days: t.due_days,
                     task_type: t.task_type,
-                    sort_order: t.sort_order
+                    sort_order: t.sort_order,
+                    service_keys: t.service_keys,
+                    website_statuses: t.website_statuses,
+                    auto_check: t.auto_check
                 };
                 if (t.id) row.id = t.id;
                 return row;
@@ -7732,9 +8059,12 @@ window.addOnboardingStepRow = function(step) {
                 <input type="checkbox" class="row-checkbox ob-help" ${step?.offer_help ? 'checked' : ''}>
                 Offer a "book a call with us" option on this step
             </label>
-        </div>`;
+        </div>
+        ${conditionEditorHtml(step)}`;
     container.appendChild(row);
+    updateConditionSummary(row.querySelector('.ob-conditions'));
     toggleOnboardingOwnerFields(row.querySelector('.ob-owner'));
+    if (!autoCheckCatalog) loadAutoCheckCatalog().then(refreshAutoCheckSelects);
 };
 
 // Show only the fields that mean something for this row. A client step has no assignee
@@ -7751,6 +8081,9 @@ window.toggleOnboardingOwnerFields = function(el) {
     row.querySelector('.ob-days').style.display = isAgency ? '' : 'none';
     // These only mean anything for a step the client performs
     row.querySelector('.ob-client-opts').style.display = isAgency ? 'none' : '';
+    // Only our own tasks can tick themselves off; a client step is done when they do it
+    const autoCheck = row.querySelector('.ob-autocheck');
+    if (autoCheck) autoCheck.style.display = isAgency ? '' : 'none';
     // The label field is pointless unless a confirmation is being asked for
     row.querySelector('.ob-confirm-label').style.display = row.querySelector('.ob-confirm').checked ? '' : 'none';
 
@@ -7788,7 +8121,9 @@ window.saveOnboardingSteps = async function() {
             sort_order: i + 1,
             // Carried from the row rather than forced true, so saving the editor can't
             // silently republish a step that was retired
-            active: r.dataset.stepActive !== 'false'
+            active: r.dataset.stepActive !== 'false',
+            ...readConditions(r),
+            auto_check: isAgency ? readConditions(r).auto_check : null
         };
     }).filter(s => s.title);
 
@@ -7820,7 +8155,8 @@ window.saveOnboardingSteps = async function() {
                     step_type: s.step_type, embed_url: s.embed_url,
                     assignee: s.assignee, due_days: s.due_days, offer_help: s.offer_help,
                     requires_confirm: s.requires_confirm, confirm_label: s.confirm_label,
-                    sort_order: s.sort_order, active: s.active
+                    sort_order: s.sort_order, active: s.active,
+                    service_keys: s.service_keys, website_statuses: s.website_statuses, auto_check: s.auto_check
                 };
                 if (s.id) row.id = s.id;
                 return row;
@@ -8066,6 +8402,8 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-contact-name').value = c.contact_name || '';
     document.getElementById('edit-client-industry').value     = c.industry || '';
     document.getElementById('edit-client-email').value        = c.client_email || '';
+    renderClientServicePicker('edit-client-services', c.name);
+    document.getElementById('edit-client-website-status').value = c.website_status || '';
     renderContactRows(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
     document.getElementById('edit-client-business-id').value  = c.business_id || '';
@@ -8306,6 +8644,9 @@ window.saveClientEdits = async function(e) {
     const renaming = normalize(newName) !== normalize(originalName) || newName !== originalName;
     if (renaming && !confirm(`Rename "${originalName}" to "${newName}"?\n\nTheir tasks, health record, check-ins, reports and team access will all be moved across.`)) return;
 
+    const servicePlan = planClientServiceChanges(originalName, 'edit-client-services');
+    if (servicePlan.end.length && !confirm(`End ${servicePlan.end.map(serviceName).join(', ')} for ${newName}?\n\nIts onboarding steps stop applying. Their history and completed steps are kept.`)) return;
+
     const original = btn.innerHTML;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
     btn.disabled = true;
@@ -8333,6 +8674,7 @@ window.saveClientEdits = async function(e) {
             contact_name: document.getElementById('edit-client-contact-name').value.trim() || null,
             industry: document.getElementById('edit-client-industry').value.trim() || null,
             client_email: document.getElementById('edit-client-email').value.trim() || null,
+            website_status: document.getElementById('edit-client-website-status').value || null,
             ad_account_id: adAccountId || null,
             business_id: document.getElementById('edit-client-business-id').value.trim() || null,
             contract_type: document.getElementById('edit-client-contract').value,
@@ -8368,8 +8710,10 @@ window.saveClientEdits = async function(e) {
         }
         if (error) throw error;
 
-        // After the rename, so contacts are filed under the client's current name
+        // After the rename, so contacts and add-ons are filed under the client's current name.
+        // rename_client() has already moved client_services, so the old rows sit under newName.
         await saveClientContacts(newName);
+        await applyClientServiceChanges(newName, servicePlan);
 
         document.getElementById('edit-client-modal').style.display = 'none';
 
@@ -8603,6 +8947,7 @@ window.openAddClientModal = function() {
     }
 
     document.getElementById('add-client-form').reset();
+    renderClientServicePicker('new-client-services', null);
     modal.style.display = 'flex';
 };
 
@@ -8630,6 +8975,7 @@ window.saveNewClient = async function(e) {
         contract_type: document.getElementById('new-client-contract').value,
         monthly_retainer: document.getElementById('new-client-retainer').value,
         contract_start_date: new Date().toISOString().split('T')[0],
+        website_status: document.getElementById('new-client-website-status').value || null,
         current_stage: 'Onboarding',
         status: 'active'
     };
@@ -8640,7 +8986,17 @@ window.saveNewClient = async function(e) {
 
         // Add to local cache and refresh UI
         if(data && data.length > 0) globalClientsData.push(data[0]);
-        
+
+        // The client exists either way; a failure here is reported, not thrown, so it
+        // can't read as "client not created" and invite a duplicate.
+        let servicesNote = '';
+        try {
+            await applyClientServiceChanges(payload.name, planClientServiceChanges(null, 'new-client-services'));
+        } catch (err) {
+            console.error('Could not save add-ons:', err);
+            servicesNote = `\n\nTheir add-ons didn't save (${err.message}). Tick them again under Edit.`;
+        }
+
         document.getElementById('add-client-modal').style.display = 'none';
         
         // Auto-switch to the new client
@@ -8660,9 +9016,9 @@ window.saveNewClient = async function(e) {
             console.error('Could not grant portal access:', err);
         }
 
-        alert(invited.length
+        alert((invited.length
             ? `Client created. ${invited.join(', ')} can sign in now — your onboarding tasks appear once they've finished their steps.`
-            : "Client created, but portal access couldn't be granted — use Invite to Portal on their page.");
+            : "Client created, but portal access couldn't be granted — use Invite to Portal on their page.") + servicesNote);
         
         // Force refresh internal dataset so the tasks render cleanly without reloading
         await fetchAllGlobalData(globalAllowedClients);
