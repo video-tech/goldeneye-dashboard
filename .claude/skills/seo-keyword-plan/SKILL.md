@@ -120,8 +120,31 @@ Tell the user new keywords show no position until SE Ranking's next daily check,
 up target pages and retires deleted keywords on the next `seranking-sync` run (19:00 UTC).
 
 ## 8. Competitors (after the list is loaded)
-Add the 3–5 businesses winning the map pack / the competitor names found in step 3, once the user
-confirms their websites. Use `PROJECT_addCompetitor`.
+**Pick them from the client's own search results, not from a name list.** Once the keywords are
+loaded and checked at least once, `PROJECT_getAllCompetitorsMetrics` (site_id, date from
+`PROJECT_getCheckDates`, one `site_engine_id` per city) returns every domain that held a top-10 spot
+for the tracked searches, with a project-wide visibility share. It costs no units: the checks are
+already paid for.
+
+1. Run it **per city** and build a table of domain × city.
+2. **Drop directories and manufacturers** — Yelp, Houzz, Angi, HomeAdvisor, Thumbtack, BBB, Trex,
+   Home Depot, Facebook, Reddit. Also drop booking-widget hosts (e.g. `book.xapp.ai`), which are a
+   competitor's form, not a site.
+3. **Rank by how many cities a domain appears in**, then by visibility. A site that shows up in every
+   city is competing for the whole service area; one 90% in a single city may be one lucky keyword.
+4. **Add 3–5** with `PROJECT_addCompetitor` (`subdomain_match` 0), after the user confirms. Check the
+   `domain_trust` in `PROJECT_listCompetitors` against the client's own — it says how hard each is to
+   outrank.
+5. Say that competitor positions start at the **next daily check**: `PROJECT_getCompetitorPositions`
+   returns empty until then, and history never backfills. That's why they're added early rather than
+   after a month of watching.
+
+**Two blind spots to name out loud:** the top-10 snapshot is only kept ~14 days (Golden Eye stores it
+daily, which is the archive), and none of this covers the map pack. Cross-check the Google Maps 3-pack
+and ask the client who they lose bids to — a company on all three lists is the one to watch.
+
+**Beware a stale list:** this data only reflects the keywords tracked at the time. Right after a
+keyword rebuild, snapshots from before it are meaningless — say so rather than comparing them.
 
 ## Quarterly review
 1. `PROJECT_getKeywordStats` over the last ~90 days, with landing pages.
@@ -132,6 +155,8 @@ confirms their websites. Use `PROJECT_addCompetitor`.
    (merge/redirect competing pages, strengthen the target page).
 5. **Cannibalization**: re-check the sitemap for new posts chasing groups another page already owns.
 6. **Budget**: recount checks per location.
+7. **Competitors**: re-run step 8's city table. Swap out any competitor that has dropped out of the
+   results, and add anyone new who now appears across several cities.
 Then steps 6–7 for the changes.
 
 ## Guardrails

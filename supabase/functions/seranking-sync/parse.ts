@@ -234,6 +234,101 @@ export function parseSummary(raw: unknown): ProjectSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Competitors
+// ---------------------------------------------------------------------------
+// Three endpoints, all Project API (no units), documented at seranking.com/api/project/competitors:
+//   GET /competitors?site_id=                                    -> parseCompetitors
+//   GET /competitors/positions?competitor_id=&date_from=&date_to= -> parseCompetitorPositions
+//   GET /competitors/metrics?site_id=&date=&site_engine_id=       -> parseTop10Domains
+
+export interface CompetitorRow {
+    seranking_competitor_id: number;
+    name: string | null;
+    url: string | null;
+    domain: string | null;
+    domain_trust: number | null;
+}
+
+// Documented shape: [{"id":1,"name":"competitor1.com","url":"competitor1.com","domain_trust":2}].
+// `url` may or may not carry a protocol, so the comparable host is derived rather than trusted.
+export function competitorDomain(url: unknown): string | null {
+    const s = String(url ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "");
+    const host = s.split("/")[0].split("?")[0].split("#")[0];
+    return host.includes(".") ? host : null;
+}
+
+export function parseCompetitors(raw: unknown): CompetitorRow[] {
+    const n = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : null; };
+    return asArray(raw).map((c: any) => ({
+        seranking_competitor_id: Number(c?.id),
+        name: c?.name ? String(c.name) : null,
+        url: c?.url ? String(c.url) : null,
+        domain: competitorDomain(c?.url ?? c?.name),
+        domain_trust: n(c?.domain_trust),
+    })).filter((c) => Number.isFinite(c.seranking_competitor_id));
+}
+
+export interface CompetitorRankRow {
+    keyword: string;
+    site_engine_id: number;
+    date: string;
+    rank: number | null;
+}
+
+// Documented shape: [{"site_engine_id":123,"keywords":[{"id":"123","positions":[{"date":"2018-07-25",
+// "pos":7,"change":1}],"name":null,"volume":null}]}] — the same nesting as our own positions call,
+// so the keyword name is resolved through the project's keyword ids rather than the `name` field,
+// which the docs show as null.
+//
+// There is NO is_map / map_position here, unlike our own positions response: SE Ranking reports a
+// competitor's organic rank only. A competitor holding a map-pack spot is therefore invisible, and
+// nothing downstream may present this as "they don't rank".
+export function parseCompetitorPositions(raw: unknown, keywordById: Map<number, string>): CompetitorRankRow[] {
+    const out: CompetitorRankRow[] = [];
+    for (const engine of asArray(raw)) {
+        const siteEngineId = Number(engine?.site_engine_id);
+        if (!Number.isFinite(siteEngineId)) continue;
+        for (const kw of Array.isArray(engine?.keywords) ? engine.keywords : []) {
+            const keyword = keywordById.get(Number(kw?.id));
+            if (!keyword) continue;
+            for (const p of Array.isArray(kw?.positions) ? kw.positions : []) {
+                const date = String(p?.date ?? "").slice(0, 10);
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+                const pos = Number(p?.pos);
+                // 0 is SE Ranking's "not ranking", the same sentinel as our own positions
+                out.push({ keyword, site_engine_id: siteEngineId, date, rank: Number.isFinite(pos) && pos > 0 ? pos : null });
+            }
+        }
+    }
+    return out;
+}
+
+export interface Top10DomainRow {
+    domain: string;
+    visibility: number | null;
+    backlinks: number | null;
+    ref_domains: number | null;
+}
+
+// Documented shape: [{"domain":"www.tests.com","domain_id":10,"visibility":0,"backlinks":"328",
+// "domains":"32"}]. backlinks and domains arrive as strings. This snapshot is only kept about 14
+// days by SE Ranking, so storing it daily is the entire point — it can't be fetched back later.
+export function parseTop10Domains(raw: unknown): Top10DomainRow[] {
+    const n = (v: unknown) => { if (v === null || v === undefined || v === "") return null; const x = Number(v); return Number.isFinite(x) ? x : null; };
+    const seen = new Set<string>();
+    const out: Top10DomainRow[] = [];
+    for (const d of asArray(raw)) {
+        const domain = String(d?.domain ?? "").trim().toLowerCase();
+        // The primary key is (client, date, engine, domain), so a repeated domain would make the
+        // whole upsert fail with "cannot affect row a second time". First one wins.
+        if (!domain || seen.has(domain)) continue;
+        seen.add(domain);
+        out.push({ domain, visibility: n(d?.visibility), backlinks: n(d?.backlinks), ref_domains: n(d?.domains) });
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // SEO potential: extra traffic and its ad value if every tracked keyword reached the top N
 // ---------------------------------------------------------------------------
 // GET /analytics/seo-potential?site_id=&top_n=3. Real 3Sixty response (2026-09-14):

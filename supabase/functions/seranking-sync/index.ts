@@ -18,7 +18,7 @@
 // Schema:  seranking-sync/schema.sql, then supabase/sql/rename_client.sql
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { keywordsToRetire, parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, type KeywordMetricRow } from "./parse.ts";
+import { keywordsToRetire, parseCompetitorPositions, parseCompetitors, parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, parseTop10Domains, type KeywordMetricRow } from "./parse.ts";
 
 const API_BASE = "https://api.seranking.com/v1/project-management";
 
@@ -178,7 +178,16 @@ async function syncClient(db: any, key: string, client: { name: string; serankin
         snapshot = `error: ${String((err as Error)?.message ?? err).slice(0, 300)}`;
     }
 
-    return { engines: engines.length, keywords: keywords.length, rank_checks: checksWritten, keyword_metrics: metricsByKeyword.size, snapshot };
+    // Same rule for competitors: a client with none configured, or an endpoint that changes
+    // shape, must not cost the rank sync that already worked.
+    let competitors: string = "ok";
+    try {
+        competitors = await syncCompetitors(db, key, client, siteId, keywordById, engines, dateFrom, dateTo);
+    } catch (err) {
+        competitors = `error: ${String((err as Error)?.message ?? err).slice(0, 300)}`;
+    }
+
+    return { engines: engines.length, keywords: keywords.length, rank_checks: checksWritten, keyword_metrics: metricsByKeyword.size, snapshot, competitors };
 }
 
 // One row a day per client: SE Ranking's visibility and authority, for the SEO tab's trend lines.
@@ -206,6 +215,91 @@ async function syncProjectSnapshot(db: any, key: string, client: { name: string 
     const { error: upErr } = await db.from("seo_project_daily").upsert([row], { onConflict: "client_name,date" });
     if (upErr) throw new Error(`seo_project_daily: ${upErr.message}`);
     return `ok (potential ${potential})`;
+}
+
+// Competitors: who else ranks for this client's keywords. Three parts, all Project API, all on
+// checks the account already pays for. See supabase/sql/seo_competitors.sql for the tables.
+//
+// The top-10 snapshot is the part worth protecting: SE Ranking keeps it about 14 days, so the
+// daily copy here is the only long-run record of who owns a client's market, and it's what the
+// quarterly review reads when choosing the next competitor to track.
+async function syncCompetitors(
+    db: any,
+    key: string,
+    client: { name: string },
+    siteId: number,
+    keywordById: Map<number, string>,
+    engines: { site_engine_id: number }[],
+    dateFrom: string,
+    dateTo: string,
+): Promise<string> {
+    const competitors = parseCompetitors(await seRankingGet(key, `/competitors?site_id=${siteId}`));
+    const now = new Date().toISOString();
+
+    if (competitors.length) {
+        await upsertChunked(db, "seo_competitors", competitors.map((c) => ({
+            client_name: client.name,
+            seranking_competitor_id: c.seranking_competitor_id,
+            name: c.name,
+            url: c.url,
+            domain: c.domain,
+            domain_trust: c.domain_trust,
+            active: true,
+            synced_at: now,
+        })), "client_name,seranking_competitor_id");
+
+        // Removed in SE Ranking: marked inactive, their history kept, exactly like keywords.
+        // Never on an empty response, which is far more likely a hiccup than "they deleted all".
+        const ids = competitors.map((c) => c.seranking_competitor_id);
+        const { error: offErr } = await db.from("seo_competitors").update({ active: false })
+            .eq("client_name", client.name).eq("active", true).not("seranking_competitor_id", "in", `(${ids.join(",")})`);
+        if (offErr) throw new Error(`retiring competitors: ${offErr.message}`);
+    }
+
+    let rankRows = 0;
+    for (const c of competitors) {
+        // site_engine_id left off on purpose: one call returns every city for that competitor.
+        const raw = await seRankingGet(
+            key,
+            `/competitors/positions?competitor_id=${c.seranking_competitor_id}&date_from=${dateFrom}&date_to=${dateTo}`,
+        );
+        const rows = parseCompetitorPositions(raw, keywordById);
+        if (!rows.length) continue;
+        await upsertChunked(db, "seo_competitor_ranks", rows.map((r) => ({
+            client_name: client.name,
+            seranking_competitor_id: c.seranking_competitor_id,
+            keyword: r.keyword,
+            site_engine_id: r.site_engine_id,
+            date: r.date,
+            rank: r.rank,
+        })), "client_name,seranking_competitor_id,keyword,site_engine_id,date");
+        rankRows += rows.length;
+    }
+
+    // Today's top 10, per city. Asked for today only: the endpoint needs an exact date, and a
+    // day with no check simply returns nothing.
+    const today = new Date().toISOString().slice(0, 10);
+    let topRows = 0;
+    for (const engine of engines) {
+        const domains = parseTop10Domains(await seRankingGet(
+            key,
+            `/competitors/metrics?site_id=${siteId}&date=${today}&site_engine_id=${engine.site_engine_id}`,
+        ));
+        if (!domains.length) continue;
+        await upsertChunked(db, "seo_serp_top10_daily", domains.map((d) => ({
+            client_name: client.name,
+            date: today,
+            site_engine_id: engine.site_engine_id,
+            domain: d.domain,
+            visibility: d.visibility,
+            backlinks: d.backlinks,
+            ref_domains: d.ref_domains,
+            synced_at: now,
+        })), "client_name,date,site_engine_id,domain");
+        topRows += domains.length;
+    }
+
+    return `ok (${competitors.length} tracked, ${rankRows} rank rows, ${topRows} top-10 rows)`;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,8 +378,11 @@ Deno.serve(async (req: Request) => {
                 const counts = await syncClient(db, key, c);
                 // Rank data synced. A snapshot failure is still surfaced in last_error, marked so
                 // it's clearly not the rank sync failing.
-                const snapErr = String(counts.snapshot).startsWith("error:") ? `snapshot ${counts.snapshot}` : null;
-                await saveState(db, c.name, { last_daily_run: new Date().toISOString().slice(0, 10), last_error: snapErr });
+                const sideErrors = [
+                    String(counts.snapshot).startsWith("error:") ? `snapshot ${counts.snapshot}` : null,
+                    String(counts.competitors).startsWith("error:") ? `competitors ${counts.competitors}` : null,
+                ].filter(Boolean).join(" | ") || null;
+                await saveState(db, c.name, { last_daily_run: new Date().toISOString().slice(0, 10), last_error: sideErrors });
                 results[c.name] = counts;
             } catch (err) {
                 // One client's rate limit or a shape SE Ranking changed must never stop the

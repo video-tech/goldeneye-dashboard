@@ -4,6 +4,14 @@
     {
       "date": "2026-09-15",
       "area": "SEO",
+      "title": "Competitors",
+      "what": "The SEO tab now tracks the other companies ranking for a client's searches. Admin side: one line per competitor (how many page-1 spots they hold, where we're ahead, where they are), a search-by-search grid, and \"who owns this market\" — every site in Google's top 10, sorted by how many of the client's cities it appears in. The client's Organic Search tab gets a plain \"How you compare\" section: how many shared searches they're ahead on, counts only, no jargon.",
+      "note": "3Sixty now tracks Backyard Builders Utah, Blackrock Decks, TC Decks Utah, Eremos Decks and Quality Decking of Utah — chosen from SE Ranking's own top-10 data, not a guess. Competitor ranks are organic only; SE Ranking doesn't report their Google Maps spot. Data starts at the next daily check, since competitor history never backfills.",
+      "action": "Run supabase/sql/seo_competitors.sql, then supabase/sql/rename_client.sql, then deploy seranking-sync"
+    },
+    {
+      "date": "2026-09-15",
+      "area": "SEO",
       "title": "Rankings by city",
       "what": "For clients tracked in more than one city, Tracked Keywords has a \"Rankings from\" picker. All cities shows each keyword's best spot, with a \"N cities\" button that opens that keyword's rank in every city. Pick one city to see the whole table, and the wrong-page alerts, from there. Alerts now name the city where the wrong page ranks.",
       "note": "Also fixed: a keyword's ranking page could come from a different city than its rank. It now comes from the city with the best rank.",

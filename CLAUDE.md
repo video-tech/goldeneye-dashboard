@@ -1338,6 +1338,38 @@ real client data; see the Known gaps entry on that.
     alphabetical, so the page shown could come from a different city than the rank. It now takes the
     page from the best-ranked row.
   - **Tests:** 6 PGlite checks on the function, 12 jsdom checks on the picker, breakdown and alerts.
+- **Competitors (built 2026-09-15)** — `supabase/sql/seo_competitors.sql`, then `rename_client.sql`,
+  then deploy `seranking-sync`. Three Project API endpoints, no Data API units:
+  `/competitors`, `/competitors/positions`, `/competitors/metrics`
+  (documented at seranking.com/api/project/competitors).
+  - **`seo_serp_top10_daily` is the one worth protecting.** `/competitors/metrics` returns every
+    domain in Google's top 10 for the tracked searches, per city, and **SE Ranking keeps that
+    snapshot only ~14 days**. The daily copy is the only lasting record of who owns a client's
+    market, and it's what picks the next competitor. Admin-read only: it's full of directories.
+  - **`seo_competitors` / `seo_competitor_ranks`** are client-readable (`client_row_visible`) for the
+    portal's "How you compare". A competitor removed in SE Ranking is marked inactive, never deleted,
+    like keywords — and never on an empty response.
+  - **Organic rank only.** SE Ranking's competitor endpoint returns `pos` with no
+    `is_map`/`map_position`, unlike our own positions call. A competitor holding a map-pack spot is
+    invisible here, so both surfaces say so and a blank cell never reads as "we beat them".
+  - **Comparisons only count searches where both sides rank.** `seo_competitor_overview` splits
+    ahead / behind / "only us"; a competitor who isn't tracked on a search is not a win.
+    `seo_competitor_keyword_matrix` is the per-keyword grid, each side's best rank across cities on
+    its latest checked day — the same "where do we stand right now" rule as `seo_keyword_summary`.
+  - **`seo_market_leaders`** ranks the snapshot by **how many cities a domain appears in**, then
+    visibility, and marks the ones already tracked plus the client's own domain (from
+    `gsc_property`). One city at 90% is usually one lucky keyword.
+  - **History never backfills**: competitor positions start at the next daily check after they're
+    added, so add them early. `/competitors/positions` returns empty until then.
+  - **Cost per client per day:** 1 + (competitors) + (cities) extra calls — 11 for 3Sixty.
+    A competitor failure is isolated like the snapshot's, reported in `last_error`, never failing
+    the rank sync.
+  - **Picking them is a documented method**, in `.claude/skills/seo-keyword-plan` step 8: read the
+    top-10 by city, drop directories and manufacturers, rank by how many cities, add 3–5, recheck
+    quarterly, and cross-check the map pack and the client's own list.
+  - **3Sixty, 2026-09-15:** Backyard Builders Utah, Blackrock Decks, TC Decks Utah, Eremos Decks,
+    Quality Decking of Utah. Domain trust 16 / 38 / 19 / 4 / 13 against 3Sixty's 7.
+  - **Tests:** 25 PGlite checks, 18 parser checks, 23 jsdom checks.
 - **Keywords removed in SE Ranking are retired, not deleted** (`keywordsToRetire()` in `parse.ts`):
   the sync marks them `active = false` and keeps their stored history. It never retires anything when
   SE Ranking returns an empty keyword list, so a bad response can't wipe a client's list.

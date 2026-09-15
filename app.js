@@ -5733,6 +5733,126 @@ async function buildReportSeoBlock(clientName, s, e) {
      }).join('');
  }
 
+ // ---- Competitors (admin) ----
+ // Three panels from supabase/sql/seo_competitors.sql: one line per tracked competitor, a
+ // search-by-search grid, and "who owns this market" from the daily top-10 snapshot.
+ //
+ // Everything here is ORGANIC rank. SE Ranking's competitor endpoint returns no map-pack
+ // position, so a competitor sitting in the local pack looks like "not ranking" — which is why
+ // the panel says so in its header and a blank cell reads "not in the top 100", never "we win".
+ function seoCompetitorRankCell(rank) {
+     if (rank == null) return '<span class="text-gray-600">—</span>';
+     const n = Number(rank);
+     const color = n <= 3 ? 'text-emerald-400' : n <= 10 ? 'text-yellow-400' : 'text-gray-400';
+     return `<span class="${color} font-bold">#${n}</span>`;
+ }
+
+ function renderSeoCompetitors(compRes, vsRes, marketRes) {
+     const panel = document.getElementById('seo-competitors-panel');
+     const empty = document.getElementById('seo-competitors-empty');
+     const body = document.getElementById('seo-competitors-body');
+     if (!panel || !empty || !body) return;
+     panel.classList.remove('hidden');
+
+     const failed = compRes?.error || vsRes?.error;
+     const rows = compRes?.data || [];
+     const show = (isEmpty, html) => {
+         empty.classList.toggle('hidden', !isEmpty);
+         body.classList.toggle('hidden', isEmpty);
+         if (isEmpty) empty.innerHTML = html;
+     };
+     if (failed) {
+         // The tab predates this feature, so a missing function is a setup step, not a bug.
+         show(true, '<span class="text-amber-400">Competitor tracking needs its tables. Run supabase/sql/seo_competitors.sql, then deploy seranking-sync.</span>');
+         return;
+     }
+     if (!rows.length) {
+         show(true, 'No competitors tracked for this client yet. Add 3–5 in SE Ranking (Competitors), then they appear here after the next daily check. Pick them from "who owns this market" below once a snapshot exists.');
+         renderSeoMarketLeaders(marketRes);
+         empty.classList.remove('hidden');
+         body.classList.remove('hidden');
+         document.getElementById('seo-competitors-tbody').innerHTML = '';
+         document.getElementById('seo-vs-head').innerHTML = '';
+         document.getElementById('seo-vs-tbody').innerHTML = '';
+         return;
+     }
+     show(false, '');
+
+     document.getElementById('seo-competitors-tbody').innerHTML = rows.map(r => {
+         const name = r.competitor_name || r.domain || '';
+         const trust = r.domain_trust == null ? '—' : Number(r.domain_trust).toFixed(0);
+         const avg = r.their_avg_rank == null ? '—' : Number(r.their_avg_rank).toFixed(1);
+         return `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 max-w-[220px]"><div class="truncate" title="${escapeAttr(r.domain || name)}">${escapeAttr(name)}</div></td>
+             <td class="py-2 text-right text-gray-400">${trust}</td>
+             <td class="py-2 text-right text-white font-bold">${Number(r.their_page1 || 0)}</td>
+             <td class="py-2 text-right text-gray-400">${avg}</td>
+             <td class="py-2 text-right text-emerald-400 font-bold">${Number(r.ahead_of_them || 0)}</td>
+             <td class="py-2 text-right text-red-400 font-bold">${Number(r.behind_them || 0)}</td>
+             <td class="py-2 text-right text-gray-400">${Number(r.not_ranking_them || 0)}</td>
+         </tr>`;
+     }).join('');
+
+     // Search by search: one column per competitor, ours first. Sorted by search volume so the
+     // keywords worth money sit at the top, not whatever sorts first alphabetically.
+     const matrix = vsRes?.data || [];
+     const byKeyword = new Map();
+     for (const m of matrix) {
+         if (!byKeyword.has(m.keyword)) byKeyword.set(m.keyword, { keyword: m.keyword, volume: m.search_volume, client_rank: m.client_rank, them: new Map() });
+         byKeyword.get(m.keyword).them.set(String(m.seranking_competitor_id), m.competitor_rank);
+     }
+     const order = rows.map(r => ({ id: String(r.seranking_competitor_id), name: r.competitor_name || r.domain || '' }));
+     document.getElementById('seo-vs-head').innerHTML =
+         '<th class="text-left pb-2">Search</th><th class="text-right pb-2">Us</th>' +
+         order.map(c => `<th class="text-right pb-2 max-w-[120px]"><span class="truncate inline-block max-w-[110px] align-bottom" title="${escapeAttr(c.name)}">${escapeAttr(c.name)}</span></th>`).join('');
+
+     const list = [...byKeyword.values()].sort((a, b) => (Number(b.volume || 0) - Number(a.volume || 0)) || a.keyword.localeCompare(b.keyword));
+     const tbody = document.getElementById('seo-vs-tbody');
+     tbody.innerHTML = list.map(k => {
+         // Beating every competitor that ranks at all is worth seeing at a glance
+         const theirRanks = order.map(c => k.them.get(c.id)).filter(v => v != null).map(Number);
+         const leading = k.client_rank != null && theirRanks.length > 0 && theirRanks.every(v => Number(k.client_rank) < v);
+         return `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 max-w-[240px]"><div class="truncate" title="${escapeAttr(k.keyword)}">${leading ? '<i class="fa-solid fa-crown text-yellow-400 mr-1" title="Ahead of every competitor that ranks"></i>' : ''}${escapeAttr(k.keyword)}</div></td>
+             <td class="py-2 text-right ${k.client_rank != null ? 'text-white font-bold' : ''}">${seoCompetitorRankCell(k.client_rank)}</td>
+             ${order.map(c => `<td class="py-2 text-right">${seoCompetitorRankCell(k.them.get(c.id))}</td>`).join('')}
+         </tr>`;
+     }).join('') || `<tr><td colspan="${order.length + 2}" class="py-4 text-center text-gray-500">No comparable ranks yet. Competitor positions start at SE Ranking's next daily check after they're added.</td></tr>`;
+     seoShowMore(tbody, [...tbody.rows], 'vs', 'searches');
+
+     renderSeoMarketLeaders(marketRes);
+ }
+
+ function renderSeoMarketLeaders(marketRes) {
+     const host = document.getElementById('seo-market-leaders');
+     if (!host) return;
+     if (marketRes?.error) {
+         host.innerHTML = '<p class="text-sm text-gray-500">Run supabase/sql/seo_competitors.sql to collect this.</p>';
+         return;
+     }
+     const rows = marketRes?.data || [];
+     if (!rows.length) {
+         host.innerHTML = '<p class="text-sm text-gray-500">No top-10 snapshot in this range yet. The next sync stores one, and SE Ranking only keeps about 14 days of its own, so this list starts from today.</p>';
+         return;
+     }
+     host.innerHTML = rows.map(r => {
+         const cities = Number(r.cities || 0);
+         const badge = r.is_client
+             ? '<span class="text-[9px] uppercase tracking-widest text-yellow-400 border border-yellow-400/30 rounded px-1">this client</span>'
+             : r.tracked
+                 ? '<span class="text-[9px] uppercase tracking-widest text-purple-400 border border-purple-400/30 rounded px-1">tracked</span>'
+                 : '';
+         return `<div class="flex items-center justify-between gap-3 py-1.5 border-b border-white/5 last:border-0">
+             <div class="flex items-center gap-2 min-w-0">
+                 <span class="text-sm ${r.is_client ? 'text-yellow-400 font-bold' : 'text-gray-300'} truncate" title="${escapeAttr(r.domain)}">${escapeAttr(r.domain)}</span>
+                 ${badge}
+             </div>
+             <span class="text-xs text-gray-400 shrink-0 whitespace-nowrap">${cities} ${cities === 1 ? 'city' : 'cities'} · ${Number(r.avg_visibility || 0).toFixed(1)}% avg</span>
+         </div>`;
+     }).join('');
+     seoShowMore(host, [...host.children], 'market', 'sites');
+ }
+
  function renderSeoAlmostPageOne(rows, minImpressions, failed) {
      const tbody = document.getElementById('seo-almost-p1-tbody');
      if (!tbody) return;
@@ -6302,6 +6422,15 @@ async function buildReportSeoBlock(clientName, s, e) {
          renderSeoKeywordsTable(keywordsRes.data || [], cityRes.error ? [] : (cityRes.data || []));
          renderSeoMoversPanel(moversRes.data || []);
          renderSeoAlmostPageOne(almostRes.data || [], almostMinImpr, !!almostRes.error);
+
+         // Competitors are their own three RPCs, fetched after the rest so a database that hasn't
+         // run seo_competitors.sql yet still renders the whole tab.
+         const [compRes, vsRes, marketRes] = await Promise.all([
+             supabaseClient.rpc('seo_competitor_overview', { p_client: clientName, p_start: iso(s), p_end: iso(e) }),
+             supabaseClient.rpc('seo_competitor_keyword_matrix', { p_client: clientName, p_start: iso(s), p_end: iso(e) }),
+             supabaseClient.rpc('seo_market_leaders', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_limit: 25 })
+         ]);
+         renderSeoCompetitors(compRes, vsRes, marketRes);
      } catch (err) {
          console.error('renderAdminSeo failed:', err);
      }
@@ -6388,6 +6517,49 @@ async function buildReportSeoBlock(clientName, s, e) {
      renderCpSeoKeywords(cpSeoLastKeywords);
  };
 
+ // ---- "How you compare" (client portal) ----
+ // Deliberately plainer than the admin grid: a client wants "am I ahead of these people", not a
+ // rank matrix. Counts, never percentages, and the section hides itself entirely rather than
+ // showing an empty or one-sided comparison.
+ //
+ // Two honesty rules, both the same kind as the rest of this tab:
+ // - Only searches where BOTH sides rank are called ahead/behind. A competitor who isn't in the
+ //   top 100 for a search isn't someone we "beat" there; that's the separate "only you" count.
+ // - The heading says Google Maps isn't included, because SE Ranking gives us no competitor map
+ //   rank. Without that line a client could read this as their whole local picture.
+ function renderCpSeoCompetitors(vsRes) {
+     const wrap = document.getElementById('cp-seo-vs-wrap');
+     const host = document.getElementById('cp-seo-vs-list');
+     if (!wrap || !host) return;
+     const rows = (vsRes?.error ? [] : (vsRes?.data || []))
+         .filter(r => Number(r.ahead_of_them || 0) + Number(r.behind_them || 0) > 0);
+     wrap.classList.toggle('hidden', !rows.length);
+     if (!rows.length) return;
+
+     host.innerHTML = rows.map(r => {
+         const ahead = Number(r.ahead_of_them || 0);
+         const behind = Number(r.behind_them || 0);
+         const only = Number(r.not_ranking_them || 0);
+         const compared = ahead + behind;
+         const pct = Math.round((ahead / compared) * 100);
+         const name = r.competitor_name || r.domain || 'A competitor';
+         const winning = ahead > behind;
+         return `<div class="border-b border-white/5 last:border-0 pb-4 last:pb-0">
+             <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-2">
+                 <p class="font-bold text-white">${escapeAttr(name)}</p>
+                 <p class="text-sm ${winning ? 'text-emerald-400' : 'text-gray-400'}">
+                     You're ahead on <span class="font-bold">${ahead}</span> of ${compared} shared ${compared === 1 ? 'search' : 'searches'}
+                 </p>
+             </div>
+             <div class="flex h-2.5 gap-[2px] rounded-full overflow-hidden" role="img" aria-label="Ahead on ${ahead} of ${compared} searches">
+                 <div class="bg-emerald-500/80" style="width:${pct}%"></div>
+                 <div class="bg-white/10 flex-1"></div>
+             </div>
+             ${only ? `<p class="text-xs text-gray-500 mt-1.5">Plus ${only} ${only === 1 ? 'search' : 'searches'} where you show up and they don't.</p>` : ''}
+         </div>`;
+     }).join('');
+ }
+
  function renderCpSeoKeywords(rows) {
      const wrap = document.getElementById('cp-seo-kw-wrap');
      if (!wrap) return;
@@ -6471,13 +6643,15 @@ async function buildReportSeoBlock(clientName, s, e) {
      // Hold the previous render while refetching (no flash). Show the spinner only the first time.
      if (body.classList.contains('hidden')) { empty.classList.add('hidden'); loading.classList.remove('hidden'); }
 
-     const [ovRes, sinceRes, kwRes, almostRes, dailyRes, logRes] = await Promise.all([
+     const [ovRes, sinceRes, kwRes, almostRes, dailyRes, logRes, vsRes] = await Promise.all([
          supabaseClient.rpc('seo_client_overview', range),
          supabaseClient.rpc('seo_since_start', { p_client: client }),
          supabaseClient.rpc('seo_keyword_summary', range),
          supabaseClient.rpc('seo_almost_page_one', { ...range, p_min_impressions: Math.max(10, days) }),
          supabaseClient.from('seo_daily').select('date, clicks').eq('client_name', client).gte('date', range.p_start).lte('date', range.p_end).order('date'),
-         supabaseClient.from('seo_changelog').select('id, live_date, kind, title, url, notes').eq('client_name', client).order('live_date', { ascending: false }).limit(200)
+         supabaseClient.from('seo_changelog').select('id, live_date, kind, title, url, notes').eq('client_name', client).order('live_date', { ascending: false }).limit(200),
+         // Competitors: the section hides itself when the SQL isn't there or nobody is tracked
+         supabaseClient.rpc('seo_competitor_overview', { p_client: client, p_start: range.p_start, p_end: range.p_end })
      ]);
      if (token !== cpSeoRenderToken) return;   // a newer render (client or range change) owns the tab
 
@@ -6601,6 +6775,9 @@ async function buildReportSeoBlock(clientName, s, e) {
 
      // ---- 4. Target searches
      renderCpSeoKeywords(keywords);
+
+     // ---- 4b. How you compare
+     renderCpSeoCompetitors(vsRes);
 
      // ---- 5. Work we did + up next
      const numberById = new Map(markers.map(m => [String(m.id), m.n]));

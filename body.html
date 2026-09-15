@@ -901,6 +901,41 @@
                                         </table>
                                     </div>
                                 </div>
+                                <div id="seo-competitors-panel" class="glass p-6 hidden">
+                                    <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
+                                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Competitors <span class="text-gray-600 font-normal normal-case">(added in SE Ranking)</span></h3>
+                                        <span class="text-[10px] text-gray-600">Organic rank only — SE Ranking doesn't report a competitor's map pack spot</span>
+                                    </div>
+                                    <div id="seo-competitors-empty" class="hidden text-sm text-gray-500"></div>
+                                    <div id="seo-competitors-body" class="hidden space-y-6">
+                                        <div class="overflow-x-auto">
+                                            <table class="w-full text-sm">
+                                                <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                    <th class="text-left pb-2">Competitor</th>
+                                                    <th class="text-right pb-2" title="SE Ranking's domain trust, 0-100">Trust</th>
+                                                    <th class="text-right pb-2">Their page 1</th>
+                                                    <th class="text-right pb-2">Their avg rank</th>
+                                                    <th class="text-right pb-2" title="Searches where we rank better than them">We're ahead</th>
+                                                    <th class="text-right pb-2" title="Searches where they rank better than us">They're ahead</th>
+                                                    <th class="text-right pb-2" title="Searches where we rank and they don't">Only us</th>
+                                                </tr></thead>
+                                                <tbody id="seo-competitors-tbody"></tbody>
+                                            </table>
+                                        </div>
+                                        <div class="overflow-x-auto">
+                                            <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Search by search</h4>
+                                            <table class="w-full text-sm">
+                                                <thead><tr id="seo-vs-head" class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10"></tr></thead>
+                                                <tbody id="seo-vs-tbody"></tbody>
+                                            </table>
+                                        </div>
+                                        <div>
+                                            <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Who owns this market</h4>
+                                            <p class="text-[10px] text-gray-600 mb-2">Every site in Google's top 10 for the tracked searches, on the latest check. Sorted by how many of the client's cities they show up in — that's what picks the next competitor.</p>
+                                            <div id="seo-market-leaders"></div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1914,6 +1949,15 @@
                         <div id="cp-seo-dist-legend" class="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-gray-300 mb-4"></div>
                         <div id="cp-seo-kw-list"></div>
                         <button type="button" id="cp-seo-kw-toggle" onclick="toggleCpSeoKeywords()" class="hidden mt-3 text-sm font-bold text-gray-300 border border-white/10 hover:bg-white/5 rounded-full px-4 py-1.5 transition"></button>
+                    </section>
+
+                    <!-- 4b. How you compare -->
+                    <section id="cp-seo-vs-wrap" class="glass p-6 hidden">
+                        <div class="mb-4">
+                            <h3 class="text-lg font-bold text-white">How you compare</h3>
+                            <p class="text-sm text-gray-400 mt-1">The other companies showing up for your searches, and how many of those searches you're ahead on. Google Maps listings aren't counted here.</p>
+                        </div>
+                        <div id="cp-seo-vs-list" class="space-y-4"></div>
                     </section>
 
                     <!-- 5. Work we did + up next -->
