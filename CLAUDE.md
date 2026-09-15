@@ -1125,6 +1125,28 @@ string does.
 - `clients.seranking_site_id` and the Test SE Ranking connection button live in Edit
   Client, same section as the other SEO fields.
 
+### SEO in the weekly report (built 2026-09-15)
+
+`buildReportSeoBlock()` in app.js gathers the Organic Search facts the report is written from. It
+reads the **same** RPCs as the client's Organic Search tab (`seo_client_overview`,
+`seo_keyword_summary`, `seo_almost_page_one`, `seo_changelog`, plus `seo_daily` for position), so a
+report and the tab can never state different numbers for the same week.
+- **Code computes, the model quotes.** Every figure, delta and percentage is worked out here and
+  handed over as text with "use these figures exactly as given". Same rule as the morning audit.
+- **What it carries:** visits, times shown, impression-weighted position, leads from Google, jobs
+  and revenue from their check-ins, return multiple (**only above 1x**, like the tab), page-1 count,
+  room to grow, ranking moves (biggest first), top-3 placements, almost-page-1 searches, and **the
+  work that went live in the period** from the changelog.
+- **The honesty rules travel with it:** the <50 noise guard states counts instead of percentages,
+  leads before `LEAD_TRACKING_START` say tracking has just started rather than comparing, and
+  Google's 2–3 day lag is stated when the data ends before the range does.
+- **It degrades in steps:** no RPCs → `seo_daily` totals; no SEO data at all → empty, and the report
+  has no Organic Search section unless the notes mention SEO.
+- **Fixed in the same change:** the prior window was a day too long. `Math.round((e - s)/86400000) + 1`
+  counts 8 days for a 7-day range, because the end date carries 23:59. It's `Math.floor` now, here
+  and in `renderCpSeo`.
+- **Tests:** 19 checks on the block, with the tab's 28 re-run for the day-count fix.
+
 ### The client Organic Search tab (rebuilt 2026-09-14)
 
 `window.renderCpSeo()` in app.js, with markup in `#cp-view-seo` in body.html. It's written for clients who

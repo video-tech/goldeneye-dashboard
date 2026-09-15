@@ -4944,26 +4944,7 @@ Treat this period as a fresh starting point. State every number plainly as where
             // unweighted, and on 2026-09-14 it put "16 clicks, 943 impressions" into a PANDEN report
             // whose notes said 32 and 2.25K. No seo_daily rows means no SEO block at all, and SEO
             // then comes only from the notes.
-            let seoBlock = '';
-            try {
-                const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                const { data: clientRows } = await supabaseClient.from('clients').select('name, gsc_property');
-                const seoClient = (clientRows || []).find(c => c.gsc_property && normalize(c.name) === normalize(cSelectedAccount));
-                if (seoClient) {
-                    const { data: seoRows } = await supabaseClient.from('seo_daily')
-                        .select('date, clicks, impressions, position')
-                        .eq('client_name', seoClient.name)
-                        .gte('date', ymd(s)).lte('date', ymd(e))
-                        .order('date');
-                    if (seoRows?.length) {
-                        const t = seoWindowTotals(seoRows, s, e);
-                        seoBlock = `\n\nORGANIC SEO — Google Search Console, ${seoRows[0].date} to ${seoRows[seoRows.length - 1].date} (Google reports search data 2–3 days late, so the most recent days of this range may not be in yet):
-- Clicks: ${t.clicks.toLocaleString()} | Impressions: ${t.impressions.toLocaleString()} | Avg. position: ${t.position != null ? t.position.toFixed(1) : 'n/a'}`;
-                    }
-                }
-            } catch (err) {
-                console.warn('Report: Search Console data unavailable, SEO will come from the notes only.', err);
-            }
+            const seoBlock = await buildReportSeoBlock(cSelectedAccount, s, e);
 
             // SEO gets its own required section whenever there's anything to say, decided here
             // rather than left to the model. On 2026-09-14 a report dropped SEO entirely even
@@ -4972,7 +4953,7 @@ Treat this period as a fresh starting point. State every number plainly as where
             const notesMentionSeo = /\b(seo|organic|search console|impressions?|rank(ing|ed|s)?|keywords?|google search|ai (mentions?|overviews?|search)|mentioned)\b/i.test(n);
             const includeSeoSection = !!seoBlock || notesMentionSeo;
             const seoSectionTemplate = includeSeoSection ? `
-            [REQUIRED — Organic Search section. Every SEO fact from the MEDIA BUYER'S NOTES goes here, exactly as written (clicks, impressions, AI mentions, rankings, anything), plus the ORGANIC SEO data above for anything the notes don't cover. One div block per fact or closely related group:]
+            [REQUIRED — Organic Search section. Every SEO fact from the MEDIA BUYER'S NOTES goes here, exactly as written (clicks, impressions, AI mentions, rankings, anything), plus the ORGANIC SEARCH data above for anything the notes don't cover. Lead with what it meant for their business (visits, leads, jobs), then rankings, then the work that went live and what's next. Use the words "visits from Google" rather than "clicks", and name a search in plain language rather than saying "keyword". One div block per fact or closely related group:]
             <tr><td style="height: 24px; font-size: 24px; line-height: 24px;">&nbsp;</td></tr>
             <tr><td style="background-color: #ffffff; border-radius: 18px; padding: 48px; border: 1px solid #e5e5ea;"><h2 style="font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px 0; color: #1d1d1f;">Organic Search</h2>
             <div style="padding: 20px 0; border-bottom: 1px solid #e8e8ed;"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">[SEO Headline]</div><div style="font-size: 15px; color: #515154; line-height: 1.6;">[SEO Details]</div></div>
@@ -5321,7 +5302,123 @@ Treat this period as a fresh starting point. State every number plainly as where
         // ============================================================================
 
  // ---- Admin SEO tab (rebuilt 2026-09-11) ----
- // Reads seo_daily / seo_pages_daily / seo_queries_daily (Search Console, via seo-sync),
+ // ---- The weekly report's Organic Search facts ----
+// Same figures the client's own Organic Search tab shows (seo_client_overview, seo_keyword_summary,
+// seo_almost_page_one, seo_changelog), so the report and the tab can never disagree. Everything is
+// computed here and handed to the model as text to quote: it never recalculates, the same rule the
+// morning audit follows.
+//
+// Degrades in steps rather than all at once: with the RPCs missing it falls back to seo_daily
+// totals, and with no SEO data at all it returns '' and the report has no Organic Search section
+// unless the notes mention SEO.
+async function buildReportSeoBlock(clientName, s, e) {
+    const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    try {
+        const { data: clientRows } = await supabaseClient.from('clients').select('name, gsc_property, seranking_site_id, seo_start_date');
+        const seoClient = (clientRows || []).find(c => normalize(c.name) === normalize(clientName) && (c.gsc_property || c.seranking_site_id));
+        if (!seoClient) return '';
+
+        // floor, not round: the end date carries 23:59, so rounding counted one day too many and
+        // compared against a window a day longer than the report's own
+        const days = Math.floor((e - s) / 86400000) + 1;
+        const priorEnd = new Date(s); priorEnd.setDate(priorEnd.getDate() - 1);
+        const priorStart = new Date(priorEnd); priorStart.setDate(priorStart.getDate() - days + 1);
+        const range = { p_client: seoClient.name, p_start: ymd(s), p_end: ymd(e), p_prior_start: ymd(priorStart), p_prior_end: ymd(priorEnd) };
+
+        const [ovRes, kwRes, almostRes, logRes, dailyRes] = await Promise.all([
+            supabaseClient.rpc('seo_client_overview', range),
+            supabaseClient.rpc('seo_keyword_summary', range),
+            supabaseClient.rpc('seo_almost_page_one', { ...range, p_min_impressions: Math.max(10, days), p_limit: 5 }),
+            supabaseClient.from('seo_changelog').select('live_date, kind, title, url, notes')
+                .eq('client_name', seoClient.name).gte('live_date', range.p_start).lte('live_date', range.p_end)
+                .order('live_date', { ascending: false }),
+            supabaseClient.from('seo_daily').select('date, clicks, impressions, position')
+                .eq('client_name', seoClient.name).gte('date', range.p_start).lte('date', range.p_end).order('date')
+        ]);
+
+        const daily = dailyRes.data || [];
+        const ov = ovRes.data?.[0];
+        const num = v => v == null ? null : Number(v);
+        const lines = [];
+
+        // Fallback: the client tab's RPCs aren't installed, so report what seo_daily alone knows
+        if (!ov) {
+            if (!daily.length) return '';
+            const t = seoWindowTotals(daily, s, e);
+            lines.push(`- Visits from Google (clicks): ${t.clicks.toLocaleString()} | Times shown in search (impressions): ${t.impressions.toLocaleString()} | Average position: ${t.position != null ? t.position.toFixed(1) : 'n/a'}`);
+        } else {
+            const delta = (cur, prior, noun) => {
+                const c = num(cur) || 0, p = num(prior);
+                if (p == null) return `${c.toLocaleString()} ${noun}`;
+                const diff = c - p;
+                // Same noise guard as the client tab: small counts are stated, never turned into a %
+                const small = c < 50 || p < 50;
+                if (!p) return `${c.toLocaleString()} ${noun} (none the period before)`;
+                if (small || !diff) return `${c.toLocaleString()} ${noun} (${p.toLocaleString()} the period before)`;
+                return `${c.toLocaleString()} ${noun} (${diff > 0 ? 'up' : 'down'} ${Math.abs(Math.round(diff / p * 100))}% from ${p.toLocaleString()})`;
+            };
+            lines.push(`- Visits from Google: ${delta(ov.clicks, ov.prior_clicks, 'visits')}`);
+            lines.push(`- Times shown in Google: ${delta(ov.impressions, ov.prior_impressions, 'times')}`);
+            // Impression-weighted, from seo_daily — the overview doesn't return a GSC position
+            if (daily.length) {
+                const t = seoWindowTotals(daily, s, e);
+                if (t.position != null) lines.push(`- Average position in Google: ${t.position.toFixed(1)}`);
+            }
+
+            // Leads only count once lead tracking was live for the whole comparison
+            if (range.p_prior_end >= LEAD_TRACKING_START) {
+                lines.push(`- Leads from Google (tracked on their website): ${delta(ov.organic_leads, ov.prior_organic_leads, 'leads')}`);
+            } else if (range.p_end >= LEAD_TRACKING_START) {
+                lines.push(`- Leads from Google (tracked on their website): ${(num(ov.organic_leads) || 0).toLocaleString()} — tracking started ${LEAD_TRACKING_START}, so there is nothing to compare with yet`);
+            }
+            if (num(ov.google_closes)) lines.push(`- Jobs they told us they closed from Google: ${num(ov.google_closes)}${num(ov.google_revenue) ? ` worth $${Math.round(num(ov.google_revenue)).toLocaleString()}` : ''} (from their own check-ins)`);
+            // Only when it's genuinely positive, the same rule as their SEO tab
+            if (num(ov.roi_multiple) > 1) lines.push(`- Return on their SEO fee for this period: ${num(ov.roi_multiple).toFixed(1)}x`);
+            if (num(ov.keywords_tracked)) {
+                lines.push(`- Target searches on page 1 of Google: ${num(ov.keywords_page1) || 0} of ${num(ov.keywords_tracked)} tracked${num(ov.prior_keywords_page1) != null ? ` (was ${num(ov.prior_keywords_page1)})` : ''}`);
+            }
+            if (num(ov.seo_potential_traffic)) lines.push(`- Room to grow: reaching the top 3 for their targets would be worth about ${Math.round(num(ov.seo_potential_traffic)).toLocaleString()} more visits a month${num(ov.seo_potential_value) ? ` (about $${Math.round(num(ov.seo_potential_value)).toLocaleString()} a month if bought as ads)` : ''}`);
+            if (ov.gsc_last_date && String(ov.gsc_last_date).slice(0, 10) < range.p_end) {
+                lines.push(`- NOTE: Google reports search data 2–3 days late. Visits are complete through ${String(ov.gsc_last_date).slice(0, 10)} only.`);
+            }
+        }
+
+        // Ranking movements worth naming, biggest first. A map pack spot counts as ranking.
+        const kws = (kwRes.data || []).map(k => ({
+            keyword: k.keyword,
+            rank: num(k.rank) ?? num(k.map_rank),
+            prior: num(k.prior_rank) ?? num(k.prior_map_rank),
+            map: num(k.map_rank)
+        })).filter(k => k.rank != null);
+        const moved = kws.filter(k => k.prior != null && k.prior !== k.rank)
+            .sort((a, b) => Math.abs(b.prior - b.rank) - Math.abs(a.prior - a.rank)).slice(0, 5);
+        if (moved.length) {
+            lines.push(`- Ranking changes this period: ${moved.map(k => `"${k.keyword}" ${k.prior} → ${k.rank}${k.map != null ? ' (in the map pack)' : ''}`).join('; ')}`);
+        }
+        const top = kws.filter(k => k.rank <= 3).slice(0, 5);
+        if (top.length) lines.push(`- Sitting in the top 3 for: ${top.map(k => `"${k.keyword}" (#${k.rank})`).join(', ')}`);
+
+        const almost = (almostRes.data || []).slice(0, 3);
+        if (almost.length) {
+            lines.push(`- Just off page 1 (page 2, so close to real traffic): ${almost.map(a => `"${a.query}" at position ${Number(a.weighted_position).toFixed(0)}`).join(', ')}`);
+        }
+
+        const log = logRes.data || [];
+        if (log.length) {
+            lines.push(`- SEO WORK THAT WENT LIVE IN THIS PERIOD (say what went live, in their language):`);
+            log.slice(0, 12).forEach(x => lines.push(`  • ${x.live_date}: ${x.title}${x.notes ? ` — ${String(x.notes).slice(0, 200)}` : ''}`));
+            if (log.length > 12) lines.push(`  • …and ${log.length - 12} more`);
+        }
+
+        if (!lines.length) return '';
+        return `\n\nORGANIC SEARCH (SEO) — ${range.p_start} to ${range.p_end}, compared with the ${days} days before. Use these figures exactly as given; do not recalculate or round them differently:\n${lines.join('\n')}`;
+    } catch (err) {
+        console.warn('Report: Organic Search data unavailable, SEO will come from the notes only.', err);
+        return '';
+    }
+}
+
+// Reads seo_daily / seo_pages_daily / seo_queries_daily (Search Console, via seo-sync),
  // seo_keywords / seo_rank_checks (SE Ranking, via seranking-sync), and lead_sources
  // (organic leads, via ghl-lead-webhook) together for one client at a time. This is
  // deliberately admin-first: the portal tab still reads the legacy seo_metrics table
@@ -6177,7 +6274,9 @@ Treat this period as a fresh starting point. State every number plainly as where
      let { s, e } = getPortalRange();
      const earliest = new Date(); earliest.setMonth(earliest.getMonth() - 16); earliest.setHours(0, 0, 0, 0);
      if (s < earliest) s = earliest;
-     const days = Math.round((e - s) / 86400000) + 1;
+     // floor, not round: e is the end of its day (23:59), so rounding made the comparison window
+     // one day longer than the range being reported
+     const days = Math.floor((e - s) / 86400000) + 1;
      const priorEnd = new Date(s); priorEnd.setDate(priorEnd.getDate() - 1);
      const priorStart = new Date(priorEnd); priorStart.setDate(priorStart.getDate() - days + 1);
      const ymd = seoLocalYmd;
