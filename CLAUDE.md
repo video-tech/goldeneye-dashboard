@@ -61,8 +61,23 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
      data structure so `secret` is mappable, then add the filter.
    - **Verified** by operation count: wrong secret = 1 op, real secret + a real contact = 4 ops and
      a text.
-6. **Admin alerts** — Supabase trigger on `Client Request` tasks → webhook → SMS to us.
-   **Unfinished**: trigger + recipients live, Make scenario needs iterator + send modules
+6. **Admin alerts** ("txt notification to us -Client request") — `trg_notify_client_request` on
+   `tasks` → webhook → SMS to us. Two routes: client requests, and the morning audit's critical
+   alert, which posts to the same hook.
+   **Secured and fixed 2026-09-15:**
+   - `notify_admins_client_request()` sends `secret` from Vault
+     (`supabase/sql/admin_alert_secret.sql`); `morning-audit` sends `MAKE_WEBHOOK_SECRET`.
+     **Both callers had to be sending it before the filter went in**, or critical alerts would
+     have stopped silently.
+   - **Filter between the webhook and the router**, so one check covers both routes.
+   - Both routes: **Search Contacts limit 1** and `found phone = the phone we sent`.
+   - **The bug this uncovered:** route 1 filtered on `event contains task_request`, but the
+     function sends `event = 'client_request'` with the type in `kind`. **No client request alert
+     had ever fired** — including "onboarding complete". Now `event contains client_request`, so
+     all three kinds (onboarding_complete, help_request, task_request) alert. Route 2
+     (morning-critical) was always fine.
+   - **Verified** by operation count: wrong secret = 1 op; a real `Client Request` task = 5 ops
+     and a text.
 7. **Report draft to Gmail** — the "Draft" button on a saved report (`sendSavedReportToMake`,
    app.js) sends `{client, subject, full_email_html, to_email[]}` through **`make-relay`** to
    `hook.us2.make.com/apq7ghcun1hza8h5ayw1xysy81nddh8v`, which drafts the email
@@ -92,9 +107,9 @@ team "My Team" 1498711):
 |---|---|---|
 | #4 txt to client after onboarding | ✅ | Plus the exact-email check, from the 10-lead incident |
 | #5 txt reminder twice a day | ✅ 2026-09-15 | Limit 1 + exact phone match added at the same time |
-| #6 txt notification to us | ❌ | Same shape as #5: sends SMS to any number in the payload, searches GHL with limit 10 and no exact-phone check. Needs `notify_admins_client_request()` to send the secret first |
-| #7 REPORTS GE to gmail | ❌ | Anyone with the URL can create Gmail drafts. Waiting on `make-relay` |
-| #8 ads approval | ❌ | Anyone with the URL can upsert `ad_approvals` rows (overwrite a client's decision) and make us call Meta. Waiting on `make-relay` |
+| #6 txt notification to us | ✅ 2026-09-15 | Filter sits before the router, so it covers both routes. Limit 1 + exact phone on both |
+| #7 REPORTS GE to gmail | ❌ | Anyone with the URL can create Gmail drafts. `make-relay` is deployed, so the filter is the last step |
+| #8 ads approval | ❌ | Anyone with the URL can upsert `ad_approvals` rows (overwrite a client's decision) and make us call Meta. `make-relay` is deployed, so the filter is the last step |
 | #2 seo for golden eye | n/a | **Already switched off**, so Make's old SEO pull is retired |
 
 **Credentials live in plain text inside blueprints:** a GHL private integration token (#5, #6) and a
