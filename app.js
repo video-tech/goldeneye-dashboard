@@ -536,9 +536,14 @@
                 supabaseClient.from('onboarding_steps').select('*').order('sort_order'),
                 supabaseClient.from('client_onboarding_progress').select('*').in('client_name', allowedClients),
                 // gsc_property / seranking_site_id decide whether the Organic Search tab shows at all
-                supabaseClient.from('clients').select('name, client_email, current_stage, gsc_property, seranking_site_id').in('name', allowedClients),
-                supabaseClient.from('weekly_reports').select('*').order('created_at', { ascending: false })
+                supabaseClient.from('clients').select('name, client_email, current_stage, gsc_property, seranking_site_id, website_status').in('name', allowedClients),
+                supabaseClient.from('weekly_reports').select('*').order('created_at', { ascending: false }),
+                // Service names head the Get Started groups
+                supabaseClient.from('services').select('*').order('sort_order'),
+                // Which steps apply to each of their clients (service-based onboarding)
+                loadOnboardingApplicability(allowedClients)
             ]);
+            globalServices = results[11].status === 'fulfilled' ? (results[11].value.data || []) : [];
 
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
             allRawReports = rResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
@@ -580,11 +585,13 @@
                 // per client, so a returning client on a new device saw it again and
                 // someone who never finished never saw it twice.
                 updateGetStartedTabVisibility();
-                const done = onboardingIsComplete(currentActiveClient);
                 // Never land them on Get Started once it's hidden — a client moved on with
-                // steps still outstanding would otherwise open to a tab that isn't there
-                const onboarding = portalClientStage() === 'Onboarding';
-                switchCpTab(!done && onboarding ? 'getstarted' : 'dashboard');
+                // steps still outstanding would otherwise open to a tab that isn't there. A
+                // client past onboarding who just added a service is onboarding again.
+                const obSteps = getStartedSteps(currentActiveClient, portalClientStage());
+                const done = obSteps.every(s => onboardingProgressFor(currentActiveClient, s.id)?.completed_at);
+                const onboarding = portalClientStage() === 'Onboarding' || servicesOnboarding(currentActiveClient).length > 0;
+                switchCpTab(!done && onboarding && obSteps.length ? 'getstarted' : 'dashboard');
 
                 // Paint the tab's dot even when they land elsewhere, then ask. Onboarding
                 // comes first — a client still working through it doesn't need a second
@@ -681,23 +688,98 @@ function onboardingProgressFor(clientName, stepId) {
     return globalOnboardingProgress.find(p => normalize(p.client_name) === want && p.step_id === stepId) || null;
 }
 
-// Every onboarding item, both sides, in order — for the admin's unified view.
-function allOnboardingItems() {
+// ---- Which steps apply to which client ----
+// Decided in SQL by onboarding_steps_for_client() (service_onboarding.sql), the same function
+// trg_onboarding_handoff uses, so the portal and the "onboarding complete" text can't disagree.
+// Loaded once per data load for every client in view. Keyed by normalized client name.
+//   steps:    rows {step_id, owner, service_key, service_status, display_service_key, completed}
+//   services: rows {service_key, status, complete} from service_onboarding_status(), incl. 'base'
+let obApplicable = new Map();
+// False until the SQL is installed and answering; everything then falls back to the old
+// behavior (every active step applies to every client), so nothing breaks in between.
+let obServiceMode = false;
+
+async function loadOnboardingApplicability(clientNames) {
+    const names = [...new Set((clientNames || []).filter(Boolean))];
+    if (!names.length) return;
+    const [stepsRes, statusRes] = await Promise.all([
+        supabaseClient.rpc('onboarding_steps_for_clients', { p_clients: names }),
+        supabaseClient.rpc('service_onboarding_status_for_clients', { p_clients: names })
+    ]);
+    if (stepsRes.error || statusRes.error) {
+        console.warn('[LIFECYCLE ENGINE] Service onboarding functions unavailable, every step applies to every client:', stepsRes.error || statusRes.error);
+        obServiceMode = false;
+        return;
+    }
+    const map = new Map();
+    const entry = n => {
+        const k = normalize(n);
+        if (!map.has(k)) map.set(k, { steps: [], services: [] });
+        return map.get(k);
+    };
+    names.forEach(entry);
+    (stepsRes.data || []).forEach(r => entry(r.client_name).steps.push(r));
+    (statusRes.data || []).forEach(r => entry(r.client_name).services.push(r));
+    // Merge rather than replace: the portal and the dashboard load different client sets
+    map.forEach((v, k) => obApplicable.set(k, v));
+    obServiceMode = true;
+}
+
+function obFor(clientName) {
+    return obServiceMode ? obApplicable.get(normalize(clientName || '')) : null;
+}
+
+function allActiveStepsSorted() {
     return globalOnboardingSteps
         .filter(s => s.active !== false)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 }
 
-// Just the client's own steps — what the portal shows and what its progress measures.
+// Every onboarding item that applies to this client, both sides, in order. Each carries
+// __service (the heading it shows under, null = Getting started). With no client, or before the
+// SQL is installed, every active step, as before.
+function allOnboardingItems(clientName) {
+    const all = allActiveStepsSorted();
+    const a = clientName ? obFor(clientName) : null;
+    if (!a) return all;
+    const display = new Map(a.steps.map(r => [r.step_id, r.display_service_key || null]));
+    return all.filter(s => display.has(s.id)).map(s => ({ ...s, __service: display.get(s.id) }));
+}
+
+// Just the client's own steps: what the portal shows and what its progress measures.
 // Agency items are tasks and don't belong in the client's checklist.
-function activeOnboardingSteps() {
-    return allOnboardingItems().filter(s => s.owner !== 'agency');
+function activeOnboardingSteps(clientName = currentActiveClient) {
+    return allOnboardingItems(clientName).filter(s => s.owner !== 'agency');
 }
 
 function onboardingIsComplete(clientName) {
-    const steps = activeOnboardingSteps();
+    const steps = activeOnboardingSteps(clientName);
     if (!steps.length) return true;
     return steps.every(s => onboardingProgressFor(clientName, s.id)?.completed_at);
+}
+
+// Add-ons this client is part-way through onboarding (client_services.status = 'onboarding')
+function servicesOnboarding(clientName) {
+    const a = obFor(clientName);
+    return a ? a.services.filter(s => s.service_key !== 'base' && s.status === 'onboarding').map(s => s.service_key) : [];
+}
+
+// The client steps Get Started shows. In the Onboarding stage, everything that applies. After it,
+// only the steps of an add-on they're onboarding now: a long-running ads client who adds SEO sees
+// the SEO steps, not the Base steps added after they onboarded years ago.
+function getStartedSteps(clientName, stage) {
+    const steps = activeOnboardingSteps(clientName);
+    if ((stage || 'Onboarding') === 'Onboarding') return steps;
+    const a = obFor(clientName);
+    if (!a) return [];
+    const live = new Set(a.steps.filter(r => r.service_status === 'onboarding').map(r => r.step_id));
+    return steps.filter(s => live.has(s.id));
+}
+
+// Title of the task trg_onboarding_handoff raises when a client past onboarding finishes an
+// add-on. Built the same way there; change both together.
+function addonHandoffTitle(serviceKey) {
+    return `${serviceName(serviceKey)} onboarding complete — ready to start`;
 }
 
 // A Loom share link can't report watch progress, so self-hosted MP4s are the norm here.
@@ -708,8 +790,23 @@ const isDirectVideo = url => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url || '');
 // chances to type a different address — and GHL keys contacts on email, so a mismatch
 // silently splits their answers across two contact records. It also keeps the webhook's
 // client lookup reliable, since the address always matches the one on file.
-function prefillFormUrl(url) {
+// An onboarding step's form also gets step_id, website_status and services, so one generic Make
+// scenario can tick off any form, and a form can branch on the client's record rather than a
+// fresh answer. They only land in the form if it has hidden fields with those names; GHL ignores
+// the rest, so they're harmless on forms without them.
+function prefillFormUrl(url, step) {
     if (!url) return url;
+    const withStep = u => {
+        if (!step) return u;
+        const want = normalize(currentActiveClient);
+        const row = portalClientRows.find(c => normalize(c.name) === want) || globalClientsData.find(c => normalize(c.name) === want);
+        const services = (obFor(currentActiveClient)?.services || []).filter(s => s.service_key !== 'base').map(s => s.service_key);
+        // Empty values are left off rather than sent blank, which could blank a GHL field
+        const extra = new URLSearchParams(Object.entries({ step_id: step.id, website_status: row?.website_status, services: services.join(',') })
+            .filter(([, v]) => v));
+        return `${u}${u.includes('?') ? '&' : '?'}${extra.toString()}`;
+    };
+    url = withStep(url);
 
     // globalClientsData is only filled by fetchAllGlobalData, which the client role never
     // runs — the portal loads its own name/email pairs instead. Check both so the lookup
@@ -1561,7 +1658,7 @@ window.renderCpProfile = function() {
 
     const obEl = document.getElementById('cp-profile-onboarding');
     if (obEl) {
-        const steps = activeOnboardingSteps();
+        const steps = activeOnboardingSteps(client);
         if (!steps.length) {
             obEl.innerText = 'Nothing outstanding';
         } else {
@@ -1593,9 +1690,13 @@ window.renderGetStarted = function() {
     const list = document.getElementById('ob-steps-list');
     if (!list) return;
 
-    const steps = activeOnboardingSteps();
     const client = currentActiveClient;
+    const steps = getStartedSteps(client, portalClientStage());
     const done = steps.filter(s => onboardingProgressFor(client, s.id)?.completed_at).length;
+    // Headings only when there's more than one group; a single list needs no "Getting started"
+    const groupOf = s => s.__service || null;
+    const grouped = new Set(steps.map(groupOf)).size > 1;
+    let lastGroup;
 
     const label = document.getElementById('ob-progress-label');
     const bar = document.getElementById('ob-progress-bar');
@@ -1608,9 +1709,24 @@ window.renderGetStarted = function() {
     let firstOpen = true;
     list.innerHTML = '';
 
+    // Headings follow services order, so steps are regrouped rather than left in raw sort order
+    const groupRank = g => g === null ? -1 : (globalServices.findIndex(x => x.key === g) + 1 || 999);
+    if (grouped) steps.sort((a, b) => groupRank(groupOf(a)) - groupRank(groupOf(b)));
+
     steps.forEach((s, i) => {
         const prog = onboardingProgressFor(client, s.id);
         const complete = !!prog?.completed_at;
+
+        if (grouped && groupOf(s) !== lastGroup) {
+            lastGroup = groupOf(s);
+            const members = steps.filter(x => groupOf(x) === lastGroup);
+            const doneHere = members.filter(x => onboardingProgressFor(client, x.id)?.completed_at).length;
+            const heading = document.createElement('div');
+            heading.className = 'flex items-baseline justify-between pt-2';
+            heading.innerHTML = `<h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">${escapeAttr(lastGroup ? serviceName(lastGroup) : 'Getting started')}</h3>
+                <span class="text-[11px] text-gray-500">${doneHere} of ${members.length}</span>`;
+            list.appendChild(heading);
+        }
         // Expand the first thing they still have to do; collapse the rest. A click on
         // the header overrides that either way, so anything can be reopened later.
         const defaultExpand = !complete && firstOpen;
@@ -1665,7 +1781,7 @@ window.renderGetStarted = function() {
 
             if (s.step_type === 'form' && s.embed_url) {
                 inner += `<div class="w-full rounded-lg overflow-hidden border border-white/10 mb-4 bg-white" style="height:70vh">
-                              <iframe src="${escapeAttr(prefillFormUrl(stripSlashEscapes(s.embed_url)))}" class="w-full h-full" frameborder="0"></iframe>
+                              <iframe src="${escapeAttr(prefillFormUrl(stripSlashEscapes(s.embed_url), s))}" class="w-full h-full" frameborder="0"></iframe>
                           </div>`;
 
                 // Only promise the automatic tick where a webhook is actually wired up.
@@ -1886,13 +2002,34 @@ function buildOnboardingHandoffTask(clientName) {
 // The agency's own onboarding work, raised when the client finishes rather than when
 // they're created. generateStageTasks dedupes on title against the database, so both
 // the portal and the dashboard can call this and only one set is ever created.
-async function raiseOnboardingAgencyTasks(clientName) {
-    // Logged even when it creates nothing: "no agency steps configured" and "they all
-    // exist already" are different problems, and silence looked the same as never running
-    const configured = allOnboardingItems().filter(s => s.owner === 'agency').length;
+//
+// Which agency steps: in the Onboarding stage, every one that applies to the client. Past it,
+// only those of an add-on whose "<add-on> onboarding complete" task exists (the trigger raises
+// it when the client finishes that add-on's steps). Keying on the task rather than on
+// client_services.status matters: SEO clients from before services existed are 'active' with no
+// such task, and must not suddenly get SEO setup tasks.
+async function raiseOnboardingAgencyTasks(clientName, stage) {
+    stage = stage || globalClientsData.find(c => normalize(c.name) === normalize(clientName))?.current_stage
+        || portalClientRows.find(c => normalize(c.name) === normalize(clientName))?.current_stage || 'Onboarding';
     try {
-        const made = await generateStageTasks(clientName, 'Onboarding');
-        console.log(`[LIFECYCLE ENGINE] ${clientName}: ${configured} agency step(s) configured, ${made} task(s) raised.`);
+        let onlyServices = null;
+        if (stage !== 'Onboarding') {
+            const a = obFor(clientName);
+            if (!a) return;
+            const candidates = [...new Set(a.steps.filter(r => r.owner === 'agency' && r.service_key).map(r => r.service_key))];
+            if (!candidates.length) return;
+            const titles = candidates.map(k => addonHandoffTitle(k).toLowerCase());
+            const { data } = await supabaseClient.from('tasks').select('title, client').eq('stage', 'Onboarding');
+            const have = new Set((data || []).filter(t => normalize(t.client || '') === normalize(clientName))
+                .map(t => String(t.title || '').trim().toLowerCase()));
+            onlyServices = candidates.filter((k, i) => have.has(titles[i]));
+            if (!onlyServices.length) return;
+        }
+        // Logged even when it creates nothing: "no agency steps configured" and "they all
+        // exist already" are different problems, and silence looked the same as never running
+        const configured = allOnboardingItems(clientName).filter(s => s.owner === 'agency').length;
+        const made = await generateStageTasks(clientName, 'Onboarding', { onlyServices });
+        console.log(`[LIFECYCLE ENGINE] ${clientName}: ${configured} agency step(s) apply${onlyServices ? ` (raising for ${onlyServices.join(', ')})` : ''}, ${made} task(s) raised.`);
     } catch (err) {
         console.error(`[LIFECYCLE ENGINE] Could not raise onboarding tasks for ${clientName}:`, err);
     }
@@ -1911,7 +2048,21 @@ async function obNotifyOnboardingComplete() {
     const key = normalize(client || '');
     if (!key || obCompletionRaised.has(key)) return;
 
-    const steps = activeOnboardingSteps();
+    // Past onboarding, finishing is an add-on's. trg_onboarding_handoff has already marked it
+    // active and raised its task in the same save, so refresh what applies (the add-on's steps
+    // leave Get Started) and raise our tasks for it. No text goes out for an add-on.
+    if (portalClientStage() !== 'Onboarding') {
+        const pending = getStartedSteps(client, portalClientStage());
+        if (!pending.length || !pending.every(s => onboardingProgressFor(client, s.id)?.completed_at)) return;
+        obCompletionRaised.add(key);
+        await loadOnboardingApplicability([client]);
+        await raiseOnboardingAgencyTasks(client, portalClientStage());
+        renderGetStarted();
+        updateGetStartedTabVisibility();
+        return;
+    }
+
+    const steps = activeOnboardingSteps(client);
     if (!steps.length || !onboardingIsComplete(client)) return;
 
     // Claimed before any await so the 2s form poll can't file a second one behind this
@@ -1959,7 +2110,7 @@ let obPollTimer = null;
 function obHasPendingFormStep() {
     // A form step that asks for a confirmation has no webhook behind it, so polling for
     // one would never stop on its own
-    return activeOnboardingSteps().some(s =>
+    return getStartedSteps(currentActiveClient, portalClientStage()).some(s =>
         s.step_type === 'form' && !s.requires_confirm &&
         !onboardingProgressFor(currentActiveClient, s.id)?.completed_at);
 }
@@ -2005,7 +2156,7 @@ window.stopOnboardingPoll = function() {
 window.updateGetStartedTabVisibility = function() {
     const tab = document.getElementById('cp-tab-getstarted');
     if (!tab) return;
-    const steps = activeOnboardingSteps();
+    const steps = getStartedSteps(currentActiveClient, portalClientStage());
     // Stays reachable after completion. The videos explain things people forget — how
     // Meta bills, what they agreed to on the forms — and hiding the tab meant the only
     // way back was asking us. First login still lands them here; a finished client just
@@ -2014,7 +2165,10 @@ window.updateGetStartedTabVisibility = function() {
     // Leaving the Onboarding stage is the exception: at that point it's history rather
     // than something they might still need, and the same videos live on in the Knowledge
     // Base anyway.
-    const show = steps.length > 0 && portalClientStage() === 'Onboarding';
+    // A client who added a service is onboarding again, whatever their stage, until its steps
+    // are done and the trigger marks it active. getStartedSteps already narrows to those steps.
+    const show = steps.length > 0 && (portalClientStage() === 'Onboarding'
+        || servicesOnboarding(currentActiveClient).length > 0);
     tab.classList.toggle('hidden', !show);
 
     // Hiding the button while its content is still on screen left the client stranded on
@@ -2042,7 +2196,7 @@ window.renderKnowledgeBase = function() {
     const grid = document.getElementById('kb-video-grid');
     if (!grid) return;
 
-    const videos = activeOnboardingSteps().filter(s => s.step_type === 'video' && s.embed_url);
+    const videos = activeOnboardingSteps(currentActiveClient).filter(s => s.step_type === 'video' && s.embed_url);
     if (!videos.length) {
         grid.innerHTML = '<p class="text-sm text-gray-500 italic md:col-span-2">No walkthrough videos yet.</p>';
         return;
@@ -3022,6 +3176,9 @@ window.submitClientRequest = async function() {
             // Awaited so callers rendering straight after this see the moved stage and the
             // tasks it generated. Handoff first: it's an Onboarding task itself, so raising
             // it after the advance would leave it filed against a stage they've left.
+            // Which onboarding steps apply to each client, before anything below reads it
+            await loadOnboardingApplicability(globalClientsData.map(c => c.name));
+
             if (currentUserRole === 'admin') {
                 await reconcileOnboardingHandoffTasks();
                 await autoAdvanceCompletedOnboarding();
@@ -3284,13 +3441,13 @@ window.submitClientRequest = async function() {
         // advance needs every Onboarding task Complete, and real rows for steps only the
         // client can tick would strand everyone at Onboarding forever.
         function clientOnboardingPseudoTasks() {
-            const steps = activeOnboardingSteps();
-            if (!steps.length) return [];
-
             const out = [];
             globalClientsData.forEach(c => {
-                if ((c.current_stage || 'Onboarding') !== 'Onboarding') return;
                 if ((c.status || 'active') !== 'active') return;
+                // In Onboarding, every step that applies to them. Past it, only the steps of
+                // an add-on they're onboarding now (nothing for everyone else).
+                const steps = getStartedSteps(c.name, c.current_stage || 'Onboarding');
+                if (!steps.length) return;
 
                 steps.forEach(s => {
                     const prog = onboardingProgressFor(c.name, s.id);
@@ -4112,7 +4269,7 @@ async function fetchHealthData() {
 window.markOnboardingComplete = async function() {
     if (currentUserRole !== 'admin' || cSelectedAccount === 'ALL') return;
 
-    const steps = activeOnboardingSteps();
+    const steps = activeOnboardingSteps(cSelectedAccount);
     const missing = steps.filter(s => !onboardingProgressFor(cSelectedAccount, s.id)?.completed_at);
     if (!missing.length) return;
 
@@ -4149,7 +4306,7 @@ window.markOnboardingComplete = async function() {
             const list = document.getElementById('c-onboarding-list');
             if (!box || !list) return;
 
-            const items = allOnboardingItems();
+            const items = cSelectedAccount === "ALL" ? [] : allOnboardingItems(cSelectedAccount);
             if (cSelectedAccount === "ALL" || !items.length) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
 
@@ -8203,12 +8360,27 @@ window.toggleAutoGenerationNotice = function() {
 // Create a stage's checklist tasks for a client. Returns how many were created.
 // Skips any the client already has for that stage, so moving back into a stage
 // doesn't duplicate the list or reopen work that's already done.
-async function generateStageTasks(clientName, stage) {
+// opts.onlyServices: for a client past onboarding, raise only agency steps tagged with these
+// add-ons (see raiseOnboardingAgencyTasks).
+async function generateStageTasks(clientName, stage, opts = {}) {
+    // Only the steps and checklist items that apply to this client's add-ons and website.
+    // Later stages ask stage_templates_for_client(); before that SQL exists, every item applies.
+    let stageItems = null;
+    if (stage !== 'Onboarding') {
+        const { data, error } = await supabaseClient.rpc('stage_templates_for_client', { p_client: clientName, p_stage: stage });
+        stageItems = error ? templatesForStage(stage) : (data || []);
+    }
+    let agencySteps = stage === 'Onboarding' ? allOnboardingItems(clientName).filter(s => s.owner === 'agency') : [];
+    if (opts.onlyServices) {
+        const want = new Set(opts.onlyServices);
+        const tagged = new Set((obFor(clientName)?.steps || []).filter(r => want.has(r.service_key)).map(r => r.step_id));
+        agencySteps = agencySteps.filter(s => tagged.has(s.id));
+    }
+
     // Onboarding is the one stage the client participates in, so its list lives in
     // onboarding_steps alongside their steps. Only the agency-owned rows become tasks.
     const templates = stage === 'Onboarding'
-        ? allOnboardingItems()
-            .filter(s => s.owner === 'agency')
+        ? agencySteps
             .map(s => ({
                 task_title: s.title,
                 assignee: s.assignee,
@@ -8218,7 +8390,7 @@ async function generateStageTasks(clientName, stage) {
                 checklist_group: null,
                 priority: 3, urgency: 3, effort: 3
             }))
-        : templatesForStage(stage);
+        : stageItems;
 
     if (!templates.length) return 0;
 
@@ -8278,11 +8450,15 @@ async function generateStageTasks(clientName, stage) {
 // again. Caught up here, where the dashboard can see every client's progress.
 async function reconcileOnboardingHandoffTasks() {
     if (currentUserRole !== 'admin') return;
-    if (!activeOnboardingSteps().length) return;
 
     for (const c of globalClientsData) {
-        if ((c.current_stage || 'Onboarding') !== 'Onboarding') continue;
         if ((c.status || 'active') !== 'active') continue;
+
+        if ((c.current_stage || 'Onboarding') !== 'Onboarding') {
+            await reconcileAddonOnboarding(c);
+            continue;
+        }
+        if (!activeOnboardingSteps(c.name).length) continue;
         if (!onboardingIsComplete(c.name)) continue;
 
         // Only a backstop now: the database trigger raises this the instant the last step
@@ -8302,7 +8478,38 @@ async function reconcileOnboardingHandoffTasks() {
         // won the race — which it always does — the agency checklist was never raised at
         // all and the only task to show for a finished onboarding was the handoff.
         // generateStageTasks dedupes against the database, so running every load is safe.
-        await raiseOnboardingAgencyTasks(c.name);
+        await raiseOnboardingAgencyTasks(c.name, 'Onboarding');
+    }
+}
+
+// The same backstop for a client past onboarding who was given an add-on. The trigger normally
+// does this inside the save that completed the last step; this catches the rare miss (two steps
+// completing in concurrent saves). No text, same as the trigger.
+async function reconcileAddonOnboarding(c) {
+    const a = obFor(c.name);
+    if (!a) return;
+    const finished = a.services.filter(s => s.service_key !== 'base' && s.status === 'onboarding' && s.complete);
+    for (const s of finished) {
+        const title = addonHandoffTitle(s.service_key);
+        const exists = globalTasksData.some(t => normalize(t.client || '') === normalize(c.name)
+            && String(t.title || '').trim().toLowerCase() === title.toLowerCase());
+        if (!exists) {
+            const row = { ...buildOnboardingHandoffTask(c.name), title,
+                notes: `${c.name} finished their ${serviceName(s.service_key)} onboarding steps in their portal.` };
+            const { data, error } = await supabaseClient.from('tasks').insert([row]).select();
+            if (error) { console.error(`[LIFECYCLE ENGINE] No ${s.service_key} handoff task for ${c.name}:`, error); continue; }
+            if (data?.length) globalTasksData.push(...data);
+        }
+        const { error } = await supabaseClient.from('client_services')
+            .update({ status: 'active', onboarded_at: new Date().toISOString() })
+            .eq('client_name', c.name).eq('service_key', s.service_key).eq('status', 'onboarding');
+        if (error) console.error(`[LIFECYCLE ENGINE] Could not mark ${s.service_key} onboarded for ${c.name}:`, error);
+        else s.status = 'active';
+        console.log(`[LIFECYCLE ENGINE] ${c.name} finished ${s.service_key} onboarding — caught up on load.`);
+    }
+    // Only clients with an add-on handoff task get anything; dedupes, so safe every load
+    if (globalTasksData.some(t => normalize(t.client || '') === normalize(c.name) && / onboarding complete — ready to start$/i.test(String(t.title || '').trim()))) {
+        await raiseOnboardingAgencyTasks(c.name, c.current_stage);
     }
 }
 

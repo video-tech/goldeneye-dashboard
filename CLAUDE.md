@@ -378,9 +378,33 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
     `onboarding`, an unticked one becomes `ended` (after a confirm), and re-ticking an ended one
     restarts it.
   - **Tests:** 26 jsdom checks.
-- **Not switched yet:** the portal's Get Started, stage task generation and `trg_onboarding_handoff`
-  still ignore the tags. Auto-checks are labels only until the reconcile is built. Don't add
-  add-on-only steps until the portal switch lands, or every client will see them.
+- **Switched over 2026-09-15:** Get Started, agency tasks, stage checklists and `trg_onboarding_handoff`
+  all use the tags now.
+  - **One source:** app.js loads `onboarding_steps_for_clients` and `service_onboarding_status_for_clients`
+    into `obApplicable` on every data load. `allOnboardingItems(client)` and
+    `activeOnboardingSteps(client)` read it, and if the SQL isn't there they fall back to every
+    step applying to everyone.
+  - **Access:** the per-client functions are SECURITY DEFINER. They check `client_row_visible()`
+    for signed-in users, while service_role (Make writing progress) and the SQL Editor see all.
+    Without that, a client whose `clients` row RLS hides would get "no steps".
+  - **In the Onboarding stage:** the old event, over the steps that apply to the client. When
+    they're all done, the handoff task and text fire, `services` goes in the Make payload, and every
+    `onboarding` add-on is marked active.
+  - **Past onboarding, a new add-on** (for example SEO for a long-running ads client): Get Started
+    shows only that add-on's steps (`getStartedSteps`). When they're done, the trigger marks it
+    active and raises "<add-on name> onboarding complete — ready to start", with **no text**,
+    because scenario #4's message is wrong for them.
+    - Base doesn't gate an add-on once the client has left Onboarding.
+    - Agency tasks for an add-on are raised only when that task exists, so pre-existing SEO clients
+      don't suddenly get SEO setup tasks.
+    - Renaming a service changes the expected title, so an in-flight add-on onboarding would miss
+      its tasks.
+  - **Later stages** generate from `stage_templates_for_client()`.
+  - **Forms:** an onboarding form's URL also carries `step_id`, `website_status` and `services`.
+    Empty values are left off.
+  - **Tests:** 49 PGlite checks (functions), 17 (trigger), 18 jsdom checks (portal), plus
+    `onboarding_handoff_tests.sql`, with Test 5 added for an add-on.
+- **Still to build:** the auto-check reconcile (`auto_check` doesn't tick tasks off yet).
 
 Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5× default
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of

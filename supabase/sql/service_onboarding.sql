@@ -2,8 +2,9 @@
 -- migration of today's clients and steps. Run once in the SQL Editor, then re-run
 -- supabase/sql/rename_client.sql (it now moves client_services).
 --
--- Safe on its own: nothing in app.js or the handoff trigger reads these columns or functions
--- yet, so running this changes no client's Get Started. The app and trigger switch over in later steps.
+-- Since 2026-09-15 app.js (Get Started, agency tasks, stage checklists) and trg_onboarding_handoff
+-- read these functions. Run this file BEFORE supabase/triggers/onboarding_handoff.sql, and before the
+-- app.js that uses them goes live; until it has run, app.js falls back to "every step applies".
 --
 -- Services are data, not code, so the list can change without touching the engine. Adding,
 -- renaming or retiring a service is a row edit in Templates → Services, and tagging steps with it is
@@ -147,6 +148,12 @@ grant execute on function onboarding_preview(text[], text) to authenticated;
 --   first matching service in services.sort_order.
 -- Only services the client has as onboarding or active count. Paused and ended don't bring steps
 -- back. completed tells whether the client has done the step.
+--
+-- SECURITY DEFINER because a client's own session may not be able to read its clients row, and
+-- an empty answer here would read as "no steps" and hide Get Started. The visibility check keeps
+-- it to the caller's own clients. With no signed-in user (the SQL Editor, or Make writing progress
+-- with service_role, which fires the handoff trigger) auth.role() is null or service_role, and
+-- those callers already bypass RLS anyway.
 create or replace function onboarding_steps_for_client(p_client text)
 returns table (
     step_id             onboarding_steps.id%type,
@@ -158,18 +165,22 @@ returns table (
     sort_order          integer
 )
 language sql stable
+security definer
 set search_path = public
 as $$
     with c as (
         select cl.name, cl.website_status,
                lower(regexp_replace(cl.name, '[^a-zA-Z0-9]', '', 'g')) as key
-        from clients cl where cl.name = p_client limit 1
+        from clients cl
+        where cl.name = p_client
+          and (coalesce(auth.role(), '') in ('', 'service_role') or client_row_visible(p_client))
+        limit 1
     ),
     mine as (
         select cs.service_key, cs.status, s.sort_order
         from client_services cs
         join services s on s.key = cs.service_key
-        where cs.client_name = p_client and cs.status in ('onboarding', 'active')
+        where cs.client_name = (select name from c) and cs.status in ('onboarding', 'active')
     ),
     eligible as (
         select st.*
@@ -204,34 +215,109 @@ grant execute on function onboarding_steps_for_client(text) to authenticated;
 -- - The first row is always 'base': the untagged steps every client does. Its status is onboarding
 --   until they're all done, then active.
 -- - Each add-on is complete when its own tagged client steps are done AND Base is done, since an SEO
---   client can't finish SEO onboarding without the shared basics.
+--   client can't finish SEO onboarding without the shared basics. Once a client has left the
+--   Onboarding stage, Base is history and no longer gates an add-on: several long-running clients
+--   show a couple of Base steps undone only because those steps were added after they onboarded,
+--   and adding SEO for them must not wait on those.
 -- Agency steps are tasks and never gate the client.
 create or replace function service_onboarding_status(p_client text)
 returns table (service_key text, status text, client_steps bigint, client_steps_done bigint, complete boolean)
 language sql stable
+security definer
 set search_path = public
 as $$
-    with steps as (select * from onboarding_steps_for_client(p_client) where owner <> 'agency'),
+    with c as (
+        select cl.name, coalesce(cl.current_stage, 'Onboarding') = 'Onboarding' as onboarding_stage
+        from clients cl
+        where cl.name = p_client
+          and (coalesce(auth.role(), '') in ('', 'service_role') or client_row_visible(p_client))
+        limit 1
+    ),
+    steps as (select * from onboarding_steps_for_client(p_client) where owner <> 'agency'),
     shared as (select step_id, completed from steps where service_key is null),
+    base_done as (select not exists (select 1 from shared where not completed) as done),
     mine as (
         select cs.service_key, cs.status from client_services cs
-        where cs.client_name = p_client and cs.status in ('onboarding', 'active')
+        where cs.client_name = (select name from c) and cs.status in ('onboarding', 'active')
     )
     select 'base'::text,
-           case when exists (select 1 from shared where not completed) then 'onboarding' else 'active' end,
+           case when (select done from base_done) then 'active' else 'onboarding' end,
            (select count(*) from shared), (select count(*) from shared where completed),
-           not exists (select 1 from shared where not completed)
-    where exists (select 1 from clients where name = p_client)
+           (select done from base_done)
+    where exists (select 1 from c)
     union all
     select m.service_key, m.status,
            (select count(*) from steps s where s.service_key = m.service_key) + (select count(*) from shared),
            (select count(*) from steps s where s.service_key = m.service_key and s.completed)
              + (select count(*) from shared where completed),
            not exists (select 1 from steps s where s.service_key = m.service_key and not s.completed)
-             and not exists (select 1 from shared where not completed)
+             and ((select done from base_done) or not (select onboarding_stage from c))
     from mine m;
 $$;
 grant execute on function service_onboarding_status(text) to authenticated;
+
+-- Batch versions for the admin dashboard, which needs every client at once on each load.
+-- Each row carries its client's name. The per-client visibility checks still apply.
+create or replace function onboarding_steps_for_clients(p_clients text[])
+returns table (client_name text, step_id onboarding_steps.id%type, owner text, service_key text, service_status text,
+               display_service_key text, completed boolean, sort_order integer)
+language sql stable
+set search_path = public
+as $$
+    select n, f.step_id, f.owner, f.service_key, f.service_status, f.display_service_key, f.completed, f.sort_order
+    from unnest(p_clients) as n
+    cross join lateral onboarding_steps_for_client(n) f;
+$$;
+grant execute on function onboarding_steps_for_clients(text[]) to authenticated;
+
+create or replace function service_onboarding_status_for_clients(p_clients text[])
+returns table (client_name text, service_key text, status text, client_steps bigint, client_steps_done bigint, complete boolean)
+language sql stable
+set search_path = public
+as $$
+    select n, s.service_key, s.status, s.client_steps, s.client_steps_done, s.complete
+    from unnest(p_clients) as n
+    cross join lateral service_onboarding_status(n) s;
+$$;
+grant execute on function service_onboarding_status_for_clients(text[]) to authenticated;
+
+-- A later stage's checklist for one client: the same rule, applied to stage_templates.
+-- Only add-ons the client currently has (onboarding or active) count, matching the steps above.
+create or replace function stage_templates_for_client(p_client text, p_stage text)
+returns setof stage_templates
+language sql stable
+security definer
+set search_path = public
+as $$
+    select t.*
+    from stage_templates t, clients cl
+    where cl.name = p_client
+      and (coalesce(auth.role(), '') in ('', 'service_role') or client_row_visible(p_client))
+      and t.stage = p_stage
+      and onboarding_condition_matches(
+            t.service_keys, t.website_statuses,
+            (select array_agg(cs.service_key) from client_services cs
+              where cs.client_name = cl.name and cs.status in ('onboarding', 'active')),
+            cl.website_status)
+    order by t.sort_order;
+$$;
+grant execute on function stage_templates_for_client(text, text) to authenticated;
+
+-- These three run with the owner's rights. Postgres lets PUBLIC execute any new function, and
+-- create or replace keeps old grants, so take it away explicitly: signed-in users (whose own
+-- visibility check applies inside) and service_role only, never the public anon key.
+revoke execute on function onboarding_steps_for_client(text), service_onboarding_status(text),
+    stage_templates_for_client(text, text) from public;
+do $$ begin
+    if exists (select 1 from pg_roles where rolname = 'anon') then
+        execute 'revoke execute on function onboarding_steps_for_client(text), service_onboarding_status(text), stage_templates_for_client(text, text) from anon';
+    end if;
+    if exists (select 1 from pg_roles where rolname = 'service_role') then
+        execute 'grant execute on function onboarding_steps_for_client(text), service_onboarding_status(text), stage_templates_for_client(text, text) to service_role';
+    end if;
+end $$;
+grant execute on function onboarding_steps_for_client(text), service_onboarding_status(text),
+    stage_templates_for_client(text, text) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- onboarding_auto_checks: things Golden Eye can see for itself
@@ -321,6 +407,16 @@ select c.name, 'seo', 'active', coalesce(c.seo_start_date::timestamptz, now()), 
 from clients c
 where c.gsc_property is not null or c.seranking_site_id is not null
 on conflict (client_name, service_key) do nothing;
+
+-- Clients still in the Onboarding stage who already finished their steps (their handoff task
+-- exists) were announced before services existed. Mark those add-ons done, so nothing reads them
+-- as a fresh onboarding waiting to be announced.
+update client_services cs set status = 'active', onboarded_at = coalesce(cs.onboarded_at, now())
+where cs.status = 'onboarding'
+  and exists (select 1 from tasks t
+              where lower(regexp_replace(coalesce(t.client, ''), '[^a-zA-Z0-9]', '', 'g'))
+                  = lower(regexp_replace(cs.client_name, '[^a-zA-Z0-9]', '', 'g'))
+                and lower(btrim(coalesce(t.title, ''))) = lower('Onboarding complete — ready for campaign build'));
 
 notify pgrst, 'reload schema';
 

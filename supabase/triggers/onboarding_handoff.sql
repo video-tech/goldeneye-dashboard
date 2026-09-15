@@ -56,6 +56,19 @@
 --   caused it, so a later check sees both or neither.
 -- - The task insert fires trg_notify_client_request, which classifies it as
 --   onboarding_complete and alerts the admins. That is the admin side of the same event.
+--
+-- Service-based onboarding (2026-09-15, needs supabase/sql/service_onboarding.sql run first):
+-- - "Every step" now means every step that APPLIES to this client, from
+--   onboarding_steps_for_client(), the same function the portal uses. An ads-only client is no
+--   longer waiting on SEO steps, and the other way round.
+-- - Client still in the Onboarding stage: unchanged event. When all their applicable client steps
+--   are done, raise the handoff task and text them once, and mark every add-on they were
+--   onboarding as active.
+-- - Client past the Onboarding stage who was given a new add-on: when that add-on's steps are done
+--   (service_onboarding_status says complete), mark it active and raise "<add-on> onboarding
+--   complete — ready to start". NO text: scenario #4's message says their onboarding is complete,
+--   which is the wrong thing to tell a long-running client. client_services.status going from
+--   onboarding to active, in the same transaction, is what stops it happening twice.
 create or replace function public.raise_onboarding_handoff_task()
 returns trigger
 language plpgsql
@@ -73,6 +86,9 @@ declare
   v_total    int;
   v_done     int;
   v_secret   text;
+  v_addon    record;
+  v_addon_title text;
+  v_services jsonb;
 begin
   if NEW.completed_at is null then
     return NEW;
@@ -98,31 +114,51 @@ begin
   order by (coalesce(c.status, 'active') = 'active') desc
   limit 1;
 
-  if v_client is null or v_status <> 'active' or v_stage <> 'Onboarding' then
+  if v_client is null or v_status <> 'active' then
     return NEW;
   end if;
 
-  select count(*) into v_total
-  from onboarding_steps s
-  where coalesce(s.active, true)
-    and coalesce(s.owner, 'client') <> 'agency';
+  -- A client past onboarding: only a newly added add-on can finish here, and it gets a task, not a text
+  if v_stage <> 'Onboarding' then
+    for v_addon in
+      select s.service_key, coalesce(sv.name, s.service_key) as name
+      from service_onboarding_status(v_client) s
+      left join services sv on sv.key = s.service_key
+      where s.service_key <> 'base' and s.status = 'onboarding' and s.complete
+    loop
+      update client_services set status = 'active', onboarded_at = now()
+      where client_name = v_client and service_key = v_addon.service_key and status = 'onboarding';
 
-  if v_total = 0 then
+      v_addon_title := v_addon.name || ' onboarding complete — ready to start';
+      if not exists (
+        select 1 from tasks t
+        where lower(btrim(coalesce(t.title, ''))) = lower(v_addon_title)
+          and lower(regexp_replace(coalesce(t.client, ''), '[^a-zA-Z0-9]', '', 'g')) = v_key
+      ) then
+        insert into tasks (client, title, type, stage, status, assignee,
+                           p, u, e, score, due, notes, updated_at)
+        values (v_client, v_addon_title, 'Client Request', 'Onboarding', 'Not Started', 'Account Manager',
+                5, 4, 1, 92, current_date + 1,
+                v_client || ' finished their ' || v_addon.name || ' onboarding steps in their portal.', now());
+      end if;
+    end loop;
     return NEW;
   end if;
 
-  select count(*) into v_done
-  from onboarding_steps s
-  join client_onboarding_progress p
-    on  p.step_id = s.id
-    and p.completed_at is not null
-    and lower(regexp_replace(coalesce(p.client_name, ''), '[^a-zA-Z0-9]', '', 'g')) = v_key
-  where coalesce(s.active, true)
-    and coalesce(s.owner, 'client') <> 'agency';
+  -- Still onboarding: every client step that applies to them, and only those
+  select count(*), count(*) filter (where f.completed)
+    into v_total, v_done
+  from (select distinct step_id, completed from onboarding_steps_for_client(v_client) where owner <> 'agency') f;
 
-  if v_done < v_total then
+  if v_total = 0 or v_done < v_total then
     return NEW;
   end if;
+
+  -- Their add-ons are onboarded as part of this one event
+  select coalesce(jsonb_agg(service_key order by service_key), '[]'::jsonb) into v_services
+  from client_services where client_name = v_client and status in ('onboarding', 'active');
+  update client_services set status = 'active', onboarded_at = now()
+  where client_name = v_client and status = 'onboarding';
 
   if exists (
     select 1 from tasks t
@@ -173,6 +209,7 @@ begin
                    'client',       v_client,
                    'client_email', v_email,
                    'completed_at', NEW.completed_at,
+                   'services',     v_services,
                    'secret',       v_secret
                  )
     );

@@ -56,6 +56,8 @@ $$;
 
 insert into clients (name, client_email, current_stage, status)
 values ('ZZ Handoff Test', 'zz-handoff-test@example.invalid', 'Onboarding', 'active');
+-- An ads client, like every client from before service-based onboarding, so all eleven steps apply
+insert into client_services (client_name, service_key, status) values ('ZZ Handoff Test', 'ads', 'onboarding');
 select pg_temp.snap('1 new client, nothing done', 'ZZ Handoff Test');
 
 -- Every client step done but the last, a video 40% watched: its row exists with
@@ -124,6 +126,7 @@ $$;
 
 insert into clients (name, client_email, current_stage, status)
 values ('ZZ Rename Test', 'zz-rename-test@example.invalid', 'Onboarding', 'active');
+insert into client_services (client_name, service_key, status) values ('ZZ Rename Test', 'ads', 'onboarding');
 
 -- Every step in one statement, as a Make upsert of several rows would. Row triggers fire
 -- after the statement, so all eleven see a finished client; only the first may act.
@@ -237,6 +240,7 @@ $$;
 
 insert into clients (name, client_email, current_stage, status)
 values ('ZZ Backfill Test', 'zz-backfill-test@example.invalid', 'Onboarding', 'active');
+insert into client_services (client_name, service_key, status) values ('ZZ Backfill Test', 'ads', 'onboarding');
 
 -- Exactly what markOnboardingComplete() writes
 insert into client_onboarding_progress (client_name, step_id, completed_at, completed_by)
@@ -247,4 +251,47 @@ select pg_temp.snap('1 every step backfilled', 'ZZ Backfill Test');
 
 -- Expect:  1 → 11 / 0 / 0 / 0
 do $$ begin raise exception E'TEST 4 RESULTS (rolled back)\n%', (select string_agg(format('%s | steps_done=%s handoff_tasks=%s client_texts=%s admin_alerts=%s', checkpoint, steps_done, handoff_tasks, client_texts, admin_alerts), E'\n' order by n) from t_log); end $$;
+rollback;
+
+
+-- =============================================================================
+-- Test 5 — a long-running client adds SEO and finishes its steps. Expect an
+-- "SEO Growth onboarding complete" task, SEO marked active, and NO text.
+-- SimpliBlinds again (Optimizing, active). The SEO step is made up inside the transaction.
+-- =============================================================================
+begin;
+
+drop trigger if exists trg_onboarding_handoff on client_onboarding_progress;
+create trigger trg_onboarding_handoff
+after insert or update of completed_at on client_onboarding_progress
+for each row when (NEW.completed_at is not null)
+execute function raise_onboarding_handoff_task();
+
+create temp table t_log (n serial, checkpoint text, seo_status text, addon_tasks int, client_texts int) on commit drop;
+create function pg_temp.snap(label text) returns void language sql as $$
+  insert into t_log (checkpoint, seo_status, addon_tasks, client_texts)
+  select label,
+    (select status from client_services where client_name = 'SimpliBlinds' and service_key = 'seo'),
+    (select count(*) from tasks where client = 'SimpliBlinds' and title = 'SEO Growth onboarding complete — ready to start'),
+    (select count(*) from net.http_request_queue where url like '%hucrpp6hm43ps165n7wxut8v9rn3dksu%');
+$$;
+
+insert into onboarding_steps (sort_order, owner, step_type, title, service_keys, active)
+values (900, 'client', 'action', 'ZZ SEO test step A', '{seo}', true),
+       (901, 'client', 'action', 'ZZ SEO test step B', '{seo}', true);
+insert into client_services (client_name, service_key, status) values ('SimpliBlinds', 'seo', 'onboarding')
+on conflict (client_name, service_key) do update set status = 'onboarding';
+select pg_temp.snap('1 SEO added');
+
+insert into client_onboarding_progress (client_name, step_id, completed_at, completed_by)
+select 'SimpliBlinds', id, now(), 'zz-trigger-test' from onboarding_steps where title = 'ZZ SEO test step A';
+select pg_temp.snap('2 one SEO step done');
+
+insert into client_onboarding_progress (client_name, step_id, completed_at, completed_by)
+select 'SimpliBlinds', id, now(), 'zz-trigger-test' from onboarding_steps where title = 'ZZ SEO test step B';
+select pg_temp.snap('3 both SEO steps done');
+
+-- Expect:  1 → onboarding / 0 / n    2 → onboarding / 0 / same n
+--          3 → active / 1 / same n   (task raised, no text)
+do $$ begin raise exception E'TEST 5 RESULTS (rolled back)\n%', (select string_agg(format('%s | seo_status=%s addon_tasks=%s client_texts=%s', checkpoint, seo_status, addon_tasks, client_texts), E'\n' order by n) from t_log); end $$;
 rollback;
