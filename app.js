@@ -8184,7 +8184,7 @@ window.addOnboardingStepRow = function(step) {
     row.dataset.stepActive = retired ? 'false' : 'true';
 
     row.innerHTML = `
-        ${retired ? `<p class="text-[10px] uppercase tracking-widest text-amber-400/80"><i class="fa-solid fa-eye-slash mr-1"></i>Hidden from clients</p>` : ''}
+        <p class="ob-hidden-note text-[10px] uppercase tracking-widest text-amber-400/80 ${retired ? '' : 'hidden'}"><i class="fa-solid fa-eye-slash mr-1"></i>Hidden from clients &mdash; nothing about it is shown or created until it's switched on</p>
         <div class="flex gap-2 items-start">
             <span class="ob-drag-handle cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-300 px-1 pt-2" title="Drag to reorder">
                 <i class="fa-solid fa-grip-vertical"></i>
@@ -8197,6 +8197,9 @@ window.addOnboardingStepRow = function(step) {
             <select class="glass-input !py-1.5 !w-40 ob-type" onchange="toggleOnboardingOwnerFields(this)">
                 ${types.map(([v, l]) => `<option value="${v}" ${step?.step_type === v ? 'selected' : ''}>${l}</option>`).join('')}
             </select>
+            <button type="button" onclick="toggleOnboardingStepLive(this)" class="ob-live-toggle text-gray-500 hover:text-white px-2 py-1.5" title="${retired ? 'Hidden. Click to switch it on for clients' : 'Live. Click to hide it'}">
+                <i class="fa-solid ${retired ? 'fa-eye-slash text-amber-400/80' : 'fa-eye'}"></i>
+            </button>
             <button type="button" onclick="this.closest('.ob-step-row').remove()" class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove step">
                 <i class="fa-solid fa-xmark"></i>
             </button>
@@ -8225,6 +8228,17 @@ window.addOnboardingStepRow = function(step) {
     updateConditionSummary(row.querySelector('.ob-conditions'));
     toggleOnboardingOwnerFields(row.querySelector('.ob-owner'));
     if (!autoCheckCatalog) loadAutoCheckCatalog().then(refreshAutoCheckSelects);
+};
+
+// Hide a step without deleting it (its progress and tags stay), or switch a hidden one on.
+// Takes effect on Save, like every other edit in this list.
+window.toggleOnboardingStepLive = function(btn) {
+    const row = btn.closest('.ob-step-row');
+    const live = row.dataset.stepActive === 'false';
+    row.dataset.stepActive = live ? 'true' : 'false';
+    row.querySelector('.ob-hidden-note').classList.toggle('hidden', live);
+    btn.title = live ? 'Live. Click to hide it' : 'Hidden. Click to switch it on for clients';
+    btn.querySelector('i').className = `fa-solid ${live ? 'fa-eye' : 'fa-eye-slash text-amber-400/80'}`;
 };
 
 // Show only the fields that mean something for this row. A client step has no assignee
@@ -8287,8 +8301,9 @@ window.saveOnboardingSteps = async function() {
         };
     }).filter(s => s.title);
 
-    // action and team steps render their own UI, so neither needs a URL
-    const missingEmbed = entered.find(s => s.owner === 'client'
+    // action and team steps render their own UI, so neither needs a URL. A hidden step can wait
+    // for its URL: that's how a step gets drafted before its video or form exists.
+    const missingEmbed = entered.find(s => s.owner === 'client' && s.active
         && s.step_type !== 'action' && s.step_type !== 'team' && !s.embed_url);
     if (missingEmbed) {
         alert(`"${missingEmbed.title}" is a ${missingEmbed.step_type} step but has no URL — clients would see an empty box.`);
