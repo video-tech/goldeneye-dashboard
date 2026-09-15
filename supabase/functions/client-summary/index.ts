@@ -54,12 +54,14 @@ async function loadTasks(db: any) {
     // Client Request rows are the client's own submissions, not work done for
     // them — cpTasksForClient() in app.js excludes them from the same two lists
     // this mirrors, so this does too.
+    // Tasks hidden from the client (tasks.client_visible = false, supabase/sql/task_client_visibility.sql)
+    // are left out too: this summary is shown in the client's own portal.
     const { data, error } = await db
         .from("tasks")
-        .select("client, title, status, type, due, updated_at")
+        .select("client, title, status, type, due, updated_at, client_visible")
         .neq("type", "Client Request");
     if (error) throw new Error(`tasks: ${error.message}`);
-    return data ?? [];
+    return (data ?? []).filter((t: any) => t.client_visible !== false);
 }
 
 function buildLists(tasks: any[], clientName: string, cutoffDay: number) {

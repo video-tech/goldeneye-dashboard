@@ -262,6 +262,19 @@ No SMS is ever sent by this app. Supabase asks Make, Make asks GHL.
   confirmed-intentional exception — that contact is treated as an investor, not an
   ordinary client — not an oversight to clean up.
 
+- **`tasks.client_visible`, added 2026-09-15** (`supabase/sql/task_client_visibility.sql`), set by
+  "Hide from client" in the task drawer. A hidden task stays on our board, marked Hidden.
+  - **Enforced in the database:** the client read policy above now also requires
+    `client_visible` on its two client branches, so a client can't read hidden tasks even from
+    DevTools.
+  - **Where it's filtered:** app.js filters them from `cpTasksForClient`, portal lists, the
+    support list and the weekly report's task lists (for admin preview, where RLS lets everything
+    through). `client-summary` skips them.
+  - **Still visible to:** the admin chat (it's for us), and the investor contact through
+    `Admin and Investor Task Access`, unchanged.
+  - **Order:** run the SQL, then deploy `client-summary`, which selects the column. Saving a task
+    marked hidden before the SQL exists is refused rather than saved visible.
+  - **Tests:** 6 PGlite checks.
 - **`client_row_visible(text)`, added 2026-09-10** — the RLS helper every client-facing table
   added from here on should use. Wraps admin / `user_has_client_access()` / `client_email`
   fallback into one call so the fallback cannot be forgotten. See SEO measurement for why that

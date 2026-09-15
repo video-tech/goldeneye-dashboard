@@ -844,10 +844,13 @@ window.obToggleStep = function(stepId, defaultExpand) {
 
 const cpTaskIsClients = t => normalize(t.assignee || '') === 'client';
 
+// Tasks hidden from the client are already withheld by RLS for a client login. This filter is what
+// keeps them out when an admin previews the portal, where RLS lets everything through.
 function cpTasksForClient() {
     return globalTasksData.filter(t =>
         normalize(t.client || '') === normalize(currentActiveClient || '') &&
-        t.type !== 'Client Request');
+        t.type !== 'Client Request' &&
+        t.client_visible !== false);
 }
 
 // Whose it is, stated on every card. In the board the two are mixed together, so the
@@ -1103,7 +1106,8 @@ window.renderCpSupport = function() {
     const open = globalTasksData.filter(t =>
         normalize(t.client || '') === normalize(currentActiveClient || '') &&
         t.type === 'Client Request' &&
-        t.status !== 'Complete');
+        t.status !== 'Complete' &&
+        t.client_visible !== false);
 
     if (!open.length) {
         list.innerHTML = '<p class="text-sm text-gray-500 italic px-2">Nothing open. Anything you send will show here until it\'s done.</p>';
@@ -2922,7 +2926,7 @@ updateAgencyPowerTicker();
         }
         function renderPortalTasks() {
             const container = document.getElementById('portal-tasks-container'); container.innerHTML = '';
-            const clientTasks = globalTasksData.filter(t => normalize(t.client) === normalize(currentActiveClient) && t.status !== 'Complete');
+            const clientTasks = globalTasksData.filter(t => normalize(t.client) === normalize(currentActiveClient) && t.status !== 'Complete' && t.client_visible !== false);
             if (clientTasks.length === 0) { container.innerHTML = '<div class="glass p-6 text-center text-gray-500 italic md:col-span-2">No active tasks at the moment.</div>'; return; }
             clientTasks.sort((a,b) => b.score - a.score).forEach(t => {
                 let badgeColor = t.status === 'In Progress' ? 'text-blue-400 bg-blue-500/10 border-blue-500/30' : t.status === 'Blocked' ? 'text-red-400 bg-red-500/10 border-red-500/30' : 'text-gray-400 bg-black/40 border-white/5';
@@ -3566,10 +3570,12 @@ window.submitClientRequest = async function() {
             renderActiveTaskView();
         };
 
-        const clientTaskBadge = t => !taskIsClients(t) ? ''
+        const clientTaskBadge = t => (t.client_visible === false
+                ? '<span class="text-[9px] font-bold uppercase tracking-widest text-gray-400 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded whitespace-nowrap" title="Hidden from the client"><i class="fa-solid fa-eye-slash mr-1"></i>Hidden</span>'
+                : '') + (!taskIsClients(t) ? ''
             : t.__onboardingStep
                 ? '<span class="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded whitespace-nowrap">Onboarding step</span>'
-                : '<span class="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded whitespace-nowrap">Client to do</span>';
+                : '<span class="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded whitespace-nowrap">Client to do</span>');
 
         // The client's outstanding onboarding steps, mirrored onto the board so we can see
         // what we're waiting on them for. Deliberately not rows in `tasks`: the stage
@@ -3733,7 +3739,8 @@ window.submitClientRequest = async function() {
         if(!t) return; activeEditId=t.id; document.getElementById('t-drawer-headline').innerText="Edit Task"; document.getElementById('t-title').value=t.title; 
         if(t.client) checkTaskClientBox(t.client);
         document.getElementById('t-stage').value=t.stage||'Onboarding'; document.getElementById('t-assignee').value=t.assignee||''; document.getElementById('t-type').value=t.type||'One-off'; document.getElementById('t-due').value=t.due||'';
-        document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden'); 
+        document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden');
+        document.getElementById('t-hidden').checked = t.client_visible === false;
     }
     updateTaskClientDisplay();
     updateTaskScore(); document.getElementById('drawer-overlay').classList.add('show'); f.classList.add('open');
@@ -3748,10 +3755,25 @@ window.submitClientRequest = async function() {
 
             const b=document.getElementById('t-save-btn'); b.innerText="Saving..."; b.disabled=true; 
             const p=parseInt(document.getElementById('t-p').value); const u=parseInt(document.getElementById('t-u').value); const ev=parseInt(document.getElementById('t-e').value); 
-            const basePayload={ title:document.getElementById('t-title').value, stage:document.getElementById('t-stage').value, type:document.getElementById('t-type').value, assignee:document.getElementById('t-assignee').value, due:document.getElementById('t-due').value||null, status:document.getElementById('t-status').value, p:p, u:u, e:ev, score:Math.round(((p*0.4)+(u*0.4)+((6-ev)*0.2))*20), notes:document.getElementById('t-notes').value, updated_at:new Date().toISOString() }; 
-            
-            if(activeEditId) { basePayload.client = selectedClients[0]; await supabaseClient.from('tasks').update(basePayload).eq('id',activeEditId); } 
-            else { const payloads = selectedClients.map(c => ({ ...basePayload, client: c })); await supabaseClient.from('tasks').insert(payloads); }
+            const basePayload={ title:document.getElementById('t-title').value, stage:document.getElementById('t-stage').value, type:document.getElementById('t-type').value, assignee:document.getElementById('t-assignee').value, due:document.getElementById('t-due').value||null, status:document.getElementById('t-status').value, p:p, u:u, e:ev, score:Math.round(((p*0.4)+(u*0.4)+((6-ev)*0.2))*20), notes:document.getElementById('t-notes').value, updated_at:new Date().toISOString(),
+                // Hidden from the client's portal, summary and report (task_client_visibility.sql)
+                client_visible: !document.getElementById('t-hidden').checked };
+
+            const writeTask = async (payload) => activeEditId
+                ? supabaseClient.from('tasks').update({ ...payload, client: selectedClients[0] }).eq('id', activeEditId)
+                : supabaseClient.from('tasks').insert(selectedClients.map(c => ({ ...payload, client: c })));
+            let { error: taskErr } = await writeTask(basePayload);
+            // Before the SQL has run there's no client_visible column. Never save a task the admin
+            // asked to hide as visible: stop and say so. Otherwise save without it.
+            if (taskErr && /client_visible/.test(`${taskErr.message || ''} ${taskErr.details || ''}`)) {
+                if (!basePayload.client_visible) {
+                    b.innerText="Save Task"; b.disabled=false;
+                    return alert("Hiding tasks needs supabase/sql/task_client_visibility.sql to be run first. The task wasn't saved.");
+                }
+                const { client_visible, ...rest } = basePayload;
+                ({ error: taskErr } = await writeTask(rest));
+            }
+            if (taskErr) { b.innerText="Save Task"; b.disabled=false; return alert("Could not save the task: " + taskErr.message); }
             
             b.innerText="Save Task"; b.disabled=false; closeAllDrawers(); 
             await fetchAllGlobalData(globalAllowedClients);
@@ -4830,8 +4852,9 @@ Treat this period as a fresh starting point. State every number plainly as where
             // other AI feature in this app: never hand the model something to
             // reinterpret or negate, just withhold the fact it shouldn't mention.
             const wantClient = normalize(cSelectedAccount);
+            // Hidden tasks never reach the report: it's written for the client
             const clientTasks = globalTasksData.filter(t =>
-                normalize(t.client || '') === wantClient && t.type !== 'Client Request');
+                normalize(t.client || '') === wantClient && t.type !== 'Client Request' && t.client_visible !== false);
 
             const completedTasks = clientTasks.filter(t => {
                 if (t.status !== 'Complete' || !t.updated_at) return false;

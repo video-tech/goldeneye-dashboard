@@ -2085,6 +2085,11 @@
                     <div><label class="modal-label">Assignee</label><input type="text" id="t-assignee" required class="glass-input" placeholder="John Doe"></div>
                     <div><label class="modal-label">Task Type</label><select id="t-type" class="glass-input"><option value="One-off">One-off</option><option value="Recurring">Recurring</option><option value="Checklist">Checklist</option><option value="Milestone">Milestone</option><option value="Client Request">Client Request</option></select></div>
                     <div class="col-span-2"><label class="modal-label">Due Date</label><input type="date" id="t-due" class="glass-input"></div>
+                    <label class="col-span-2 flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+                        <input type="checkbox" id="t-hidden" class="row-checkbox mt-0.5">
+                        <span><i class="fa-solid fa-eye-slash text-amber-400/80 mr-1"></i>Hide from client
+                            <span class="block text-[11px] text-gray-500">Stays on our board. It won't show in their portal, their work summary or their weekly report.</span></span>
+                    </label>
                 </div>
                 <div class="bg-black/20 border border-white/5 rounded-xl p-5 relative overflow-hidden">
                     <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-400 to-purple-500"></div>
