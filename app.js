@@ -3181,6 +3181,8 @@ window.submitClientRequest = async function() {
 
             if (currentUserRole === 'admin') {
                 await reconcileOnboardingHandoffTasks();
+                // Before the stage advance, so a task Golden Eye just ticked off can move its client on
+                await runAutoChecks();
                 await autoAdvanceCompletedOnboarding();
             }
         }
@@ -4368,6 +4370,7 @@ window.markOnboardingComplete = async function() {
                         ${isBlocker ? '<i class="fa-solid fa-arrow-right text-blue-400 text-[10px] shrink-0" title="Waiting on this"></i>' : '<span class="w-3 shrink-0"></span>'}
                         ${ownerBadge}
                         <span class="text-sm truncate ${complete ? 'text-gray-500 line-through' : 'text-white'}">${escapeHTML(item.title)}</span>
+                        ${mine && item.auto_check ? '<i class="fa-solid fa-bolt text-emerald-400/70 text-[10px] shrink-0" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}
                     </div>
                     <div class="text-[11px] whitespace-nowrap">${state}</div>
                 </div>`;
@@ -8480,6 +8483,25 @@ async function reconcileOnboardingHandoffTasks() {
         // generateStageTasks dedupes against the database, so running every load is safe.
         await raiseOnboardingAgencyTasks(c.name, 'Onboarding');
     }
+}
+
+// Ticks off our own tasks whose "done when" check now passes (supabase/sql/auto_check_reconcile.sql).
+// The decision is made in that SQL function, which the daily schedule also runs; this just asks
+// it on load and mirrors what it closed into the board.
+async function runAutoChecks() {
+    if (currentUserRole !== 'admin') return 0;
+    const { data, error } = await supabaseClient.rpc('reconcile_auto_checks');
+    if (error) {
+        // Not installed yet is expected until the SQL has run; anything else is worth seeing
+        if (!/reconcile_auto_checks/.test(error.message || '')) console.error('[LIFECYCLE ENGINE] Automatic checks failed:', error);
+        return 0;
+    }
+    (data || []).forEach(r => {
+        const task = globalTasksData.find(t => String(t.id) === String(r.task_id));
+        if (task) task.status = 'Complete';
+        console.log(`[LIFECYCLE ENGINE] ${r.client}: "${r.title}" ticked off automatically (${r.check_key}).`);
+    });
+    return data?.length || 0;
 }
 
 // The same backstop for a client past onboarding who was given an add-on. The trigger normally

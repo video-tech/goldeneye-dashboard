@@ -404,7 +404,20 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
     Empty values are left off.
   - **Tests:** 49 PGlite checks (functions), 17 (trigger), 18 jsdom checks (portal), plus
     `onboarding_handoff_tests.sql`, with Test 5 added for an add-on.
-- **Still to build:** the auto-check reconcile (`auto_check` doesn't tick tasks off yet).
+- **Auto-check reconcile (built 2026-09-15)** is `reconcile_auto_checks()` in
+  `supabase/sql/auto_check_reconcile.sql`.
+  - **What it closes:** open tasks whose template has an `auto_check` that
+    `onboarding_auto_checks(client)` says passes. Agency onboarding steps match on title with stage
+    Onboarding; stage checklist items match on title + stage. Tasks have no template id, so this is
+    the same link `generateStageTasks` dedupes on.
+  - **How:** it sets the task to Complete and appends "Ticked off automatically: <label> (date)" to
+    its notes. It never reopens a task.
+  - **When:** pg_cron job `onboarding-auto-checks` at 19:30 UTC daily (after both SEO syncs), plus
+    `runAutoChecks()` on every admin load, before `autoAdvanceCompletedOnboarding`, so a ticked
+    task can move a client on.
+  - **Who can run it:** admins, or no signed-in user (the schedule). SECURITY DEFINER.
+  - **UI:** a lightning bolt marks self-closing tasks in the client's onboarding list.
+  - **Tests:** 19 PGlite checks.
 
 Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5× default
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of
