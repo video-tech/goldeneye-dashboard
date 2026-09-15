@@ -5566,19 +5566,22 @@ async function buildReportSeoBlock(clientName, s, e) {
      catch (_) { return String(u || ''); }
  }
 
+ // rows: keyword rows, each optionally carrying `city` (per-city mode). A keyword ranking the wrong
+ // page in several cities is listed once per city, so the city tells you where to look.
  function renderSeoWrongPageAlerts(rows) {
      const box = document.getElementById('seo-wrong-page-alerts');
      if (!box) return;
      const wrong = rows.filter(seoWrongPage);
      box.classList.toggle('hidden', !wrong.length);
      if (!wrong.length) { box.innerHTML = ''; return; }
+     const keywordCount = new Set(wrong.map(r => r.keyword)).size;
      box.innerHTML = `
          <div class="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3">
-             <p class="text-xs font-bold text-amber-300 mb-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Wrong page ranking for ${wrong.length} keyword${wrong.length === 1 ? '' : 's'}</p>
+             <p class="text-xs font-bold text-amber-300 mb-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Wrong page ranking for ${keywordCount} keyword${keywordCount === 1 ? '' : 's'}</p>
              <p class="text-[11px] text-gray-400 mb-2">Google is showing a different page than the target set in SE Ranking. Usually the fix is to strengthen the target page for that search, or link to it from the page that's ranking.</p>
              <ul class="space-y-1.5">
                  ${wrong.map(r => `<li class="text-xs text-gray-300">
-                     <span class="font-bold text-white">${escapeAttr(r.keyword)}</span>
+                     <span class="font-bold text-white">${escapeAttr(r.keyword)}</span>${r.city ? ` <span class="text-gray-400">(${escapeAttr(seoCityShort(r.city))})</span>` : ''}
                      <span class="text-gray-500">— ranking</span> <span class="text-amber-300" title="${escapeAttr(r.ranking_url)}">${escapeAttr(seoPagePath(r.ranking_url))}</span>
                      <span class="text-gray-500">instead of</span> <span class="text-emerald-300" title="${escapeAttr(r.target_page)}">${escapeAttr(seoPagePath(r.target_page))}</span>
                  </li>`).join('')}
@@ -5586,10 +5589,79 @@ async function buildReportSeoBlock(clientName, s, e) {
          </div>`;
  }
 
- function renderSeoKeywordsTable(rows) {
+ // ---- Per-city rankings ----
+ // SE Ranking checks a keyword from each city it's assigned to. seo_keyword_summary gives the best
+ // city; seo_keyword_city_ranks gives every city, which the picker and the breakdown read.
+ let seoKeywordRowsCache = [];
+ let seoCityRowsCache = [];
+ let seoCityFilter = 'all';          // 'all' or a site_engine_id, as a string
+ const seoCityOpen = new Set();      // keywords whose city breakdown is expanded
+
+ // "Lehi, Utah, United States" → "Lehi". A location without a city is a national check.
+ function seoCityShort(label) {
+     return String(label || '').split(',')[0].trim() || 'Nationwide';
+ }
+
+ window.setSeoCityFilter = function(value) {
+     seoCityFilter = value || 'all';
+     renderSeoKeywordsTable(seoKeywordRowsCache, seoCityRowsCache);
+ };
+
+ window.toggleSeoCityDetail = function(keyword) {
+     if (seoCityOpen.has(keyword)) seoCityOpen.delete(keyword); else seoCityOpen.add(keyword);
+     renderSeoKeywordsTable(seoKeywordRowsCache, seoCityRowsCache);
+ };
+
+ function seoRankLabel(rank, mapRank) {
+     if (rank == null && mapRank == null) return '<span class="text-gray-500">not ranking</span>';
+     return [rank != null ? `<span class="text-yellow-400">#${rank}</span>` : '',
+             mapRank != null ? `<span class="text-purple-400" title="Map pack">map #${mapRank}</span>` : ''].filter(Boolean).join(' ');
+ }
+
+ function renderSeoKeywordsTable(rows, cityRows = []) {
      const tbody = document.getElementById('seo-keywords-tbody');
      if (!tbody) return;
-     renderSeoWrongPageAlerts(rows);
+     seoKeywordRowsCache = rows;
+     seoCityRowsCache = cityRows || [];
+
+     // The picker only appears when the project checks from more than one place
+     const cities = [...new Map(seoCityRowsCache.map(c => [String(c.site_engine_id), c.city])).entries()]
+         .sort((a, b) => seoCityShort(a[1]).localeCompare(seoCityShort(b[1])));
+     const wrap = document.getElementById('seo-city-filter-wrap');
+     const select = document.getElementById('seo-city-filter');
+     // The picker hides below 2 cities, so a leftover pick must not keep filtering unseen.
+    if (seoCityFilter !== 'all' && (cities.length < 2 || !cities.some(([id]) => id === seoCityFilter))) seoCityFilter = 'all';
+     if (wrap) wrap.classList.toggle('hidden', cities.length < 2);
+     if (select) {
+         select.innerHTML = `<option value="all">All cities (best)</option>` +
+             cities.map(([id, label]) => `<option value="${escapeAttr(id)}">${escapeAttr(seoCityShort(label))}</option>`).join('');
+         select.value = seoCityFilter;
+     }
+
+     const cityByKeyword = new Map();
+     seoCityRowsCache.forEach(c => {
+         if (!cityByKeyword.has(c.keyword)) cityByKeyword.set(c.keyword, []);
+         cityByKeyword.get(c.keyword).push(c);
+     });
+
+     // One city picked: show that city's own rank for every keyword checked there
+     if (seoCityFilter !== 'all') {
+         rows = rows.map(r => {
+             const c = (cityByKeyword.get(r.keyword) || []).find(x => String(x.site_engine_id) === seoCityFilter);
+             return c ? { ...r, rank: c.rank, map_rank: c.map_rank, ranking_url: c.ranking_url, prior_rank: c.prior_rank, prior_map_rank: c.prior_map_rank } : null;
+         }).filter(Boolean)
+           .sort((a, b) => ((a.rank == null && a.map_rank == null) - (b.rank == null && b.map_rank == null))
+               || ((a.rank ?? 999) - (b.rank ?? 999)) || ((a.map_rank ?? 999) - (b.map_rank ?? 999)));
+     }
+
+     // Alerts check every city, not just the best one: Lehi can rank the right page while Draper
+     // ranks a blog post. Without city data (SQL not installed yet) they fall back to the summary.
+     const alertRows = seoCityRowsCache.length
+         ? seoCityRowsCache.filter(c => seoCityFilter === 'all' || String(c.site_engine_id) === seoCityFilter)
+             .map(c => ({ ...c, city: cities.length > 1 ? c.city : null }))
+         : rows;
+     renderSeoWrongPageAlerts(alertRows);
+
      if (!rows.length) {
          tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No keywords tracked yet — add some in SE Ranking, they show up here on the next sync.</td></tr>';
          seoShowMore(tbody.closest('table'), [], 'keywords', 'keywords');
@@ -5605,14 +5677,28 @@ async function buildReportSeoBlock(clientName, s, e) {
          const mapCell = r.map_rank != null
              ? `#${r.map_rank} ${r.prior_map_rank != null ? seoDeltaPill(r.map_rank, r.prior_map_rank, { invert: true }) : ''}`
              : dash;
-         const wrong = seoWrongPage(r);
+         const perCity = cityByKeyword.get(r.keyword) || [];
+         // In "all cities" mode the row shows the best city, so flag it if ANY city ranks the wrong page
+         const wrong = seoCityFilter === 'all' && perCity.length ? perCity.some(seoWrongPage) : seoWrongPage(r);
          const keywordTitle = [r.keyword,
              r.ranking_url ? `Ranking page: ${r.ranking_url}` : '',
              r.target_page ? `Target page: ${r.target_page}` : ''].filter(Boolean).join('\n');
          const notRanking = r.rank == null && r.map_rank == null;
+         const showCities = seoCityFilter === 'all' && perCity.length > 1;
+         const open = showCities && seoCityOpen.has(r.keyword);
+         const cityToggle = showCities
+             ? ` <button type="button" onclick="toggleSeoCityDetail('${escapeHTML(r.keyword)}')" class="seo-city-toggle text-[10px] text-blue-400 hover:text-blue-300 whitespace-nowrap" aria-expanded="${open}">${perCity.length} cities <i class="fa-solid fa-chevron-${open ? 'up' : 'down'} text-[8px]"></i></button>`
+             : '';
+         const cityDetail = open
+             ? `<div class="seo-city-detail mt-1 flex flex-wrap gap-1.5 whitespace-normal">${perCity
+                 .slice().sort((a, b) => seoCityShort(a.city).localeCompare(seoCityShort(b.city)))
+                 .map(c => `<span class="text-[10px] bg-black/30 border ${seoWrongPage(c) ? 'border-amber-400/40' : 'border-white/10'} rounded px-1.5 py-0.5" title="${escapeAttr(c.ranking_url ? `Ranking page: ${c.ranking_url}` : 'Not ranking')}">
+                     <span class="text-gray-400">${escapeAttr(seoCityShort(c.city))}</span> ${seoRankLabel(c.rank, c.map_rank)}${seoWrongPage(c) ? ' <i class="fa-solid fa-triangle-exclamation text-amber-400" aria-label="Wrong page ranking"></i>' : ''}
+                 </span>`).join('')}</div>`
+             : '';
          return `
          <tr class="hover:bg-white/5 transition">
-             <td class="py-2 pr-2 text-gray-300 truncate max-w-[200px]" title="${escapeAttr(keywordTitle)}">${wrong ? '<i class="fa-solid fa-triangle-exclamation text-amber-400 text-[10px] mr-1" aria-label="Wrong page ranking"></i>' : ''}${escapeAttr(r.keyword)}</td>
+             <td class="py-2 pr-2 text-gray-300 max-w-[260px]" title="${escapeAttr(keywordTitle)}"><div class="truncate">${wrong ? '<i class="fa-solid fa-triangle-exclamation text-amber-400 text-[10px] mr-1" aria-label="Wrong page ranking"></i>' : ''}${escapeAttr(r.keyword)}${cityToggle}</div>${cityDetail}</td>
              ${notRanking
                  ? '<td colspan="2" class="py-2 text-right text-gray-500">not ranking</td>'
                  : `<td class="py-2 text-right text-yellow-400">${organicCell}</td><td class="py-2 text-right text-purple-400">${mapCell}</td>`}
@@ -6197,19 +6283,23 @@ async function buildReportSeoBlock(clientName, s, e) {
          // At least ~1 impression a day, never under 10: enough to be a real search, without a
          // 90-day view filling up with queries seen twice
          const almostMinImpr = Math.max(10, spanDays);
-         const [pagesRes, keywordsRes, moversRes, almostRes] = await Promise.all([
+         const [pagesRes, keywordsRes, moversRes, almostRes, cityRes] = await Promise.all([
              supabaseClient.rpc('seo_page_summary', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) }),
              supabaseClient.rpc('seo_keyword_summary', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) }),
              supabaseClient.rpc('seo_movers', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) }),
-             supabaseClient.rpc('seo_almost_page_one', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd), p_min_impressions: almostMinImpr })
+             supabaseClient.rpc('seo_almost_page_one', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd), p_min_impressions: almostMinImpr }),
+             // Per-city rankings; missing until seo_admin_rpcs.sql is re-run, and the table then
+             // simply shows the best city as before
+             supabaseClient.rpc('seo_keyword_city_ranks', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
          ]);
+         if (cityRes.error) console.warn('seo_keyword_city_ranks unavailable (re-run supabase/sql/seo_admin_rpcs.sql):', cityRes.error);
          if (pagesRes.error) console.error('seo_page_summary failed:', pagesRes.error);
          if (keywordsRes.error) console.error('seo_keyword_summary failed:', keywordsRes.error);
          if (moversRes.error) console.error('seo_movers failed:', moversRes.error);
          if (almostRes.error) console.error('seo_almost_page_one failed:', almostRes.error);
 
          renderSeoPagesTable(pagesRes.data || []);
-         renderSeoKeywordsTable(keywordsRes.data || []);
+         renderSeoKeywordsTable(keywordsRes.data || [], cityRes.error ? [] : (cityRes.data || []));
          renderSeoMoversPanel(moversRes.data || []);
          renderSeoAlmostPageOne(almostRes.data || [], almostMinImpr, !!almostRes.error);
      } catch (err) {

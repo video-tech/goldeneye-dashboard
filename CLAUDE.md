@@ -1321,8 +1321,23 @@ real client data; see the Known gaps entry on that.
     mismatch, including rows collapsed behind View all.
   - **Scope:** admin tab only.
   - **Tests:** 12 jsdom checks on real 3Sixty cases.
+  - **Per city (built 2026-09-15):** alerts are judged per city from `seo_keyword_city_ranks`, and
+    name the city when the client has 2+ locations. A keyword can rank the right page in one town
+    and a blog post in another, and the best-rank summary would hide the second.
   - **Keep "strict matching" off in SE Ranking.** It counts only the target page's position, which
     hides exactly the mismatch this is for.
+- **Rankings by city (built 2026-09-15).** `seo_keyword_city_ranks` (in `seo_admin_rpcs.sql`) returns
+  one row per keyword per tracked location: the latest in-window check for that `site_engine_id`, its
+  prior-window rank, and the city label from `seo_rank_locations`.
+  - **UI:** with 2+ cities, Tracked Keywords gets a "Rankings from" picker. *All cities* keeps the
+    best-rank summary and adds an "N cities" button that expands that keyword's rank in each city.
+    Picking a city swaps every row to that city's numbers and hides keywords not checked there.
+  - **Graceful without the SQL:** if the RPC is missing, the table and alerts fall back to the summary
+    and the picker stays hidden. A leftover pick resets to *All cities* when the picker hides.
+  - **Fixed at the same time:** `seo_keyword_summary` took `max(ranking_url)` across cities, which is
+    alphabetical, so the page shown could come from a different city than the rank. It now takes the
+    page from the best-ranked row.
+  - **Tests:** 6 PGlite checks on the function, 12 jsdom checks on the picker, breakdown and alerts.
 - **Keywords removed in SE Ranking are retired, not deleted** (`keywordsToRetire()` in `parse.ts`):
   the sync marks them `active = false` and keeps their stored history. It never retires anything when
   SE Ranking returns an empty keyword list, so a bad response can't wipe a client's list.

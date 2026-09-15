@@ -888,6 +888,10 @@
                                     </div>
                                     <div class="glass p-6 overflow-x-auto">
                                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Tracked Keywords <span class="text-gray-600 font-normal normal-case">(managed in SE Ranking)</span></h3>
+                                        <div id="seo-city-filter-wrap" class="hidden mb-3 flex items-center gap-2">
+                                            <label for="seo-city-filter" class="text-[10px] uppercase tracking-widest text-gray-500">Rankings from</label>
+                                            <select id="seo-city-filter" class="glass-input !py-1 !text-xs !w-auto" onchange="setSeoCityFilter(this.value)"></select>
+                                        </div>
                                         <div id="seo-wrong-page-alerts" class="hidden mb-4"></div>
                                         <table class="w-full text-sm">
                                             <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">

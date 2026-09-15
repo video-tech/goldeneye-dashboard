@@ -132,7 +132,9 @@ as $$
         select src.date,
                min(src.organic_rank) as organic_rank,
                min(src.map_rank) as map_rank,
-               max(src.ranking_url) as ranking_url
+               -- The page from the best-ranking city that day. This was max(ranking_url), which with
+               -- several cities picked a page alphabetically rather than from the city ranking best.
+               (array_agg(src.ranking_url order by src.organic_rank asc nulls last, src.map_rank asc nulls last))[1] as ranking_url
         from seo_rank_checks src
         where src.client_name = k.client_name and src.keyword = k.keyword
           and src.date between p_start and p_end
@@ -165,6 +167,57 @@ as $$
              cur.organic_rank asc nulls last, cur.map_rank asc nulls last, k.keyword asc;
 $$;
 grant execute on function seo_keyword_summary(text, date, date, date, date) to authenticated;
+
+-- Per-city rankings (added 2026-09-15). SE Ranking checks a keyword from each location it's assigned
+-- to, and seo_keyword_summary collapses those into the best one. This keeps them apart: one row per
+-- active keyword per location it was checked from in the range.
+--   rank / map_rank / ranking_url  the LATEST check in the range, ranking or not. Unlike the summary
+--                                  (latest day with a rank), a city where it dropped out reads as
+--                                  not ranking, which is the honest per-city answer.
+--   prior_rank / prior_map_rank    the latest check in the prior range.
+--   city                           seo_rank_locations.label, e.g. "Lehi, Utah, United States".
+-- seo_rank_locations is admin-only, so this is for the admin SEO tab.
+create or replace function seo_keyword_city_ranks(
+    p_client text, p_start date, p_end date, p_prior_start date, p_prior_end date
+)
+returns table (
+    keyword text, site_engine_id bigint, city text, target_page text,
+    rank int, map_rank int, rank_date date, ranking_url text,
+    prior_rank int, prior_map_rank int
+)
+language sql stable
+set search_path = public
+as $$
+    select k.keyword, cur.site_engine_id, l.label, k.target_page,
+           cur.organic_rank, cur.map_rank, cur.date, cur.ranking_url,
+           pri.organic_rank, pri.map_rank
+    from seo_keywords k
+    join lateral (
+        select distinct on (src.site_engine_id)
+               src.site_engine_id, src.date, src.organic_rank, src.map_rank, src.ranking_url
+        from seo_rank_checks src
+        where src.client_name = k.client_name and src.keyword = k.keyword
+          and src.date between p_start and p_end
+        order by src.site_engine_id, src.date desc
+    ) cur on true
+    left join lateral (
+        select src.organic_rank, src.map_rank
+        from seo_rank_checks src
+        where src.client_name = k.client_name and src.keyword = k.keyword
+          and src.site_engine_id = cur.site_engine_id
+          and src.date between p_prior_start and p_prior_end
+        order by src.date desc
+        limit 1
+    ) pri on true
+    left join lateral (
+        select loc.label from seo_rank_locations loc
+        where loc.client_name = k.client_name and loc.site_engine_id = cur.site_engine_id
+        limit 1
+    ) l on true
+    where k.client_name = p_client and k.active
+    order by k.keyword, l.label nulls last;
+$$;
+grant execute on function seo_keyword_city_ranks(text, date, date, date, date) to authenticated;
 
 -- Top movers among pages AND queries together, current vs prior. impressions >= 50 in
 -- EITHER window keeps a page with 3 impressions from reading as a 300% gainer on noise —
