@@ -1338,6 +1338,26 @@ stays null when no row has a value, so "not reported" still differs from a repor
 locked until the week's numbers are in. Reminder recipients come from `client_contacts`,
 which the `team` onboarding step writes to.
 
+## Settings → Updates (built 2026-09-15)
+
+A plain-English list of every change to Golden Eye, from **`updates.json` in the repo root**, served
+from GitHub Pages beside `app.js` and fetched with the same `?v=` cache-buster.
+
+**Add an entry in the same commit as the change it describes.** Newest first. Fields: `date`
+(YYYY-MM-DD), `area` (SEO / Reports / Onboarding / Tasks / Security / Data), `title`, `what`, and
+optionally `note` and `action`. **`action` means something must be run or deployed before it works**
+("Run supabase/sql/x.sql"), and it shows as an amber "Action needed" line — the one place a
+setup step is visible without reading a chat log.
+
+- **A file, not a table.** The entry ships and rolls back with its change, needs no RLS or migration,
+  and stays readable in git. Nothing writes it from the app.
+- **Write for the person using the dashboard**, not as a commit message. Say what they can now do,
+  and what it fixed if that matters.
+- **The badge** on the tab counts entries dated after the last visit, kept in `localStorage`
+  (`ge-updates-seen`) per browser, and clears when the list is opened. `renderGoldenEye()` refreshes it.
+- **Everything is escaped** (`escapeAttr`) — the file is trusted, but it renders into the dashboard.
+- **Tests:** 12 jsdom checks, including that the real `updates.json` parses and is in date order.
+
 ## Conventions
 
 - Client names are compared **normalized** (lowercased, non-alphanumerics stripped) almost

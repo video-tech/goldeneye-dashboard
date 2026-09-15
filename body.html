@@ -1279,6 +1279,9 @@
                         <button id="tab-btn-set-milestones" onclick="switchSettingsView('milestones')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Milestones</button>
                         <button id="tab-btn-set-health" onclick="switchSettingsView('health')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Health Score Config</button>
                         <button id="tab-btn-set-notifications" onclick="switchSettingsView('notifications')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Notifications</button>
+                        <button id="tab-btn-set-updates" onclick="switchSettingsView('updates')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">
+                            Updates <span id="updates-new-badge" class="hidden ml-1 align-middle bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[10px] font-bold px-1.5 py-0.5 rounded-full"></span>
+                        </button>
                         <button id="tab-btn-set-data" onclick="switchSettingsView('data')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300">Data</button>
                     </div>
                     
@@ -1390,6 +1393,17 @@
                             <label class="flex justify-between items-center p-4 bg-black/20 border border-white/5 rounded-xl cursor-pointer hover:bg-white/5 transition"><span class="font-bold flex items-center gap-3"><i class="fa-solid fa-envelope text-yellow-400"></i> Email Notifications</span><input type="checkbox" checked class="row-checkbox w-5 h-5"></label>
                             <label class="flex justify-between items-center p-4 bg-black/20 border border-white/5 rounded-xl cursor-pointer hover:bg-white/5 transition opacity-60"><span class="font-bold text-gray-400 flex items-center gap-3"><i class="fa-brands fa-slack text-purple-400"></i> Slack Integration</span><span class="text-[10px] uppercase font-bold bg-white/10 px-2 py-1 rounded">Soon</span></label>
                         </div>
+                    </div>
+
+                    <div id="s-view-updates" class="space-y-6 hidden glass p-6">
+                        <div class="flex flex-wrap justify-between items-end gap-3">
+                            <div>
+                                <h3 class="text-lg font-bold text-white">What's New</h3>
+                                <p class="text-xs text-gray-400 mt-1">Every change to Golden Eye, newest first. Anything marked <span class="text-amber-400 font-bold">Action needed</span> has a step to run before it works.</p>
+                            </div>
+                            <div id="updates-filter" class="flex flex-wrap gap-1.5"></div>
+                        </div>
+                        <div id="updates-list" class="space-y-3"></div>
                     </div>
 
                     <div id="s-view-data" class="space-y-6 hidden glass p-6">

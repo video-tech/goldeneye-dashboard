@@ -3485,7 +3485,9 @@ window.submitClientRequest = async function() {
         // --- GOLDEN EYE (DASHBOARD) RENDERING ---
         function renderGoldenEye() {
             // Check for a cached audit first thing!
-            checkSavedAudit(); 
+            checkSavedAudit();
+            // Puts the count of unread changes on Settings → Updates
+            if (typeof checkUpdatesBadge === 'function') checkUpdatesBadge();
 
             const isLight = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isLight ? '#64748b' : 'rgba(255,255,255,0.6)';
 
@@ -7035,7 +7037,7 @@ window.renderClientPayments = function() {
         };
 
         window.switchSettingsView = window.switchSettingsView || function(view) {
-            const views = ['users', 'scoring', 'milestones', 'health', 'notifications', 'data'];
+            const views = ['users', 'scoring', 'milestones', 'health', 'notifications', 'updates', 'data'];
             views.forEach(v => {
                 const el = document.getElementById(`s-view-${v}`);
                 const btn = document.getElementById(`tab-btn-set-${v}`);
@@ -7052,7 +7054,110 @@ window.renderClientPayments = function() {
             if (view === 'users') { renderUsersTable(); populateInviteClientList(); }
             // Fetched on demand — nobody needs this on every dashboard load
             if (view === 'notifications') loadAlertRecipients();
+            if (view === 'updates') renderUpdates();
         };
+
+        // ---- Settings → Updates ----
+        // Reads updates.json, which ships next to app.js and body.html on GitHub Pages, so an
+        // entry goes live with the change it describes and there's nothing to keep in the database.
+        // Same cache-buster the loader uses: Pages caches for ten minutes otherwise.
+        const GE_BASE = 'https://video-tech.github.io/goldeneye-dashboard';
+        const UPDATES_SEEN_KEY = 'ge-updates-seen';
+        let updatesCache = null;
+        let updatesFilter = 'all';
+
+        const UPDATE_AREA_COLOR = {
+            SEO: 'text-emerald-300 border-emerald-400/30 bg-emerald-500/10',
+            Reports: 'text-blue-300 border-blue-400/30 bg-blue-500/10',
+            Onboarding: 'text-purple-300 border-purple-400/30 bg-purple-500/10',
+            Tasks: 'text-amber-300 border-amber-400/30 bg-amber-500/10',
+            Security: 'text-red-300 border-red-400/30 bg-red-500/10',
+            Data: 'text-cyan-300 border-cyan-400/30 bg-cyan-500/10'
+        };
+
+        async function loadUpdates() {
+            if (updatesCache) return updatesCache;
+            const res = await fetch(`${GE_BASE}/updates.json?v=${Date.now()}`);
+            if (!res.ok) throw new Error(`updates.json returned ${res.status}`);
+            const json = await res.json();
+            updatesCache = (json.updates || []).filter(u => u && u.title);
+            return updatesCache;
+        }
+
+        // A dot on the tab for anything dated after the last visit to this screen. Per browser,
+        // like every other localStorage flag here — it's a nudge, not a record.
+        window.checkUpdatesBadge = async function() {
+            const badge = document.getElementById('updates-new-badge');
+            if (!badge || currentUserRole !== 'admin') return;
+            try {
+                const updates = await loadUpdates();
+                const seen = localStorage.getItem(UPDATES_SEEN_KEY) || '';
+                const fresh = updates.filter(u => String(u.date || '') > seen).length;
+                badge.innerText = fresh > 9 ? '9+' : String(fresh);
+                badge.classList.toggle('hidden', !fresh);
+            } catch (err) {
+                console.warn('Updates: could not load updates.json', err);
+            }
+        };
+
+        window.setUpdatesFilter = function(area) {
+            updatesFilter = area;
+            renderUpdates();
+        };
+
+        window.renderUpdates = async function() {
+            const list = document.getElementById('updates-list');
+            const filterBar = document.getElementById('updates-filter');
+            if (!list) return;
+            list.innerHTML = '<p class="text-xs text-gray-500"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i>Loading…</p>';
+
+            let updates;
+            try {
+                updates = await loadUpdates();
+            } catch (err) {
+                list.innerHTML = `<p class="text-xs text-red-400">Couldn't load the update list (${escapeAttr(err.message)}). It's served from GitHub Pages, so a failed deploy or being offline would do it.</p>`;
+                return;
+            }
+
+            const seen = localStorage.getItem(UPDATES_SEEN_KEY) || '';
+            const areas = [...new Set(updates.map(u => u.area).filter(Boolean))];
+            if (filterBar) {
+                filterBar.innerHTML = ['all', ...areas].map(a => `
+                    <button type="button" onclick="setUpdatesFilter('${escapeAttr(a)}')"
+                        class="ob-chip" aria-pressed="${updatesFilter === a}">${a === 'all' ? 'Everything' : escapeAttr(a)}</button>`).join('');
+            }
+
+            const shown = updates.filter(u => updatesFilter === 'all' || u.area === updatesFilter);
+            list.innerHTML = shown.length ? shown.map(u => {
+                const isNew = String(u.date || '') > seen;
+                const areaClass = UPDATE_AREA_COLOR[u.area] || 'text-gray-300 border-white/15 bg-white/5';
+                return `<div class="bg-black/20 border ${isNew ? 'border-blue-400/30' : 'border-white/5'} rounded-xl p-4">
+                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                        ${u.area ? `<span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${areaClass}">${escapeAttr(u.area)}</span>` : ''}
+                        <span class="text-sm font-bold text-white">${escapeAttr(u.title)}</span>
+                        ${isNew ? '<span class="text-[10px] font-bold uppercase tracking-widest text-blue-300">New</span>' : ''}
+                        <span class="text-[11px] text-gray-500 ml-auto">${escapeAttr(updateDateLabel(u.date))}</span>
+                    </div>
+                    <p class="text-sm text-gray-300 leading-relaxed">${escapeAttr(u.what || '')}</p>
+                    ${u.note ? `<p class="text-xs text-gray-500 mt-2 leading-relaxed">${escapeAttr(u.note)}</p>` : ''}
+                    ${u.action ? `<p class="text-xs text-amber-400 mt-2"><i class="fa-solid fa-triangle-exclamation mr-1"></i><span class="font-bold">Action needed:</span> ${escapeAttr(u.action)}</p>` : ''}
+                </div>`;
+            }).join('') : '<p class="text-xs text-gray-500">Nothing in this area yet.</p>';
+
+            // Mark everything seen once it's on screen, so the badge clears
+            const newest = updates.map(u => String(u.date || '')).sort().pop();
+            if (newest) localStorage.setItem(UPDATES_SEEN_KEY, newest);
+            const badge = document.getElementById('updates-new-badge');
+            if (badge) badge.classList.add('hidden');
+        };
+
+        function updateDateLabel(date) {
+            if (!date) return '';
+            // Parsed as local, not UTC: new Date('2026-09-15') is midnight UTC and can read as the 14th
+            const [y, m, d] = String(date).split('-').map(Number);
+            if (!y || !m || !d) return String(date);
+            return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        }
 
         // Checkbox list of clients for the invite form
         window.populateInviteClientList = function() {

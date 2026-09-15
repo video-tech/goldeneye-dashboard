@@ -1,0 +1,90 @@
+{
+  "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
+  "updates": [
+    {
+      "date": "2026-09-15",
+      "area": "Reports",
+      "title": "Weekly reports now include real SEO results",
+      "what": "A report for an SEO client gets an Organic Search section built from the same numbers their SEO tab shows: visits and leads from Google, jobs they reported closing from Google, which searches moved up, searches sitting on page 2, and the articles and fixes that went live that week. Small numbers stay plain counts instead of being spun as percentages.",
+      "note": "Also fixed: the \"period before\" comparison was one day longer than the period being reported, which slightly inflated every prior-period figure here and on the SEO tab."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "Security",
+      "title": "Every Make automation now requires a secret",
+      "what": "Make webhook links are public, and anyone holding one could make Golden Eye text a client, draft an email, or overwrite an ad approval. All five now check a shared secret first, and the two that send texts look up contacts by exact phone match so one reminder can never reach several people.",
+      "note": "This also uncovered that admin alerts for client requests had never actually fired: the scenario was filtering on the wrong field. Fixed, so onboarding-complete and help requests now text you."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "Tasks",
+      "title": "Hide a task from the client",
+      "what": "Tick \"Hide from client\" on any task and it stays on your board, marked Hidden, but never shows in their portal, their weekly work summary or their report. Hidden is enforced in the database, not just on screen.",
+      "action": "Run supabase/sql/task_client_visibility.sql, then deploy client-summary."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "Onboarding",
+      "title": "Forms you build inside Golden Eye",
+      "what": "A step can now be a set of questions answered right in the portal, with no GHL form and no Make scenario behind it. Write the questions in Templates, mark any as required, and show a question only for clients with an existing site or a new build. Answers appear on the client's page with a Copy button, ready to paste into Cuppa.",
+      "action": "Run supabase/sql/onboarding_questions.sql, then re-run supabase/sql/rename_client.sql."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "Onboarding",
+      "title": "SEO onboarding steps, and hiding a step until it's ready",
+      "what": "The SEO Growth steps are in: an intake form and a Google access video for the client, and seven setup tasks for us. The eye button on any step hides it from clients, so a step can be drafted before its video or form exists.",
+      "action": "Run supabase/sql/seo_onboarding_steps.sql once."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "Onboarding",
+      "title": "Tasks that tick themselves off",
+      "what": "Setup tasks close on their own once Golden Eye can see the work is done: the ad account is saved, spend is flowing, Search Console is syncing, the first article auto-logged, the first website lead arrived. Each carries a note saying why it closed. A lightning bolt marks which tasks work this way.",
+      "action": "Run supabase/sql/auto_check_reconcile.sql."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "Onboarding",
+      "title": "Onboarding follows what each client actually bought",
+      "what": "Clients get the steps for their add-ons and website situation, nothing else. An SEO-only client never sees Facebook steps. Adding SEO to a long-standing client brings back Get Started with just the SEO steps, raises our SEO tasks when they finish, and doesn't re-announce their original onboarding.",
+      "action": "Run supabase/sql/service_onboarding.sql, then the trigger file and its tests."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "Onboarding",
+      "title": "Services, step tags and a client preview in Templates",
+      "what": "Templates → Services manages the add-ons. Every onboarding step and stage checklist item can be tagged by add-on and website situation, and Preview a Client shows exactly what someone with, say, Ads + SEO and an existing site would get. Add/Edit Client gained add-on checkboxes and a website dropdown."
+    },
+    {
+      "date": "2026-09-14",
+      "area": "SEO",
+      "title": "The client SEO tab",
+      "what": "SEO clients now have a tab written for people who don't know SEO: what it did for their business, how far they've come since starting, a traffic chart marked with the work we did, their target searches in plain language, and what's next. A return-per-dollar figure appears only once it's genuinely positive."
+    },
+    {
+      "date": "2026-09-14",
+      "area": "SEO",
+      "title": "Articles log themselves",
+      "what": "Publishing on Webflow, Wix, Sanity or a GitHub-based site records itself in the SEO changelog, with markers on the traffic chart showing when each went live. Setup is about a minute per client from the SEO tab. Midas's 42 articles and 3Sixty's 55 posts were backfilled."
+    },
+    {
+      "date": "2026-09-14",
+      "area": "SEO",
+      "title": "Almost Page 1, and map-pack rankings counted properly",
+      "what": "The admin SEO tab lists searches sitting on page 2, which are the best content targets. Keyword rankings now count a map-pack placement as ranking, so a local client in the map pack no longer reads as \"not ranking\"."
+    },
+    {
+      "date": "2026-09-14",
+      "area": "Data",
+      "title": "Check-ins ask where each job came from",
+      "what": "The weekly check-in splits closed jobs and revenue by source: Google or your website, Facebook or Instagram ads, referrals, or other. Totals still work exactly as before, and the Google row is what powers the return figures on the SEO tab."
+    },
+    {
+      "date": "2026-09-14",
+      "area": "Reports",
+      "title": "Reports explain the work in the client's words",
+      "what": "\"What We're Working On\" is always included, with planned to-dos rewritten as plain language rather than pasted task titles, and no internal due dates or assignees. Notes you type are saved with the report, the summary reads casually, and a week with no prior spend is treated as a fresh baseline instead of compared to nothing."
+    }
+  ]
+}
