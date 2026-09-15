@@ -4,6 +4,13 @@
     {
       "date": "2026-09-15",
       "area": "SEO",
+      "title": "Keywords follow your SE Ranking list",
+      "what": "Keywords you remove in SE Ranking now drop off the SEO tab and reports on the next sync (their history is kept). Each keyword's target page is also brought in from SE Ranking, ready for the wrong-page alerts.",
+      "action": "Deploy seranking-sync."
+    },
+    {
+      "date": "2026-09-15",
+      "area": "SEO",
       "title": "A tidier SEO tab",
       "what": "The SEO Changelog, Top Pages and Tracked Keywords now show their first three rows, with a View all button to open the rest. A list you open stays open while you change the date range."
     },

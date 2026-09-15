@@ -45,6 +45,9 @@ export interface KeywordRow {
     seranking_keyword_id: number;
     keyword: string;
     site_engine_ids: number[];
+    // The page we want ranking for this keyword ("Target URL" in SE Ranking, `link` in the API).
+    // Null when none is set. Compared with ranking_url to flag the wrong page ranking.
+    target_page: string | null;
 }
 
 // A real response, captured the same way: {"id":"17705872","name":"midas media",
@@ -60,7 +63,33 @@ export function parseKeywords(raw: unknown): KeywordRow[] {
         seranking_keyword_id: Number(k?.id),
         keyword: String(k?.name ?? "").trim().toLowerCase(),
         site_engine_ids: Array.isArray(k?.site_engine_ids) ? k.site_engine_ids.map(Number) : [],
+        target_page: typeof k?.link === "string" && k.link.trim() ? k.link.trim() : null,
     })).filter((k) => k.keyword && Number.isFinite(k.seranking_keyword_id));
+}
+
+// Keywords Golden Eye still has as active that SE Ranking no longer tracks — removed there, so
+// retired here. Returns the keyword texts to mark inactive. Never retires anything when SE Ranking
+// returned no keywords at all: an empty list is far more likely a hiccup than a deleted project,
+// and wiping a client's whole keyword table on a bad response would be hard to notice.
+export function keywordsToRetire(activeInGoldenEye: string[], fromSeRanking: KeywordRow[]): string[] {
+    if (!fromSeRanking.length) return [];
+    const still = new Set(fromSeRanking.map((k) => k.keyword));
+    return activeInGoldenEye.filter((k) => !still.has(String(k).trim().toLowerCase()));
+}
+
+// Same page, however it was typed: protocol, "www.", trailing slash, query string and case don't
+// make it a different page. Used for the wrong-page check so a target of
+// "3sixty-industries.com/services/pergola-builds/" matches a ranking URL of
+// "https://www.3sixty-industries.com/services/pergola-builds".
+export function samePage(a: string | null | undefined, b: string | null | undefined): boolean {
+    const norm = (u: string | null | undefined) => {
+        if (!u) return "";
+        let s = String(u).trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "");
+        s = s.split("#")[0].split("?")[0];
+        return s.replace(/\/+$/, "");
+    };
+    const x = norm(a), y = norm(b);
+    return !!x && x === y;
 }
 
 export interface RankCheckRow {

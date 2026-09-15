@@ -18,7 +18,7 @@
 // Schema:  seranking-sync/schema.sql, then supabase/sql/rename_client.sql
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, type KeywordMetricRow } from "./parse.ts";
+import { keywordsToRetire, parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, type KeywordMetricRow } from "./parse.ts";
 
 const API_BASE = "https://api.seranking.com/v1/project-management";
 
@@ -102,11 +102,24 @@ async function syncClient(db: any, key: string, client: { name: string; serankin
 
     const keywords = parseKeywords(await seRankingGet(key, `/keywords?site_id=${siteId}`));
     if (keywords.length) {
+        // active: true re-activates a keyword that was removed in SE Ranking and later added back
         await upsertChunked(db, "seo_keywords", keywords.map((k) => ({
             client_name: client.name,
             seranking_keyword_id: k.seranking_keyword_id,
             keyword: k.keyword,
+            target_page: k.target_page,
+            active: true,
         })), "client_name,keyword");
+
+        // Keywords removed in SE Ranking stop showing in Golden Eye. Their stored rank history is
+        // kept (active = false, never deleted), so a report for an older week still has it.
+        const { data: current } = await db.from("seo_keywords").select("keyword").eq("client_name", client.name).eq("active", true);
+        const retire = keywordsToRetire((current ?? []).map((r: any) => r.keyword), keywords);
+        for (let i = 0; i < retire.length; i += 100) {
+            const { error } = await db.from("seo_keywords").update({ active: false })
+                .eq("client_name", client.name).in("keyword", retire.slice(i, i + 100));
+            if (error) throw new Error(`retiring keywords: ${error.message}`);
+        }
     }
     const keywordById = new Map(keywords.map((k) => [k.seranking_keyword_id, k.keyword]));
 
