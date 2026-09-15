@@ -1,3 +1,11 @@
+-- KEY: <CURRENT ANON KEY> is a placeholder. The key that used to be written here was stale, and on
+-- 2026-09-15 it broke the morning-audit and client-summary jobs with "Invalid JWT". Don't paste a key
+-- from an old file. After scheduling, copy the key from a job that works:
+--   with good as (select substring(command from 'Bearer ([^'']+)''') as k from cron.job where jobname = 'seo-sync-daily')
+--   select cron.alter_job(j.jobid, command := regexp_replace(j.command, 'Bearer [^'']+', 'Bearer ' || (select k from good)))
+--   from cron.job j where j.jobname = '<this job>';
+-- (or take it from Supabase → Project Settings → API keys → anon).
+
 -- Schedule the morning audit. Run this once in the Supabase SQL Editor, after
 -- `supabase functions deploy morning-audit` has succeeded.
 --
@@ -29,7 +37,7 @@ select cron.schedule(
         url     := 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/morning-audit',
         headers := jsonb_build_object(
             'Content-Type',  'application/json',
-            'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z250dHNxdWNldGxkbGxmZ29pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NzUyODcsImV4cCI6MjA4ODE1MTI4N30.OjUwMHZ-ZQLMtY__gktnY4RneMw7RWXLMKdHzcTWWgQ'
+            'Authorization', 'Bearer <CURRENT ANON KEY>'
         ),
         body    := '{}'::jsonb,
         -- pg_net gives up after 5s by default, far shorter than these functions run
