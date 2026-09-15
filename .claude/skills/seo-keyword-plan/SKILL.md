@@ -12,6 +12,16 @@ client's real services and cities, checks it against their site, and loads it in
 **Work with the user step by step.** Present findings and a draft, get approval, then change
 SE Ranking. Never delete a keyword or add paid data they haven't approved.
 
+## 0. Check the SE Ranking connection first
+This skill needs the **SE Ranking** connector (tools named `PROJECT_…`, e.g. `PROJECT_listProjects`).
+A skill doesn't bring its own connection — it uses the session's. Before asking the user anything,
+confirm those tools are available (load them via tool search if they're deferred) and call
+`PROJECT_listProjects` once.
+- **Works** → carry on, and mention which projects you can see.
+- **Missing or failing** → stop and tell the user: in the Claude app, turn on the SE Ranking connector
+  for this session; in a terminal session, run `/mcp` and sign in to SE Ranking. Steps 1 and 3–6 can
+  still be drafted without it, but nothing can be read from or loaded into SE Ranking until it's on.
+
 ## Mode
 - **New client** → do every step.
 - **Quarterly review** → skip to "Quarterly review" at the bottom, then return to steps 5–7 for changes.
