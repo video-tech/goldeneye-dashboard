@@ -419,6 +419,28 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
   - **UI:** a lightning bolt marks self-closing tasks in the client's onboarding list.
   - **Tests:** 19 PGlite checks.
 
+**Questions steps (built 2026-09-15)** are a step type answered inside Golden Eye rather than an
+embedded GHL form, for forms nothing in GHL uses. The SEO intake is one. Schema is in
+`supabase/sql/onboarding_questions.sql`.
+- **Where things live:** questions are data on the step (`onboarding_steps.questions`, a jsonb list of
+  `{id, label, type short|long|choice|multi, options, required, website_statuses}`), edited in the
+  step's question builder in Templates. Answers go in `onboarding_answers`, one row per client per
+  step, as `{question id: {label, value}}`.
+- **Stable answers:** a question's `id` never changes, so rewording keeps its answers, and the label
+  saved with each answer keeps old answers readable.
+- **Submitting** (`obSubmitAnswers`) saves the answers, then completes the step through
+  `obCompleteStep`, so the handoff trigger treats it like any step. Editing later just re-saves.
+- **Website-conditioned questions** are asked only when the client's `website_status` matches.
+- **RLS:** read, insert and update via `client_row_visible`; delete is admin only. It's in
+  `rename_client.sql`.
+- **Admin view:** answers show under the client's onboarding list, with a Copy button (plain text,
+  for Cuppa).
+- **The editor's eye button** hides or shows a step. A hidden step can be saved without a link or
+  questions, which is how steps are drafted before their video or form exists.
+- **SEO steps:** `supabase/sql/seo_onboarding_steps.sql` added 2 client steps (hidden) and 7 agency
+  steps, 6 with auto-checks.
+- **Tests:** 13 PGlite checks, 20 jsdom checks.
+
 Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5× default
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of
 those. Encode H.264 (**not HEVC** — Chrome/Firefox won't reliably play it), `+faststart`.

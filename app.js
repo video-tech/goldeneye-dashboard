@@ -28,6 +28,7 @@
         let globalOnboardingProgress = [];
         let globalServices = [];          // add-ons on top of Base, from services
         let globalClientServices = [];    // which add-ons each client has, from client_services
+        let globalOnboardingAnswers = []; // answers to built-in Questions steps, from onboarding_answers
         // Delays the manual "mark it done" fallback on form steps until the webhook has had a chance
         let obManualRevealTimer = null;
         let allRawSeo = [];
@@ -541,9 +542,12 @@
                 // Service names head the Get Started groups
                 supabaseClient.from('services').select('*').order('sort_order'),
                 // Which steps apply to each of their clients (service-based onboarding)
-                loadOnboardingApplicability(allowedClients)
+                loadOnboardingApplicability(allowedClients),
+                // Answers to built-in Questions steps, so a client can come back and edit them
+                supabaseClient.from('onboarding_answers').select('*').in('client_name', allowedClients)
             ]);
             globalServices = results[11].status === 'fulfilled' ? (results[11].value.data || []) : [];
+            globalOnboardingAnswers = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
 
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
             allRawReports = rResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
@@ -1779,6 +1783,10 @@ window.renderGetStarted = function() {
                 inner += obTeamStepHtml(s, complete);
             }
 
+            if (s.step_type === 'questions') {
+                inner += obQuestionsFormHtml(s, complete);
+            }
+
             if (s.step_type === 'form' && s.embed_url) {
                 inner += `<div class="w-full rounded-lg overflow-hidden border border-white/10 mb-4 bg-white" style="height:70vh">
                               <iframe src="${escapeAttr(prefillFormUrl(stripSlashEscapes(s.embed_url), s))}" class="w-full h-full" frameborder="0"></iframe>
@@ -1802,7 +1810,9 @@ window.renderGetStarted = function() {
             const selfCompleting = (s.step_type === 'video' && isDirectVideo(s.embed_url) && !s.requires_confirm)
                                 || (s.step_type === 'form' && !s.requires_confirm)
                                 // A team step carries its own Save and "just me" buttons
-                                || s.step_type === 'team';
+                                || s.step_type === 'team'
+                                // and a Questions step its own Submit
+                                || s.step_type === 'questions';
 
             inner += complete
                 ? `<p class="text-[11px] text-emerald-400/80"><i class="fa-solid fa-circle-check mr-1"></i>Completed ${prog.completed_at ? new Date(prog.completed_at).toLocaleDateString() : ''} &mdash; here for reference.</p>`
@@ -1849,6 +1859,126 @@ window.renderGetStarted = function() {
     obManualRevealTimer = setTimeout(() => {
         document.querySelectorAll('[id^="ob-manual-"]').forEach(b => b.classList.remove('hidden'));
     }, 25000);
+};
+
+// ---- Built-in Questions steps ----
+// The questions live on the step (onboarding_steps.questions), answers in onboarding_answers.
+// Submitting saves the answers and completes the step like any other, so the handoff trigger
+// and progress bars need nothing special. See supabase/sql/onboarding_questions.sql.
+function obAnswersFor(clientName, stepId) {
+    const want = normalize(clientName);
+    return globalOnboardingAnswers.find(a => normalize(a.client_name) === want && a.step_id === stepId) || null;
+}
+
+function obClientWebsiteStatus(clientName) {
+    const want = normalize(clientName || '');
+    const row = portalClientRows.find(c => normalize(c.name) === want) || globalClientsData.find(c => normalize(c.name) === want);
+    return row?.website_status || null;
+}
+
+// The questions this client is asked: a question tagged with website situations only shows when
+// the client's website situation is one of them (unknown means it isn't asked).
+function obQuestionsFor(step, clientName) {
+    const web = obClientWebsiteStatus(clientName);
+    return (Array.isArray(step.questions) ? step.questions : [])
+        .filter(q => q && q.id && q.label)
+        .filter(q => !(q.website_statuses || []).length || (web && q.website_statuses.includes(web)));
+}
+
+function obQuestionsFormHtml(s, complete) {
+    const questions = obQuestionsFor(s, currentActiveClient);
+    const saved = obAnswersFor(currentActiveClient, s.id)?.answers || {};
+    const valueOf = q => saved[q.id]?.value;
+    const fieldId = q => `obq-${s.id}-${q.id}`;
+
+    const field = q => {
+        const v = valueOf(q);
+        const req = q.required ? ' <span class="text-red-400" title="Required">*</span>' : '';
+        const label = `<label class="block text-sm font-bold text-white mb-1" for="${fieldId(q)}">${escapeAttr(q.label)}${req}</label>`;
+        const opts = Array.isArray(q.options) ? q.options.filter(Boolean) : [];
+        if (q.type === 'long') {
+            return `${label}<textarea id="${fieldId(q)}" rows="3" class="glass-input w-full" data-qid="${escapeAttr(q.id)}">${escapeAttr(typeof v === 'string' ? v : '')}</textarea>`;
+        }
+        if (q.type === 'choice' || q.type === 'multi') {
+            const chosen = new Set(Array.isArray(v) ? v : (v ? [v] : []));
+            const input = q.type === 'choice' ? 'radio' : 'checkbox';
+            return `<fieldset data-qid="${escapeAttr(q.id)}" data-qtype="${q.type}">
+                <legend class="block text-sm font-bold text-white mb-1">${escapeAttr(q.label)}${req}</legend>
+                <div class="flex flex-wrap gap-x-4 gap-y-2">
+                    ${opts.map(o => `<label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                        <input type="${input}" name="${fieldId(q)}" value="${escapeAttr(o)}" class="row-checkbox" ${chosen.has(o) ? 'checked' : ''}> ${escapeAttr(o)}
+                    </label>`).join('')}
+                </div>
+            </fieldset>`;
+        }
+        return `${label}<input type="text" id="${fieldId(q)}" class="glass-input w-full" data-qid="${escapeAttr(q.id)}" value="${escapeAttr(typeof v === 'string' ? v : '')}">`;
+    };
+
+    if (!questions.length) {
+        return `<p class="text-sm text-gray-500 mb-4">Nothing to answer here yet.</p>`;
+    }
+    return `<form id="obq-form-${s.id}" class="space-y-4 mb-4" onsubmit="event.preventDefault(); obSubmitAnswers('${s.id}')">
+        ${questions.map(q => `<div>${field(q)}</div>`).join('')}
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
+                <i class="fa-solid fa-check mr-2"></i>${complete ? 'Save changes' : 'Submit answers'}
+            </button>
+            <span id="obq-status-${s.id}" class="text-xs text-gray-400" role="status"></span>
+        </div>
+    </form>`;
+}
+
+window.obSubmitAnswers = async function(stepId) {
+    if (previewBlocksWrite('submitting answers')) return;
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    const form = document.getElementById(`obq-form-${stepId}`);
+    const status = document.getElementById(`obq-status-${stepId}`);
+    if (!step || !form) return;
+
+    const answers = {};
+    const missing = [];
+    obQuestionsFor(step, currentActiveClient).forEach(q => {
+        let value;
+        if (q.type === 'choice') {
+            value = form.querySelector(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)?.value || '';
+        } else if (q.type === 'multi') {
+            value = [...form.querySelectorAll(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)].map(i => i.value);
+        } else {
+            value = (form.querySelector(`[data-qid="${CSS.escape(q.id)}"]`)?.value || '').trim();
+        }
+        const empty = Array.isArray(value) ? !value.length : !value;
+        if (q.required && empty) missing.push(q.label);
+        if (!empty) answers[q.id] = { label: q.label, value };
+    });
+
+    if (missing.length) {
+        status.className = 'text-xs text-amber-400';
+        status.innerText = `Please answer: ${missing.join('; ')}`;
+        return;
+    }
+
+    status.className = 'text-xs text-gray-400';
+    status.innerText = 'Saving…';
+    const now = new Date().toISOString();
+    const row = { client_name: currentActiveClient, step_id: stepId, answers, submitted_by: clientEmail || null, updated_at: now };
+    const { error } = await supabaseClient.from('onboarding_answers').upsert(row, { onConflict: 'client_name,step_id' });
+    if (error) {
+        console.error('Could not save answers:', error);
+        status.className = 'text-xs text-red-400';
+        status.innerText = "Couldn't save your answers. Please try again, or email us if it keeps happening.";
+        return;
+    }
+
+    const existing = obAnswersFor(currentActiveClient, stepId);
+    if (existing) Object.assign(existing, row); else globalOnboardingAnswers.push({ ...row, submitted_at: now });
+
+    if (onboardingProgressFor(currentActiveClient, stepId)?.completed_at) {
+        status.className = 'text-xs text-emerald-400';
+        status.innerText = 'Saved.';
+        return;
+    }
+    // Completing re-renders the list and moves them on to the next step
+    await obCompleteStep(stepId);
 };
 
 // Restore playback position so a client returning mid-video isn't sent back to zero
@@ -3090,15 +3220,17 @@ window.submitClientRequest = async function() {
     // Add-on services and which ones each client has (service_onboarding.sql)
     let servicesQ = supabaseClient.from('services').select('*').order('sort_order');
     let clientServicesQ = supabaseClient.from('client_services').select('*');
+    let answersQ = supabaseClient.from('onboarding_answers').select('*');
 
     if (allowedClients && currentUserRole !== 'admin') {
         clientsQ = clientsQ.in('name', allowedClients); healthQ = healthQ.in('client_name', allowedClients); tasksQ = tasksQ.in('client', allowedClients); crQ = crQ.in('client_name', allowedClients); seoQ = seoQ.in('client_name', allowedClients);
         checkinsQ = checkinsQ.in('client_name', allowedClients);
         contactsQ = contactsQ.in('client_name', allowedClients);
         clientServicesQ = clientServicesQ.in('client_name', allowedClients);
+        answersQ = answersQ.in('client_name', allowedClients);
     }
 
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ, servicesQ, clientServicesQ ]);
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ, servicesQ, clientServicesQ, answersQ ]);
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
     
@@ -3127,6 +3259,7 @@ window.submitClientRequest = async function() {
     globalOnboardingProgress = results[11].status === 'fulfilled' ? (results[11].value.data || []) : [];
     globalServices = results[12].status === 'fulfilled' ? (results[12].value.data || []) : [];
     globalClientServices = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
+    globalOnboardingAnswers = results[14].status === 'fulfilled' ? (results[14].value.data || []) : [];
 
             if (allowedClients && currentUserRole !== 'admin') {
                 const normAllowed = allowedClients.map(a => normalize(a));
@@ -4374,8 +4507,52 @@ window.markOnboardingComplete = async function() {
                     </div>
                     <div class="text-[11px] whitespace-nowrap">${state}</div>
                 </div>`;
+            }).join('') + clientAnswersHtml(cSelectedAccount);
+        }
+
+        // What the client answered on built-in Questions steps, under their onboarding list.
+        // Question wording comes from the answer itself, so it still reads right after the
+        // question is reworded or removed. Copy puts plain text on the clipboard (for Cuppa).
+        const obAnswerText = {};
+        function clientAnswersHtml(clientName) {
+            const mine = globalOnboardingAnswers.filter(a => normalize(a.client_name) === normalize(clientName));
+            if (!mine.length) return '';
+            return mine.map(a => {
+                const step = globalOnboardingSteps.find(s => s.id === a.step_id);
+                const title = step?.title || 'Onboarding questions';
+                // In the step's question order where the question still exists, then any others
+                const order = (Array.isArray(step?.questions) ? step.questions : []).map(q => q.id);
+                const entries = Object.entries(a.answers || {})
+                    .sort(([x], [y]) => (order.indexOf(x) + 1 || 999) - (order.indexOf(y) + 1 || 999));
+                const show = v => Array.isArray(v) ? v.join(', ') : String(v ?? '');
+                obAnswerText[a.step_id] = `${title} (${clientName})\n\n` + entries.map(([, e]) => `${e.label}\n${show(e.value)}`).join('\n\n');
+                const when = new Date(a.updated_at || a.submitted_at).toLocaleDateString();
+                return `<details class="mt-3 rounded-lg border border-white/5 bg-black/20">
+                    <summary class="cursor-pointer px-3 py-2 text-sm text-white flex items-center justify-between gap-3">
+                        <span><i class="fa-solid fa-clipboard-list text-blue-400 mr-2"></i>${escapeAttr(title)} &mdash; answers</span>
+                        <span class="text-[11px] text-gray-500">${escapeAttr(when)}</span>
+                    </summary>
+                    <div class="px-3 pb-3 space-y-3">
+                        ${entries.map(([, e]) => `<div>
+                            <p class="text-[11px] text-gray-500">${escapeAttr(e.label)}</p>
+                            <p class="text-sm text-gray-200 whitespace-pre-wrap">${escapeAttr(show(e.value))}</p>
+                        </div>`).join('') || '<p class="text-sm text-gray-500">Submitted with nothing filled in.</p>'}
+                        <button type="button" onclick="copyClientAnswers('${a.step_id}', this)" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
+                            <i class="fa-solid fa-copy mr-1"></i> Copy answers
+                        </button>
+                    </div>
+                </details>`;
             }).join('');
         }
+
+        window.copyClientAnswers = async function(stepId, btn) {
+            try {
+                await navigator.clipboard.writeText(obAnswerText[stepId] || '');
+                btn.innerHTML = '<i class="fa-solid fa-check mr-1"></i> Copied';
+            } catch {
+                btn.innerText = "Couldn't copy. Select the text instead.";
+            }
+        };
 
         // A one-off task for this client only — something that came up for them and
         // doesn't belong in the template every future client inherits.
@@ -7763,7 +7940,9 @@ function updateConditionSummary(wrap) {
 }
 
 function readConditions(row) {
-    const pressed = sel => [...row.querySelectorAll(`${sel}[aria-pressed="true"]`)].map(b => b.dataset.key);
+    // Only the step's own tag line: a Questions step's per-question website pills share the look
+    const scope = row.querySelector('.ob-conditions') || row;
+    const pressed = sel => [...scope.querySelectorAll(`${sel}[aria-pressed="true"]`)].map(b => b.dataset.key);
     return {
         service_keys: pressed('.ob-chip-svc'),
         website_statuses: pressed('.ob-chip-web'),
@@ -8169,7 +8348,8 @@ window.addOnboardingStepRow = function(step) {
         ['video',  'Video (Loom)'],
         ['form',   'Form (embedded)'],
         ['team',   'Sales team (names & numbers)'],
-        ['action', 'Action (no embed)']
+        ['action', 'Action (no embed)'],
+        ['questions', 'Questions (built in)']
     ];
 
     const owner = step?.owner === 'agency' ? 'agency' : 'client';
@@ -8223,12 +8403,82 @@ window.addOnboardingStepRow = function(step) {
                 Offer a "book a call with us" option on this step
             </label>
         </div>
+        <div class="ob-questions space-y-2 border-l-2 border-blue-500/30 pl-3">
+            <p class="text-[10px] uppercase tracking-widest text-gray-500">Questions &mdash; answers are saved in Golden Eye and shown on the client's page</p>
+            <div class="ob-q-list space-y-2">
+                ${(Array.isArray(step?.questions) ? step.questions : []).map(obQuestionRowHtml).join('')}
+            </div>
+            <button type="button" onclick="addObQuestion(this)" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
+                <i class="fa-solid fa-plus mr-1"></i> Add question
+            </button>
+        </div>
         ${conditionEditorHtml(step)}`;
     container.appendChild(row);
     updateConditionSummary(row.querySelector('.ob-conditions'));
     toggleOnboardingOwnerFields(row.querySelector('.ob-owner'));
     if (!autoCheckCatalog) loadAutoCheckCatalog().then(refreshAutoCheckSelects);
 };
+
+// One question in a Questions step. Its id is kept across edits, so rewording a question keeps the
+// answers already given to it. Website pills use their own class so readConditions() (the step's
+// own tags) never picks them up.
+const OB_QUESTION_TYPES = [['short', 'Short answer'], ['long', 'Long answer'], ['choice', 'Pick one'], ['multi', 'Pick any']];
+
+function obQuestionRowHtml(q) {
+    q = q || {};
+    const id = q.id || `q_${Math.random().toString(36).slice(2, 8)}`;
+    const webs = q.website_statuses || [];
+    return `
+        <div class="ob-q-row bg-black/20 border border-white/5 rounded-lg p-2 space-y-2" data-qid="${escapeAttr(id)}">
+            <div class="flex gap-2 items-center">
+                <input type="text" class="glass-input !py-1.5 flex-1 ob-q-label" placeholder="Question" value="${escapeAttr(q.label || '')}">
+                <select class="glass-input !py-1.5 !w-36 ob-q-type" onchange="this.closest('.ob-q-row').querySelector('.ob-q-options').style.display = ['choice','multi'].includes(this.value) ? '' : 'none'">
+                    ${OB_QUESTION_TYPES.map(([v, l]) => `<option value="${v}" ${(q.type || 'short') === v ? 'selected' : ''}>${l}</option>`).join('')}
+                </select>
+                <label class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer whitespace-nowrap">
+                    <input type="checkbox" class="row-checkbox ob-q-required" ${q.required ? 'checked' : ''}> Required
+                </label>
+                <button type="button" onclick="moveObQuestion(this, -1)" class="text-gray-500 hover:text-white px-1" title="Move up"><i class="fa-solid fa-arrow-up"></i></button>
+                <button type="button" onclick="moveObQuestion(this, 1)" class="text-gray-500 hover:text-white px-1" title="Move down"><i class="fa-solid fa-arrow-down"></i></button>
+                <button type="button" onclick="this.closest('.ob-q-row').remove()" class="text-red-500/60 hover:text-red-400 px-1" title="Remove question"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <input type="text" class="glass-input !py-1.5 w-full ob-q-options" placeholder="Choices, separated by commas"
+                   value="${escapeAttr((q.options || []).join(', '))}" style="display:${['choice', 'multi'].includes(q.type) ? '' : 'none'}">
+            <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">Only ask if website</span>
+                ${Object.entries(WEBSITE_STATUS_LABELS).map(([k, label]) => `
+                    <button type="button" class="ob-chip ob-chip-web ob-q-web" data-key="${k}" aria-pressed="${webs.includes(k)}"
+                        onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true')">${label}</button>`).join('')}
+                <span class="text-[10px] text-gray-500">(none picked = always ask)</span>
+            </div>
+        </div>`;
+}
+
+window.addObQuestion = function(btn) {
+    const list = btn.closest('.ob-questions').querySelector('.ob-q-list');
+    list.insertAdjacentHTML('beforeend', obQuestionRowHtml());
+    list.lastElementChild.querySelector('.ob-q-label').focus();
+};
+
+window.moveObQuestion = function(btn, dir) {
+    const row = btn.closest('.ob-q-row');
+    const sibling = dir < 0 ? row.previousElementSibling : row.nextElementSibling;
+    if (!sibling) return;
+    if (dir < 0) sibling.before(row); else sibling.after(row);
+};
+
+function readObQuestions(stepRow) {
+    return [...stepRow.querySelectorAll('.ob-q-row')].map(r => ({
+        id: r.dataset.qid,
+        label: r.querySelector('.ob-q-label').value.trim(),
+        type: r.querySelector('.ob-q-type').value,
+        required: r.querySelector('.ob-q-required').checked,
+        options: ['choice', 'multi'].includes(r.querySelector('.ob-q-type').value)
+            ? r.querySelector('.ob-q-options').value.split(',').map(o => o.trim()).filter(Boolean)
+            : [],
+        website_statuses: [...r.querySelectorAll('.ob-q-web[aria-pressed="true"]')].map(b => b.dataset.key)
+    })).filter(q => q.label);
+}
 
 // Hide a step without deleting it (its progress and tags stay), or switch a hidden one on.
 // Takes effect on Save, like every other edit in this list.
@@ -8263,8 +8513,10 @@ window.toggleOnboardingOwnerFields = function(el) {
 
     // Hidden, not cleared — toggling owner or type to compare options and back used to
     // wipe a pasted URL. The save decides what actually gets stored.
-    const needsEmbed = !isAgency && type.value !== 'action' && type.value !== 'team';
+    const needsEmbed = !isAgency && !['action', 'team', 'questions'].includes(type.value);
     embed.style.display = needsEmbed ? '' : 'none';
+    const questions = row.querySelector('.ob-questions');
+    if (questions) questions.style.display = !isAgency && type.value === 'questions' ? '' : 'none';
 };
 
 window.saveOnboardingSteps = async function() {
@@ -8278,7 +8530,7 @@ window.saveOnboardingSteps = async function() {
         // An agency item is a task, not something rendered to the client
         const stepType = isAgency ? 'action' : r.querySelector('.ob-type').value;
         // The field is only hidden when it doesn't apply, so ignore whatever it still holds
-        const keepsEmbed = !isAgency && stepType !== 'action' && stepType !== 'team';
+        const keepsEmbed = !isAgency && !['action', 'team', 'questions'].includes(stepType);
 
         return {
             id: r.dataset.stepId || null,
@@ -8297,17 +8549,31 @@ window.saveOnboardingSteps = async function() {
             // silently republish a step that was retired
             active: r.dataset.stepActive !== 'false',
             ...readConditions(r),
-            auto_check: isAgency ? readConditions(r).auto_check : null
+            auto_check: isAgency ? readConditions(r).auto_check : null,
+            // Kept only on a Questions step; switching a step to another type drops them on save
+            questions: !isAgency && stepType === 'questions' ? readObQuestions(r) : null
         };
     }).filter(s => s.title);
 
-    // action and team steps render their own UI, so neither needs a URL. A hidden step can wait
-    // for its URL: that's how a step gets drafted before its video or form exists.
+    // action, team and questions steps render their own UI, so none needs a URL. A hidden step can
+    // wait for its URL: that's how a step gets drafted before its video or form exists.
     const missingEmbed = entered.find(s => s.owner === 'client' && s.active
-        && s.step_type !== 'action' && s.step_type !== 'team' && !s.embed_url);
+        && !['action', 'team', 'questions'].includes(s.step_type) && !s.embed_url);
     if (missingEmbed) {
         alert(`"${missingEmbed.title}" is a ${missingEmbed.step_type} step but has no URL — clients would see an empty box.`);
         return;
+    }
+    const emptyQuestions = entered.find(s => s.active && s.step_type === 'questions' && !s.questions.length);
+    if (emptyQuestions) {
+        alert(`"${emptyQuestions.title}" is a Questions step with no questions. Add some, or hide the step with the eye button.`);
+        return;
+    }
+    for (const s of entered.filter(x => x.step_type === 'questions')) {
+        const noChoices = s.questions.find(q => ['choice', 'multi'].includes(q.type) && !q.options.length);
+        if (noChoices) {
+            alert(`In "${s.title}", the question "${noChoices.label}" needs its choices, separated by commas.`);
+            return;
+        }
     }
 
     const original = btn.innerHTML;
@@ -8331,13 +8597,24 @@ window.saveOnboardingSteps = async function() {
                     assignee: s.assignee, due_days: s.due_days, offer_help: s.offer_help,
                     requires_confirm: s.requires_confirm, confirm_label: s.confirm_label,
                     sort_order: s.sort_order, active: s.active,
-                    service_keys: s.service_keys, website_statuses: s.website_statuses, auto_check: s.auto_check
+                    service_keys: s.service_keys, website_statuses: s.website_statuses, auto_check: s.auto_check,
+                    questions: s.questions
                 };
                 if (s.id) row.id = s.id;
                 return row;
             });
 
-            await saveRowsByIdPresence('onboarding_steps', payload);
+            try {
+                await saveRowsByIdPresence('onboarding_steps', payload);
+            } catch (err) {
+                // Before onboarding_questions.sql has run there's no questions column. Save the rest
+                // rather than block every edit, unless a Questions step is being saved.
+                const noColumn = /questions/.test(`${err.message || ''} ${err.details || ''}`);
+                if (!noColumn || entered.some(s => s.step_type === 'questions')) {
+                    throw noColumn ? new Error('Questions steps need supabase/sql/onboarding_questions.sql to be run first.') : err;
+                }
+                await saveRowsByIdPresence('onboarding_steps', payload.map(({ questions, ...rest }) => rest));
+            }
         }
 
         await loadOnboardingData();
