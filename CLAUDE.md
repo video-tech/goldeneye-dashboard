@@ -1240,6 +1240,23 @@ then `rename_client.sql`, then deploy `seo-sync`. **No new cron job:** `seo-sync
 - **Connected 2026-09-16:** Midas Media (property 511204105). 3Sixty has no GA4 ID yet.
 - **Tests:** 20 parser checks, 16 PGlite checks, 28 jsdom checks.
 
+### Map Pack (built 2026-09-16)
+
+A dedicated panel on the admin SEO tab, `supabase/sql/seo_map_pack.sql`, one function only — no new
+tables. `seo_keyword_summary` and `seo_keyword_city_ranks` both collapse to the latest day in range,
+so there was no way to see the local 3-pack forming or slipping over a week, only a snapshot. This
+aggregates the same `seo_rank_checks.map_rank` rows `seranking-sync` already syncs daily into a
+day-by-day trend.
+- **"In the pack"** means `map_rank` is not null for some tracked city that day (SE Ranking only
+  fills it when the keyword actually shows in the 3-pack). Both the trend and the keyword list take
+  the **best (lowest) rank across every tracked city** for a keyword on a given day — same
+  "where do we stand right now" rule as `seo_keyword_summary`, applied per day instead of once.
+- **Reads:** `seo_gbp_report`'s Maps profile-views tile appears here too (from `gbp_daily`), when the
+  client also has `seranking_local_id` set — tying pack rank to actual Maps visibility.
+- **Read through `seo_map_pack_report(client, start, end, prior_start, prior_end)`.** Admin-only in
+  practice: the per-keyword city breakdown reads `seo_rank_locations`, which is admin-only RLS.
+- **Tests:** 16 PGlite checks, 15 jsdom checks.
+
 ### Google Business Profile via SE Ranking Local (built 2026-09-16)
 
 The panel under Site Analytics. Setup: `supabase/sql/gbp.sql`, then `rename_client.sql`, then deploy

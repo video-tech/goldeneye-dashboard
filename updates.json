@@ -4,6 +4,14 @@
     {
       "date": "2026-09-16",
       "area": "SEO",
+      "title": "A dedicated Map Pack section",
+      "what": "The admin SEO tab now has its own Map Pack panel: how many tracked searches are holding a spot in Google's local 3-pack, how many at #1, the average pack position, and a chart of that count day by day so you can see the pack forming or slipping over the week rather than a single snapshot. Each keyword lists its pack position, its organic position alongside it, and a per-city breakdown for keywords tracked from more than one town.",
+      "note": "For clients with Business Profile connected, it also shows Maps profile views for the same range, tying pack rank to real visibility.",
+      "action": "Run supabase/sql/seo_map_pack.sql"
+    },
+    {
+      "date": "2026-09-16",
+      "area": "SEO",
       "title": "Google Business Profile on the SEO tab",
       "what": "A Business Profile section now sits under Site Analytics: calls, website clicks, direction requests, messages and profile views against the period before, actions per day, how much of the profile's visibility came from Search vs Maps, how people searched (the business name, or the service), the search terms that showed the profile, and the reviews still waiting for a reply with a link to answer them on Google.",
       "note": "The data comes through SE Ranking's Local Marketing tool, free to read, so there's no waiting on Google's API approval. Each client's profile has to be added as a location in SE Ranking first. Midas is connected; set its SE Ranking Local ID (42103) under Edit.",

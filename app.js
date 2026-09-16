@@ -6946,6 +6946,95 @@ async function buildChatSeoBriefing(clientName) {
      seoShowMore(tbody.closest('table'), rows.length ? [...tbody.rows] : [], 'ga4-events', 'events');
  }
 
+ // ---- Map Pack (built 2026-09-16) ----
+ // seo_keyword_summary/seo_keyword_city_ranks both collapse to the latest day in range, so there
+ // was no way to see the pack forming or slipping over the week — only a snapshot. This adds the
+ // trend, sourced from the same seo_rank_checks rows seranking-sync already syncs daily.
+ let seoMapPackChart = null;
+
+ function renderSeoMapPack(res, clientObj) {
+     const panel = document.getElementById('seo-mappack-panel');
+     const empty = document.getElementById('seo-mappack-empty');
+     const body = document.getElementById('seo-mappack-body');
+     if (!panel || !empty || !body) return;
+     panel.classList.remove('hidden');
+     const showEmpty = (html) => {
+         empty.innerHTML = html; empty.classList.remove('hidden'); body.classList.add('hidden');
+         if (seoMapPackChart) { seoMapPackChart.destroy(); seoMapPackChart = null; }
+     };
+     if (!clientObj.seranking_site_id) {
+         showEmpty(`No SE Ranking project set for ${escapeAttr(clientObj.name)}, so there's no tracked rank to show a map pack from.`);
+         return;
+     }
+     if (res?.error) {
+         const missing = /function|does not exist|schema cache/i.test(res.error.message || '');
+         showEmpty(missing
+             ? '<span class="text-amber-400">Map Pack needs its function. Run supabase/sql/seo_map_pack.sql.</span>'
+             : `<span class="text-red-400">Couldn't load Map Pack data: ${escapeAttr(res.error.message)}</span>`);
+         return;
+     }
+     const d = res?.data;
+     if (!d || !d.current || !Number(d.current.keywords_in_pack)) {
+         empty.classList.remove('hidden');
+         body.classList.add('hidden');
+         empty.innerHTML = Number(d?.cities_tracked)
+             ? 'No tracked keyword is holding a map pack spot in this range. That\'s common for a new local push — keep an eye on it as rankings climb.'
+             : 'Nothing tracked yet — the next daily sync (19:00 UTC) will pick this up once keywords have rank history.';
+         if (seoMapPackChart) { seoMapPackChart.destroy(); seoMapPackChart = null; }
+         return;
+     }
+     empty.classList.add('hidden');
+     body.classList.remove('hidden');
+
+     const c = d.current;
+     document.getElementById('seo-mp-count').textContent = seoNum(c.keywords_in_pack);
+     document.getElementById('seo-mp-top').textContent = seoNum(c.top3_count);
+     document.getElementById('seo-mp-avg').innerHTML = `${c.avg_position != null ? Number(c.avg_position).toFixed(1) : '—'} ${seoDeltaPill(Number(c.avg_position), Number(d.prior?.avg_position), { invert: true })}`;
+     const viewsTile = document.getElementById('seo-mp-views-tile');
+     const hasGbp = !!clientObj.seranking_local_id;
+     if (viewsTile) viewsTile.classList.toggle('hidden', !hasGbp);
+     if (hasGbp) document.getElementById('seo-mp-views').innerHTML = `${seoNum(c.maps_views)} ${seoDeltaPill(Number(c.maps_views), Number(d.prior?.maps_views))}`;
+
+     const canvas = document.getElementById('seoMapPackChart');
+     if (canvas) {
+         if (seoMapPackChart) seoMapPackChart.destroy();
+         const trend = d.trend || [];
+         const isLight = document.getElementById('theme-wrapper')?.classList.contains('light-mode');
+         const tick = isLight ? '#64748b' : '#9ca3af';
+         seoMapPackChart = new Chart(canvas.getContext('2d'), {
+             type: 'line',
+             data: {
+                 labels: trend.map(p => p.date),
+                 datasets: [{ label: 'Keywords in the pack', data: trend.map(p => p.count), borderColor: '#fbbf24', backgroundColor: 'rgba(251,191,36,0.12)', fill: true, borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 0, pointHoverRadius: 4, stepped: false }]
+             },
+             options: {
+                 maintainAspectRatio: false,
+                 interaction: { mode: 'index', intersect: false },
+                 scales: {
+                     x: { grid: { display: false }, ticks: { color: tick, maxTicksLimit: 8 } },
+                     y: { beginAtZero: true, grid: { color: isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)' }, ticks: { color: tick, precision: 0 } }
+                 },
+                 plugins: { legend: { display: false } }
+             }
+         });
+     }
+
+     const tbody = document.getElementById('seo-mp-keywords-tbody');
+     if (tbody) {
+         const rows = d.keywords || [];
+         tbody.innerHTML = rows.length ? rows.map(r => {
+             const cities = (r.cities || []).length > 1
+                 ? `<div class="text-[10px] text-gray-500 mt-0.5">${r.cities.map(c => `${escapeAttr(seoCityShort(c.city))} #${c.map_rank}`).join(' · ')}</div>` : '';
+             return `<tr class="hover:bg-white/5 transition">
+                 <td class="py-2 pr-2 text-gray-300 truncate max-w-[280px]" title="${escapeAttr(r.keyword)}">${escapeAttr(r.keyword)}${cities}</td>
+                 <td class="py-2 text-right font-bold ${r.map_rank === 1 ? 'text-amber-400' : 'text-white'} tabular-nums">#${r.map_rank} ${r.prior_map_rank != null ? seoDeltaPill(r.map_rank, r.prior_map_rank, { invert: true }) : ''}</td>
+                 <td class="py-2 text-right text-gray-400 tabular-nums">${r.organic_rank != null ? '#' + r.organic_rank : '—'}</td>
+             </tr>`;
+         }).join('') : '<tr><td colspan="3" class="py-4 text-center text-gray-500">No keywords in the pack in this range.</td></tr>';
+         seoShowMore(tbody.closest('table'), rows.length ? [...tbody.rows] : [], 'mappack-keywords', 'keywords');
+     }
+ }
+
  // ---- Google Business Profile (via SE Ranking Local Marketing, built 2026-09-16) ----
  let seoGbpChart = null;
 
@@ -7181,6 +7270,12 @@ async function buildChatSeoBriefing(clientName) {
              supabaseClient.rpc('seo_market_leaders', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_limit: 25 })
          ]);
          renderSeoCompetitors(compRes, vsRes, marketRes);
+
+         // Map Pack: same seo_rank_checks rows the keyword table reads, just aggregated as a trend.
+         const mapPackRes = clientObj.seranking_site_id
+             ? await supabaseClient.rpc('seo_map_pack_report', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
+             : null;
+         renderSeoMapPack(mapPackRes, clientObj);
 
          // The latest site audit and the one before it, for "what changed". Not tied to the date
          // range: an audit is a monthly snapshot, and the newest one is always the one to act on.

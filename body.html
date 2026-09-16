@@ -936,6 +936,34 @@
                                         </div>
                                     </div>
                                 </div>
+                                <!-- Map Pack: a dedicated view of Google's local 3-pack, reading seo_rank_checks'
+                                     daily map_rank through seo_map_pack_report (supabase/sql/seo_map_pack.sql). -->
+                                <div id="seo-mappack-panel" class="glass p-6 hidden">
+                                    <div class="flex flex-wrap justify-between items-baseline gap-2 mb-5">
+                                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Map Pack <span class="text-gray-600 font-normal normal-case">(Google's local 3-pack, tracked daily by SE Ranking)</span></h3>
+                                    </div>
+                                    <div id="seo-mappack-empty" class="hidden text-sm text-gray-500"></div>
+                                    <div id="seo-mappack-body" class="hidden space-y-6">
+                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Keywords in the pack</p><div id="seo-mp-count" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Holding #1</p><div id="seo-mp-top" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg. pack position</p><div id="seo-mp-avg" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div id="seo-mp-views-tile"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Maps profile views</p><div id="seo-mp-views" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                        </div>
+                                        <div>
+                                            <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">How many keywords held a pack spot each day</h4>
+                                            <div class="relative w-full h-[200px]"><canvas id="seoMapPackChart" aria-label="Keywords in the map pack per day"></canvas></div>
+                                        </div>
+                                        <div class="overflow-x-auto">
+                                            <table class="w-full text-sm">
+                                                <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                    <th class="text-left pb-2">Keyword</th><th class="text-right pb-2">Pack position</th><th class="text-right pb-2" title="Also ranking organically">Organic</th>
+                                                </tr></thead>
+                                                <tbody id="seo-mp-keywords-tbody"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
                                 <div id="seo-audit-panel" class="glass p-6 hidden">
                                     <div class="flex flex-wrap justify-between items-baseline gap-2 mb-4">
                                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Site Audit <span class="text-gray-600 font-normal normal-case">(SE Ranking, runs monthly on the 1st)</span></h3>
