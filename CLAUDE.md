@@ -1207,6 +1207,26 @@ report and the tab can never state different numbers for the same week.
   and in `renderCpSeo`.
 - **Tests:** 19 checks on the block, with the tab's 28 re-run for the day-count fix.
 
+### SEO in the chat agent (built 2026-09-16)
+
+`buildChatSeoBriefing()` in app.js is what the Client Intelligence Agent knows about a client's
+organic search. **Before this it read `globalSeoData` — `seo_metrics`, the table Make #2 filled before
+it was switched off** — so every SEO answer came from stale or empty rows with an unweighted position.
+- **Starts from `buildReportSeoBlock()` for the last 28 whole days**, so the chat and a weekly report
+  can't state different numbers.
+- **Adds what an account manager asks and a report leaves out**, each computed in code and handed
+  over as text: a 16-week weekly trend (impression-weighted position per week), the changelog on
+  dated lines oldest first (with a warning not to claim same-week causes), top pages, click movers,
+  wrong pages ranking, competitors (with the organic-only caveat), the latest audit versus the one
+  before, and website leads by source (never compared before `LEAD_TRACKING_START`).
+- **Each section degrades alone:** a missing function or table drops that section. A total failure
+  tells the model to say the numbers are unavailable.
+- **Cached per client for 5 minutes**: the chat rebuilds its system prompt on every message, and
+  this is about ten queries.
+- The prompt now says to quote SEO figures exactly and treat under 50 visits / 5 leads as noise.
+- **Checked against 3Sixty's live data** through the read-only connection before shipping.
+- **Tests:** 20 checks run the real code on a fake database; the report block's 19 still pass.
+
 ### The client Organic Search tab (rebuilt 2026-09-14)
 
 `window.renderCpSeo()` in app.js, with markup in `#cp-view-seo` in body.html. It's written for clients who

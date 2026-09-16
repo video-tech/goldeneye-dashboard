@@ -3,6 +3,12 @@
   "updates": [
     {
       "date": "2026-09-16",
+      "area": "SEO",
+      "title": "The chat agent now knows a client's real SEO",
+      "what": "Ask the Client Intelligence Agent about a client's SEO and it now answers from the same numbers as the SEO tab: visits, position and leads from Google over the last 28 days, a 16-week weekly trend, the SEO work logged with dates, top pages, what moved, wrong pages ranking, competitors, and the latest site audit. Try \"why did traffic change?\" or \"what should we work on next?\". Before, it was reading an old table that stopped updating when Make's SEO pull was switched off."
+    },
+    {
+      "date": "2026-09-16",
       "area": "Security",
       "title": "Client work summaries locked to their schedule",
       "what": "The service that writes each client's daily work summary now only runs for its 16:05 schedule or a signed-in admin. Before, anyone who read the page's source could force it to rewrite every client's portal summary, using our OpenAI account. The daily summaries work as before."

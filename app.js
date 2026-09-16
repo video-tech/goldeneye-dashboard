@@ -5432,6 +5432,151 @@ async function buildReportSeoBlock(clientName, s, e) {
     }
 }
 
+// ---- The chat agent's SEO briefing ----
+// What the Client Intelligence Agent knows about a client's organic search. Until 2026-09-16 it was
+// fed seo_metrics, the table Make scenario #2 filled before it was switched off, so every SEO answer
+// was built on stale or empty numbers with an unweighted position.
+//
+// Same principle as the report: code computes, the model quotes. It starts from buildReportSeoBlock
+// for the last 28 days (so the chat and a report can't disagree), then adds what an account manager
+// asks about and a client report leaves out: a weekly trend long enough to see a change, the work
+// logged on dated lines so the model can line work up with the trend, top pages, what moved, wrong
+// pages ranking, competitors, the latest site audit and where leads came from.
+//
+// Each part degrades on its own: a missing function or table drops that section, never the briefing.
+// Cached per client for 5 minutes, because the chat rebuilds its system prompt on every message and
+// this is about ten queries.
+const CHAT_SEO_CACHE_MS = 5 * 60 * 1000;
+const chatSeoCache = new Map();
+
+async function buildChatSeoBriefing(clientName) {
+    const key = normalize(clientName);
+    const hit = chatSeoCache.get(key);
+    if (hit && Date.now() - hit.at < CHAT_SEO_CACHE_MS) return hit.text;
+
+    const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const num = v => v == null ? null : Number(v);
+    try {
+        const { data: clientRows } = await supabaseClient.from('clients').select('name, gsc_property, seranking_site_id, seo_start_date');
+        const c = (clientRows || []).find(r => normalize(r.name) === key && (r.gsc_property || r.seranking_site_id));
+        if (!c) {
+            const none = 'This client has no Search Console property or SE Ranking project connected, so there is no SEO data. Say so if asked about SEO.';
+            chatSeoCache.set(key, { at: Date.now(), text: none });
+            return none;
+        }
+
+        // The last 28 whole days (whole weeks, so weekdays match the 28 before), ending yesterday
+        const e = new Date(); e.setHours(23, 59, 59, 999); e.setDate(e.getDate() - 1);
+        const s = new Date(e); s.setHours(0, 0, 0, 0); s.setDate(s.getDate() - 27);
+        const priorEnd = new Date(s); priorEnd.setDate(priorEnd.getDate() - 1);
+        const priorStart = new Date(priorEnd); priorStart.setDate(priorStart.getDate() - 27);
+        const trendStart = new Date(s); trendStart.setDate(trendStart.getDate() - 7 * 12);   // 16 weeks in all
+        const logStart = new Date(s); logStart.setDate(logStart.getDate() - 7 * 12);
+        const range = { p_client: c.name, p_start: ymd(s), p_end: ymd(e), p_prior_start: ymd(priorStart), p_prior_end: ymd(priorEnd) };
+        const safe = p => p.then(r => r, err => ({ error: err }));
+
+        const [base, dailyRes, pagesRes, moversRes, kwRes, compRes, auditRes, leadsRes, logRes] = await Promise.all([
+            buildReportSeoBlock(c.name, s, e),
+            safe(supabaseClient.from('seo_daily').select('date, clicks, impressions, position')
+                .eq('client_name', c.name).gte('date', ymd(trendStart)).lte('date', range.p_end).order('date')),
+            safe(supabaseClient.rpc('seo_page_summary', { ...range, p_limit: 8 })),
+            safe(supabaseClient.rpc('seo_movers', { ...range, p_limit: 5 })),
+            safe(supabaseClient.rpc('seo_keyword_summary', range)),
+            safe(supabaseClient.rpc('seo_competitor_overview', { p_client: c.name, p_start: range.p_start, p_end: range.p_end })),
+            safe(supabaseClient.from('seo_site_audits').select('audit_time, score, pages_crawled, errors, warnings, notices, issues')
+                .eq('client_name', c.name).order('audit_time', { ascending: false }).limit(2)),
+            safe(supabaseClient.from('lead_sources').select('created_at, source')
+                .eq('client_name', c.name).gte('created_at', ymd(priorStart)).lte('created_at', `${range.p_end}T23:59:59`)),
+            safe(supabaseClient.from('seo_changelog').select('live_date, kind, title')
+                .eq('client_name', c.name).gte('live_date', ymd(logStart)).lte('live_date', range.p_end)
+                .order('live_date', { ascending: true }).limit(60))
+        ]);
+
+        const parts = [];
+        if (c.seo_start_date) parts.push(`SEO work for this client started ${String(c.seo_start_date).slice(0, 10)}.`);
+        if (base) parts.push(base.trim());
+
+        // Weekly trend: impression-weighted position per week, never a flat average of daily positions
+        const daily = dailyRes.data || [];
+        if (daily.length) {
+            const weeks = new Map();
+            for (const d of daily) {
+                const day = new Date(`${String(d.date).slice(0, 10)}T00:00:00`);
+                const offset = Math.floor((day - trendStart) / (7 * 86400000));
+                if (offset < 0) continue;
+                const wk = new Date(trendStart); wk.setDate(wk.getDate() + offset * 7);
+                const w = weeks.get(offset) || { start: ymd(wk), clicks: 0, impressions: 0, posWeight: 0, days: 0 };
+                const imp = Number(d.impressions) || 0;
+                w.clicks += Number(d.clicks) || 0;
+                w.impressions += imp;
+                if (d.position != null && imp > 0) w.posWeight += Number(d.position) * imp;
+                w.days += 1;
+                weeks.set(offset, w);
+            }
+            const rows = [...weeks.entries()].sort((a, b) => a[0] - b[0]).map(([, w]) =>
+                `  ${w.start}: ${w.clicks} visits, ${w.impressions} times shown, position ${w.impressions ? (w.posWeight / w.impressions).toFixed(1) : 'n/a'}${w.days < 7 ? ` (${w.days} days of data)` : ''}`);
+            parts.push(`WEEKLY SEARCH CONSOLE TREND (weeks starting on the date shown; Google reports 2–3 days late, so the last week may be incomplete):\n${rows.join('\n')}`);
+        }
+
+        const log = logRes.data || [];
+        if (log.length) {
+            parts.push(`SEO WORK LOGGED, OLDEST FIRST (use these dates to line work up with the weekly trend; SEO effects usually take weeks, so don't claim a same-week cause):\n${log.map(x => `  ${x.live_date} [${x.kind}] ${x.title}`).join('\n')}`);
+        }
+
+        const pages = pagesRes.data || [];
+        if (pages.length) {
+            parts.push(`TOP PAGES, last 28 days (clicks, previous 28 days in brackets):\n${pages.map(p =>
+                `  ${seoPagePath(p.page)}: ${num(p.clicks)} clicks (${num(p.prior_clicks) ?? 0}), ${num(p.impressions)} shown, position ${num(p.weighted_position) != null ? num(p.weighted_position).toFixed(1) : 'n/a'}`).join('\n')}`);
+        }
+
+        const movers = moversRes.data || [];
+        if (movers.length) {
+            parts.push(`BIGGEST CLICK CHANGES vs the previous 28 days (only pages/searches with 50+ impressions):\n${movers.map(m =>
+                `  ${m.kind === 'page' ? 'Page' : 'Search'} ${m.kind === 'page' ? seoPagePath(m.name) : `"${m.name}"`}: ${num(m.prior_clicks)} → ${num(m.clicks)} clicks`).join('\n')}`);
+        }
+
+        const wrong = (kwRes.data || []).filter(r => seoWrongPage(r));
+        if (wrong.length) {
+            parts.push(`WRONG PAGE RANKING (Google shows a different page than the one we target — a sign of competing pages):\n${wrong.slice(0, 8).map(r =>
+                `  "${r.keyword}": ranking ${seoPagePath(r.ranking_url)} instead of ${seoPagePath(r.target_page)}`).join('\n')}`);
+        }
+
+        const comps = (compRes.data || []).filter(r => Number(r.keywords_compared) > 0);
+        if (comps.length) {
+            parts.push(`COMPETITORS (organic rank only — SE Ranking gives no competitor map-pack position, so never say we beat someone in Google Maps; "ahead/behind" counts only searches where both rank):\n${comps.map(r =>
+                `  ${r.competitor_name || r.domain}: ${num(r.their_page1)} on page 1, avg rank ${r.their_avg_rank != null ? Number(r.their_avg_rank).toFixed(1) : 'n/a'}, domain trust ${r.domain_trust ?? 'n/a'}; we're ahead on ${num(r.ahead_of_them)}, behind on ${num(r.behind_them)}, and rank alone on ${num(r.not_ranking_them)}`).join('\n')}`);
+        }
+
+        const [audit, prevAudit] = auditRes.data || [];
+        if (audit) {
+            const issues = (Array.isArray(audit.issues) ? audit.issues : []).filter(i => i.severity !== 'notice').slice(0, 6);
+            const change = prevAudit?.score != null && audit.score != null ? ` (was ${prevAudit.score} on ${String(prevAudit.audit_time).slice(0, 10)})` : '';
+            parts.push(`LATEST SITE AUDIT, ${String(audit.audit_time).slice(0, 10)}: health score ${audit.score}/100${change}, ${audit.errors} errors, ${audit.warnings} warnings, ${audit.pages_crawled} pages crawled.${issues.length ? `\n${issues.map(i => `  ${i.severity}: ${i.name} (${i.count})`).join('\n')}` : ''}`);
+        }
+
+        const leads = leadsRes.data || [];
+        if (!leadsRes.error && range.p_end >= LEAD_TRACKING_START) {
+            const count = (from, to) => {
+                const out = {};
+                for (const l of leads) {
+                    const d = String(l.created_at).slice(0, 10);
+                    if (d >= from && d <= to) out[l.source || 'unknown'] = (out[l.source || 'unknown'] || 0) + 1;
+                }
+                return out;
+            };
+            const fmt = o => Object.keys(o).length ? Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') : 'none';
+            parts.push(`WEBSITE LEADS BY SOURCE (lead tracking began ${LEAD_TRACKING_START}; nothing before that was measured, so never compare with earlier periods): last 28 days: ${fmt(count(range.p_start, range.p_end))}${range.p_prior_end >= LEAD_TRACKING_START ? `; previous 28 days: ${fmt(count(range.p_prior_start, range.p_prior_end))}` : ''}`);
+        }
+
+        const text = parts.length ? parts.join('\n\n') : 'SEO is connected for this client, but no data has synced yet.';
+        chatSeoCache.set(key, { at: Date.now(), text });
+        return text;
+    } catch (err) {
+        console.warn('Chat: SEO briefing unavailable', err);
+        return 'SEO data could not be loaded right now. If asked about SEO, say the numbers are unavailable rather than guessing.';
+    }
+}
+
 // Reads seo_daily / seo_pages_daily / seo_queries_daily (Search Console, via seo-sync),
  // seo_keywords / seo_rank_checks (SE Ranking, via seranking-sync), and lead_sources
  // (organic leads, via ghl-lead-webhook) together for one client at a time. This is
@@ -7061,11 +7206,10 @@ async function buildReportSeoBlock(clientName, s, e) {
                     .slice(-90)
                     .map(r => ({ date: r.date ? r.date.split('T')[0] : 'Unknown', spend: r.spend, leads: r.leads }));
                     
-                const clientSeo = globalSeoData
-                    .filter(r => normalize(r.client_name).includes(normC))
-                    .slice(-90)
-                    .map(r => ({ date: r.date ? r.date.split('T')[0] : 'Unknown', clicks: r.clicks, imp: r.impressions, pos: r.avg_position }));
-                    
+                // Real SEO data: Search Console, SE Ranking, competitors, audit and leads, computed
+                // here and handed over as text (buildChatSeoBriefing). Replaced the dead seo_metrics feed.
+                const clientSeo = await buildChatSeoBriefing(cSelectedAccount);
+
                 const clientTasks = globalTasksData
                     .filter(t => normalize(t.client || '').includes(normC))
                     .slice(-50)
@@ -7090,14 +7234,17 @@ async function buildReportSeoBlock(clientName, s, e) {
                 - Current Relationship Health Score: ${clientHealth}/100
                 - All Tasks: ${JSON.stringify(clientTasks)}
                 - Ad Performance: ${JSON.stringify(clientAds)}
-                - Organic SEO Performance: ${JSON.stringify(clientSeo)}
                 - Weekly outcomes reported by the client (estimates sent, jobs closed, revenue): ${JSON.stringify(clientOutcomes)}
-                
+
+                ORGANIC SEARCH (SEO) — every figure below was computed by Golden Eye from Search Console, SE Ranking and the client's website leads:
+                ${clientSeo}
+
                 Rules:
-                1. Base your answers strictly on the provided JSON data.
-                2. Look for deep cross-channel correlations.
-                3. Be concise, direct, and highly analytical. Provide insights humans might miss. Give no generic advice.
-                4. Use basic markdown to format your response cleanly.`;
+                1. Base your answers strictly on the data provided. If something isn't in it, say you don't have that data.
+                2. Quote SEO figures exactly as given; don't recalculate, re-average or round them differently.
+                3. Look for deep cross-channel correlations, but treat small numbers (under 50 visits or 5 leads) as noise, not trends.
+                4. Be concise, direct, and highly analytical. Provide insights humans might miss. Give no generic advice.
+                5. Use basic markdown to format your response cleanly.`;
             }
 
             // Setup or update system instructions
