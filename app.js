@@ -5887,6 +5887,120 @@ async function buildReportSeoBlock(clientName, s, e) {
      seoShowMore(host, [...host.children], 'market', 'sites');
  }
 
+ // ---- Site audit (admin) ----
+ // SE Ranking's monthly crawl, stored by seranking-sync in seo_site_audits (newest two rows read).
+ // Errors lead, then warnings; notices sit behind View all, since most are housekeeping (unminified
+ // JavaScript) rather than anything costing rankings. Comparing with the previous run is the point
+ // of a monthly audit: a new issue usually means a site change broke something, and a fixed one is
+ // work worth logging.
+ const SEO_AUDIT_SEVERITY = {
+     error: { label: 'Error', dot: 'bg-red-400', text: 'text-red-400' },
+     warning: { label: 'Warning', dot: 'bg-yellow-400', text: 'text-yellow-400' },
+     notice: { label: 'Notice', dot: 'bg-gray-500', text: 'text-gray-400' },
+ };
+
+ function renderSeoSiteAudit(auditRes) {
+     const panel = document.getElementById('seo-audit-panel');
+     const empty = document.getElementById('seo-audit-empty');
+     const body = document.getElementById('seo-audit-body');
+     if (!panel || !empty || !body) return;
+     panel.classList.remove('hidden');
+     const when = document.getElementById('seo-audit-when');
+     const show = (isEmpty, html) => {
+         empty.classList.toggle('hidden', !isEmpty);
+         body.classList.toggle('hidden', isEmpty);
+         if (isEmpty) { empty.innerHTML = html; when.textContent = ''; }
+     };
+     if (auditRes?.error) {
+         show(true, '<span class="text-amber-400">Site audits need their table. Run supabase/sql/seo_site_audits.sql, then deploy seranking-sync.</span>');
+         return;
+     }
+     const [latest, previous] = auditRes?.data || [];
+     if (!latest) {
+         show(true, 'No site audit synced for this client yet. In SE Ranking, open the project\'s Website Audit, run it once and set its schedule to monthly. It appears here after the next daily sync.');
+         return;
+     }
+     show(false, '');
+
+     const date = d => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+     when.textContent = `Checked ${date(latest.audit_time)} · ${Number(latest.pages_crawled || 0)} pages`;
+
+     // Score, with the change since the last run. Higher is better.
+     const score = latest.score == null ? null : Number(latest.score);
+     const scoreColor = score == null ? 'text-gray-400' : score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-yellow-400' : 'text-red-400';
+     const delta = (cur, prev, higherIsBetter) => {
+         if (previous == null || cur == null || prev == null) return '';
+         const d = Number(cur) - Number(prev);
+         if (d === 0) return '<span class="text-xs text-gray-500 ml-1">no change</span>';
+         const good = higherIsBetter ? d > 0 : d < 0;
+         return `<span class="text-xs font-bold ml-1 ${good ? 'text-emerald-400' : 'text-red-400'}">${d > 0 ? '+' : ''}${d}</span>`;
+     };
+     document.getElementById('seo-audit-score').innerHTML =
+         `<span class="text-2xl font-extrabold ${scoreColor}">${score == null ? '—' : score}</span><span class="text-sm text-gray-500">/100</span>${delta(latest.score, previous?.score, true)}`;
+     for (const [id, key] of [['seo-audit-errors', 'errors'], ['seo-audit-warnings', 'warnings'], ['seo-audit-notices', 'notices']]) {
+         document.getElementById(id).innerHTML =
+             `<span class="text-2xl font-extrabold text-white">${Number(latest[key] || 0).toLocaleString()}</span>${delta(latest[key], previous?.[key], false)}`;
+     }
+
+     const issues = Array.isArray(latest.issues) ? latest.issues : [];
+     const before = new Map((Array.isArray(previous?.issues) ? previous.issues : []).map(i => [i.code, i]));
+     const nowCodes = new Set(issues.map(i => i.code));
+
+     // Fixed since last audit: only errors and warnings are worth calling out
+     const fixedBox = document.getElementById('seo-audit-fixed');
+     const fixed = previous ? [...before.values()].filter(i => !nowCodes.has(i.code) && i.severity !== 'notice') : [];
+     fixedBox.classList.toggle('hidden', !fixed.length);
+     fixedBox.innerHTML = fixed.length
+         ? `<i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i><span class="text-emerald-400 font-bold">Fixed since ${date(previous.audit_time)}:</span> <span class="text-gray-300">${fixed.map(i => escapeAttr(i.name)).join(', ')}</span>`
+         : '';
+
+     const tbody = document.getElementById('seo-audit-tbody');
+     if (!issues.length) {
+         tbody.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-emerald-400">No issues found in this audit.</td></tr>';
+         document.getElementById('seo-more-audit')?.remove();
+         return;
+     }
+     tbody.innerHTML = issues.map(i => {
+         const sev = SEO_AUDIT_SEVERITY[i.severity] || SEO_AUDIT_SEVERITY.notice;
+         const prev = before.get(i.code);
+         // "New" needs a previous run to be new against; on the first audit everything is simply there
+         const tag = !previous ? ''
+             : !prev ? '<span class="text-[9px] uppercase tracking-widest text-red-400 border border-red-400/30 rounded px-1 ml-2">new</span>'
+             : Number(i.count) > Number(prev.count) ? `<span class="text-[10px] text-red-400 ml-2">up from ${Number(prev.count)}</span>`
+             : Number(i.count) < Number(prev.count) ? `<span class="text-[10px] text-emerald-400 ml-2">down from ${Number(prev.count)}</span>`
+             : '';
+         return `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300"><span class="inline-block w-2 h-2 rounded-full ${sev.dot} mr-2" title="${sev.label}"></span>${escapeAttr(i.name)}${tag}</td>
+             <td class="py-2 pr-2 text-gray-500 whitespace-nowrap">${escapeAttr(i.section)}</td>
+             <td class="py-2 text-right font-bold ${sev.text}">${Number(i.count).toLocaleString()}</td>
+         </tr>`;
+     }).join('');
+     // Show every error and warning up front; notices wait behind View all
+     const rows = [...tbody.rows];
+     const important = issues.filter(i => i.severity !== 'notice').length;
+     if (important > 0 && important < rows.length) {
+         const open = !!seoListOpen['audit'];
+         rows.forEach((r, n) => r.classList.toggle('hidden', !open && n >= important));
+         let btn = document.getElementById('seo-more-audit');
+         if (!btn) {
+             btn = document.createElement('button');
+             btn.id = 'seo-more-audit';
+             btn.type = 'button';
+             btn.className = 'mt-3 text-xs font-bold text-blue-400 hover:text-blue-300 transition';
+             tbody.closest('.overflow-x-auto').after(btn);
+         }
+         const hidden = rows.length - important;
+         btn.innerHTML = open
+             ? '<i class="fa-solid fa-chevron-up mr-1"></i>Hide notices'
+             : `<i class="fa-solid fa-chevron-down mr-1"></i>Show ${hidden} ${hidden === 1 ? 'notice' : 'notices'}`;
+         btn.onclick = () => { seoListOpen['audit'] = !open; renderSeoSiteAudit(auditRes); };
+     } else {
+         // All one kind: nothing to fold away
+         document.getElementById('seo-more-audit')?.remove();
+         rows.forEach(r => r.classList.remove('hidden'));
+     }
+ }
+
  function renderSeoAlmostPageOne(rows, minImpressions, failed) {
      const tbody = document.getElementById('seo-almost-p1-tbody');
      if (!tbody) return;
@@ -6465,6 +6579,13 @@ async function buildReportSeoBlock(clientName, s, e) {
              supabaseClient.rpc('seo_market_leaders', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_limit: 25 })
          ]);
          renderSeoCompetitors(compRes, vsRes, marketRes);
+
+         // The latest site audit and the one before it, for "what changed". Not tied to the date
+         // range: an audit is a monthly snapshot, and the newest one is always the one to act on.
+         const auditRes = await supabaseClient.from('seo_site_audits')
+             .select('seranking_audit_id, audit_time, score, pages_crawled, errors, warnings, notices, issues')
+             .eq('client_name', clientName).order('audit_time', { ascending: false }).limit(2);
+         renderSeoSiteAudit(auditRes);
      } catch (err) {
          console.error('renderAdminSeo failed:', err);
      }

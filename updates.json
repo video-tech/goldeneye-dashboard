@@ -4,6 +4,14 @@
     {
       "date": "2026-09-16",
       "area": "SEO",
+      "title": "Monthly site audit",
+      "what": "The bottom of the SEO tab now shows the client's latest site audit from SE Ranking: a health score out of 100, errors, warnings and notices, and every issue found with how many pages it affects. Errors and warnings show first; notices are behind a button. From the second month on, it shows the change since last time — the score going up or down, issues that are new, counts that rose or fell, and what got fixed.",
+      "note": "SE Ranking now re-audits 3Sixty and Midas on the 1st of every month. That uses the plan's page allowance, not API units. 3Sixty's first audit scored 70 (57 errors, including 54 broken images); Midas scored 87.",
+      "action": "Run supabase/sql/seo_site_audits.sql, then supabase/sql/rename_client.sql, then deploy seranking-sync"
+    },
+    {
+      "date": "2026-09-16",
+      "area": "SEO",
       "title": "Competitor numbers fixed, directories hidden",
       "what": "Fixed: a competitor who isn't in Google's top 100 was being counted as ranking #100, so every comparison said we were ahead. Midas showed \"ahead on 14, behind on 0\" against all five competitors when four of them don't rank for those searches at all. They now count as not ranking. \"Who owns this market\" also hides directories and manufacturers (Yelp, Houzz, Trex, booking widgets) by default, with a button to show them, so the list shows the local businesses worth tracking.",
       "action": "Re-run supabase/sql/seo_competitors.sql (it also clears the bad rows), then deploy seranking-sync"

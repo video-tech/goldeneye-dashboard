@@ -1380,6 +1380,28 @@ real client data; see the Known gaps entry on that.
   - **3Sixty, 2026-09-15:** Backyard Builders Utah, Blackrock Decks, TC Decks Utah, Eremos Decks,
     Quality Decking of Utah. Domain trust 16 / 38 / 19 / 4 / 13 against 3Sixty's 7.
   - **Tests:** 30 PGlite checks, 20 parser checks, 30 jsdom checks.
+- **Site audit (built 2026-09-16)** — `supabase/sql/seo_site_audits.sql`, then `rename_client.sql`,
+  then deploy `seranking-sync`. The last panel on the admin SEO tab.
+  - **SE Ranking does the crawling, on its own schedule.** Each client's audit is set in SE Ranking to
+    `schedule_type: month`, day 1, 09:00 UTC (3Sixty audit `384541`, Midas `381943`, set 2026-09-16).
+    A crawl counts pages against the plan's page limit, **not Data API units**; every read is free
+    (seranking.com/api/project/audit). Don't use the Data API's `/v1/site-audit` endpoints — those
+    charge 2 credits a page.
+  - **The sync only notices and stores.** `syncSiteAudit` reads `/audits` (account-wide), picks this
+    project's latest *finished* audit by `site_id` (the documented example omits it, so it falls back
+    to the `gsc_property` domain, but never takes an audit tied to a different project), and fetches
+    `/audits/report` only when that run isn't already stored. Isolated like the snapshot and
+    competitors: a failure lands in `last_error` as `audit …`, never failing the rank sync.
+  - **`seo_site_audits`** keeps one row per run, keyed on audit id + `audit_time` (a recheck keeps the
+    id). `issues` holds only checks that found something, `{code, name, section, severity, count}`,
+    errors first. `audit_time` has no zone in the API and is read as UTC. Admin-only by RLS: the issues
+    are technical and would alarm a client more than inform them.
+  - **The panel compares with the previous run:** score and total deltas, "new" on issues absent last
+    time, "up/down from N" on counts that moved, and a "Fixed since" line (errors and warnings only).
+    Errors and warnings always show; notices sit behind a button, since most are housekeeping.
+  - **A new SEO client needs one step in SE Ranking:** open the project's Website Audit, run it once,
+    set the schedule to monthly. It appears after the next sync.
+  - **Tests:** 15 parser checks on the real 3Sixty/Midas responses, 22 jsdom checks.
 - **Keywords removed in SE Ranking are retired, not deleted** (`keywordsToRetire()` in `parse.ts`):
   the sync marks them `active = false` and keeps their stored history. It never retires anything when
   SE Ranking returns an empty keyword list, so a bad response can't wipe a client's list.

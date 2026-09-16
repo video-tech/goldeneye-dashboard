@@ -334,6 +334,115 @@ export function parseTop10Domains(raw: unknown): Top10DomainRow[] {
 }
 
 // ---------------------------------------------------------------------------
+// Site audits
+// ---------------------------------------------------------------------------
+// Project API, documented at seranking.com/api/project/audit. Reads are free; a crawl counts pages
+// against the plan limit, and SE Ranking runs those itself on each audit's monthly schedule.
+//   GET /audits                       -> parseAuditList   (account-wide, every audit)
+//   GET /audits/report?audit_id=      -> parseAuditReport
+
+export interface AuditListRow {
+    audit_id: number;
+    site_id: number | null;
+    url: string | null;
+    status: string;
+    last_update: string | null;
+}
+
+// Real response (2026-09-16): {"items":[{"id":384541,"url":"https://www.3sixty-industries.com/",
+// "has_project":true,"site_id":12904139,"last_update":"2026-09-11","status":"finished",
+// "stats":{"score":70,...}}],"total":2}. site_id links an audit to its rank-tracking project; the
+// docs' example omits it, so the caller falls back to matching the audit's domain.
+export function parseAuditList(raw: unknown): AuditListRow[] {
+    const items = raw && typeof raw === "object" && Array.isArray((raw as any).items) ? (raw as any).items : asArray(raw);
+    return items.map((a: any) => {
+        const site = Number(a?.site_id);
+        return {
+            audit_id: Number(a?.id),
+            site_id: Number.isFinite(site) && site > 0 ? site : null,
+            url: a?.url ? String(a.url) : null,
+            status: String(a?.status ?? ""),
+            last_update: a?.last_update ? String(a.last_update).slice(0, 10) : null,
+        };
+    }).filter((a: AuditListRow) => Number.isFinite(a.audit_id));
+}
+
+// The finished audit for a project: by site_id when SE Ranking gives it, else by domain. Newest
+// first, so a client with a second audit (a one-off recheck of a subfolder, say) gets the latest.
+export function pickClientAudit(audits: AuditListRow[], siteId: number, domain: string | null): AuditListRow | null {
+    const host = (u: string | null) => competitorDomain(u);
+    const mine = audits.filter((a) => a.status === "finished"
+        && (a.site_id === siteId || (a.site_id === null && !!domain && host(a.url) === domain)));
+    mine.sort((x, y) => String(y.last_update ?? "").localeCompare(String(x.last_update ?? "")) || y.audit_id - x.audit_id);
+    return mine[0] ?? null;
+}
+
+export interface AuditIssue {
+    code: string;
+    name: string;
+    section: string;
+    severity: "error" | "warning" | "notice";
+    count: number;
+}
+
+export interface AuditReport {
+    audit_time: string | null;
+    score: number | null;
+    pages_crawled: number | null;
+    errors: number | null;
+    warnings: number | null;
+    notices: number | null;
+    passed: number | null;
+    domain_trust: number | null;
+    issues: AuditIssue[];
+}
+
+// Real 3Sixty report (2026-09-11): {"total_pages":99,"total_warnings":207,"total_errors":57,
+// "total_passed":103,"total_notices":558,"is_finished":true,"domain_props":{"dt":7,...},
+// "sections":[{"uid":"metatags_v2","name":"Meta Tags","props":{"description_missing":{"code":
+// "description_missing","status":"warning","name":"Description missing","value":49},...}}],
+// "score_percent":70,"audit_time":"2026-09-11 22:08:55"}. Each check carries a count in `value`;
+// only checks that found something are kept, sorted errors first, then by how many.
+export function parseAuditReport(raw: unknown): AuditReport {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error(`expected an audit report, got: ${JSON.stringify(raw).slice(0, 300)}`);
+    }
+    const r: any = raw;
+    const n = (v: unknown) => { if (v === null || v === undefined || v === "") return null; const x = Number(v); return Number.isFinite(x) ? Math.round(x) : null; };
+    const rank = { error: 0, warning: 1, notice: 2 } as const;
+    const issues: AuditIssue[] = [];
+    for (const section of Array.isArray(r.sections) ? r.sections : []) {
+        const props = section?.props && typeof section.props === "object" ? section.props : {};
+        for (const [key, check] of Object.entries<any>(props)) {
+            const count = Number(check?.value);
+            const severity = String(check?.status ?? "");
+            if (!(count > 0) || !(severity in rank)) continue;
+            issues.push({
+                code: String(check?.code ?? key),
+                name: String(check?.name ?? key),
+                section: String(section?.name ?? ""),
+                severity: severity as AuditIssue["severity"],
+                count: Math.round(count),
+            });
+        }
+    }
+    issues.sort((a, b) => rank[a.severity] - rank[b.severity] || b.count - a.count || a.name.localeCompare(b.name));
+    // "2026-09-11 22:08:55" carries no zone; SE Ranking's API times are UTC
+    const t = typeof r.audit_time === "string" && r.audit_time.trim() ? r.audit_time.trim().replace(" ", "T") + (/[zZ]|[+-]\d\d:?\d\d$/.test(r.audit_time) ? "" : "Z") : null;
+    return {
+        audit_time: t,
+        score: n(r.score_percent ?? r.weighted_score_percent),
+        pages_crawled: n(r.total_pages),
+        errors: n(r.total_errors),
+        warnings: n(r.total_warnings),
+        notices: n(r.total_notices),
+        passed: n(r.total_passed),
+        domain_trust: n(r.domain_props?.dt),
+        issues,
+    };
+}
+
+// ---------------------------------------------------------------------------
 // SEO potential: extra traffic and its ad value if every tracked keyword reached the top N
 // ---------------------------------------------------------------------------
 // GET /analytics/seo-potential?site_id=&top_n=3. Real 3Sixty response (2026-09-14):

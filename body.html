@@ -936,6 +936,30 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div id="seo-audit-panel" class="glass p-6 hidden">
+                                    <div class="flex flex-wrap justify-between items-baseline gap-2 mb-4">
+                                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Site Audit <span class="text-gray-600 font-normal normal-case">(SE Ranking, runs monthly on the 1st)</span></h3>
+                                        <span id="seo-audit-when" class="text-[10px] text-gray-500"></span>
+                                    </div>
+                                    <div id="seo-audit-empty" class="hidden text-sm text-gray-500"></div>
+                                    <div id="seo-audit-body" class="hidden space-y-5">
+                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Health score</p><div id="seo-audit-score"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Errors</p><div id="seo-audit-errors"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Warnings</p><div id="seo-audit-warnings"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Notices</p><div id="seo-audit-notices"></div></div>
+                                        </div>
+                                        <div id="seo-audit-fixed" class="hidden text-sm"></div>
+                                        <div class="overflow-x-auto">
+                                            <table class="w-full text-sm">
+                                                <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                    <th class="text-left pb-2">Issue</th><th class="text-left pb-2">Area</th><th class="text-right pb-2" title="Pages or items affected">Found</th>
+                                                </tr></thead>
+                                                <tbody id="seo-audit-tbody"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

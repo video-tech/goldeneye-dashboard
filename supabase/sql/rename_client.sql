@@ -112,6 +112,8 @@ begin
     update seo_competitors            set client_name = new_name where client_name = old_name;
     update seo_competitor_ranks       set client_name = new_name where client_name = old_name;
     update seo_serp_top10_daily       set client_name = new_name where client_name = old_name;
+    -- Added 2026-09-16 with site audits (supabase/sql/seo_site_audits.sql):
+    update seo_site_audits            set client_name = new_name where client_name = old_name;
     -- Added 2026-09-14 with service-based onboarding (supabase/sql/service_onboarding.sql):
     update client_services            set client_name = new_name where client_name = old_name;
     -- Added 2026-09-15 with built-in onboarding questions (supabase/sql/onboarding_questions.sql):

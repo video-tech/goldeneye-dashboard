@@ -18,7 +18,7 @@
 // Schema:  seranking-sync/schema.sql, then supabase/sql/rename_client.sql
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { keywordsToRetire, parseCompetitorPositions, parseCompetitors, parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, parseTop10Domains, type KeywordMetricRow } from "./parse.ts";
+import { competitorDomain, keywordsToRetire, parseAuditList, parseAuditReport, parseCompetitorPositions, parseCompetitors, pickClientAudit, parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, parseTop10Domains, type KeywordMetricRow } from "./parse.ts";
 
 const API_BASE = "https://api.seranking.com/v1/project-management";
 
@@ -49,7 +49,7 @@ async function seRankingGet(key: string, path: string): Promise<unknown> {
 // ---------------------------------------------------------------------------
 
 async function loadSeRankingClients(db: any, only?: string) {
-    const { data, error } = await db.from("clients").select("name, status, seranking_site_id");
+    const { data, error } = await db.from("clients").select("name, status, seranking_site_id, gsc_property");
     if (error) throw new Error(`clients: ${error.message}`);
     const normalize = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     return (data ?? []).filter((c: any) => {
@@ -85,7 +85,7 @@ async function saveState(db: any, clientName: string, patch: Record<string, unkn
 // ever asking SE Ranking for a range unrelated to what the account has tracked.
 const HISTORY_DAYS = 35;
 
-async function syncClient(db: any, key: string, client: { name: string; seranking_site_id: number }) {
+async function syncClient(db: any, key: string, client: { name: string; seranking_site_id: number; gsc_property?: string | null }) {
     const siteId = client.seranking_site_id;
 
     const engines = parseSearchEngines(await seRankingGet(key, `/sites/search-engines?site_id=${siteId}`));
@@ -187,7 +187,14 @@ async function syncClient(db: any, key: string, client: { name: string; serankin
         competitors = `error: ${String((err as Error)?.message ?? err).slice(0, 300)}`;
     }
 
-    return { engines: engines.length, keywords: keywords.length, rank_checks: checksWritten, keyword_metrics: metricsByKeyword.size, snapshot, competitors };
+    let audit: string = "ok";
+    try {
+        audit = await syncSiteAudit(db, key, client, siteId);
+    } catch (err) {
+        audit = `error: ${String((err as Error)?.message ?? err).slice(0, 300)}`;
+    }
+
+    return { engines: engines.length, keywords: keywords.length, rank_checks: checksWritten, keyword_metrics: metricsByKeyword.size, snapshot, competitors, audit };
 }
 
 // One row a day per client: SE Ranking's visibility and authority, for the SEO tab's trend lines.
@@ -302,6 +309,45 @@ async function syncCompetitors(
     return `ok (${competitors.length} tracked, ${rankRows} rank rows, ${topRows} top-10 rows)`;
 }
 
+// Site audit: SE Ranking crawls on each audit's own monthly schedule; this only notices a newer
+// finished run and stores it once. One free read when nothing is new, two when something is.
+async function syncSiteAudit(db: any, key: string, client: { name: string; gsc_property?: string | null }, siteId: number): Promise<string> {
+    const audits = parseAuditList(await seRankingGet(key, `/audits?limit=100`));
+    const gsc = String(client.gsc_property ?? "").replace(/^sc-domain:/i, "");
+    const latest = pickClientAudit(audits, siteId, competitorDomain(gsc));
+    if (!latest) return "ok (no finished audit for this project)";
+
+    // Already stored? A run is identified by audit id plus the day SE Ranking last updated it.
+    if (latest.last_update) {
+        const { data: have, error } = await db.from("seo_site_audits").select("audit_time")
+            .eq("client_name", client.name).eq("seranking_audit_id", latest.audit_id)
+            .gte("audit_time", `${latest.last_update}T00:00:00Z`).limit(1);
+        if (error) throw new Error(`seo_site_audits read: ${error.message}`);
+        if (have?.length) return `ok (audit from ${latest.last_update} already stored)`;
+    }
+
+    const report = parseAuditReport(await seRankingGet(key, `/audits/report?audit_id=${latest.audit_id}`));
+    const auditTime = report.audit_time ?? (latest.last_update ? `${latest.last_update}T00:00:00Z` : null);
+    if (!auditTime) throw new Error(`audit ${latest.audit_id} has no audit_time`);
+
+    const { error: upErr } = await db.from("seo_site_audits").upsert([{
+        client_name: client.name,
+        seranking_audit_id: latest.audit_id,
+        audit_time: auditTime,
+        score: report.score,
+        pages_crawled: report.pages_crawled,
+        errors: report.errors,
+        warnings: report.warnings,
+        notices: report.notices,
+        passed: report.passed,
+        domain_trust: report.domain_trust,
+        issues: report.issues,
+        synced_at: new Date().toISOString(),
+    }], { onConflict: "client_name,seranking_audit_id,audit_time" });
+    if (upErr) throw new Error(`seo_site_audits: ${upErr.message}`);
+    return `ok (stored audit: score ${report.score}, ${report.issues.length} issues)`;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
@@ -381,6 +427,7 @@ Deno.serve(async (req: Request) => {
                 const sideErrors = [
                     String(counts.snapshot).startsWith("error:") ? `snapshot ${counts.snapshot}` : null,
                     String(counts.competitors).startsWith("error:") ? `competitors ${counts.competitors}` : null,
+                    String(counts.audit).startsWith("error:") ? `audit ${counts.audit}` : null,
                 ].filter(Boolean).join(" | ") || null;
                 await saveState(db, c.name, { last_daily_run: new Date().toISOString().slice(0, 10), last_error: sideErrors });
                 results[c.name] = counts;
