@@ -1240,6 +1240,32 @@ then `rename_client.sql`, then deploy `seo-sync`. **No new cron job:** `seo-sync
 - **Connected 2026-09-16:** Midas Media (property 511204105). 3Sixty has no GA4 ID yet.
 - **Tests:** 20 parser checks, 16 PGlite checks, 28 jsdom checks.
 
+### Google Business Profile via SE Ranking Local (built 2026-09-16)
+
+The panel under Site Analytics. Setup: `supabase/sql/gbp.sql`, then `rename_client.sql`, then deploy
+`seranking-sync`. It runs inside the existing 19:00 UTC `seranking-sync` job.
+- **Why SE Ranking, not Google's API:** Google's Business Profile APIs need a manual approval (weeks),
+  and their performance API has no reviews. SE Ranking's Local Marketing API
+  (`/v1/local-marketing/locations/{id}/…`, seranking.com/api/local-marketing-api) costs **no API
+  credits**; each profile is a location in SE Ranking → Local Marketing, which uses the plan's location
+  allowance. `clients.gbp_location_id` stays for Google's API later.
+- **Switch:** `clients.seranking_local_id` (the location number). **Test Business Profile** in Edit
+  Client checks the typed id exists and its Google connection is `connected`.
+- **Pull** (`syncGbp`, parsing in `seranking-sync/gbp-parse.ts`): daily metrics (540 days the first
+  time, then a 45-day window, since Google restates), 18 months of monthly searches, search terms per
+  finished month (12 months first, then the last 2), today's review summary, and up to 1000 reviews.
+  Own sync state, `seo_sync_state.source = 'gbp'`: a failure never marks the rank sync failed. Clients
+  load gracefully before `gbp.sql` runs.
+- **Tables:** `gbp_daily`, `gbp_searches_monthly`, `gbp_keywords_monthly`, `gbp_reviews_daily`
+  (`client_row_visible`) and `gbp_reviews` (admin-only: names and review text). Read through
+  `seo_gbp_report(client, start, end, prior_start, prior_end)`.
+- **Google's gaps, shown not hidden:** small monthly search and search-term counts come back null and
+  display as —, never 0. Search terms exist only for finished months. Data runs a few days behind.
+  SE Ranking's `rating_distribution` under-counts, so totals come from `total_reviews`.
+- **Connected 2026-09-16:** Midas Media (location 42103: 6 reviews, 3.8 average, 4 unanswered). 3Sixty
+  needs Business Profile access first.
+- **Tests:** 15 parser checks (real Midas responses), 15 PGlite checks, 17 jsdom checks.
+
 ### SEO in the chat agent (built 2026-09-16)
 
 `buildChatSeoBriefing()` in app.js is what the Client Intelligence Agent knows about a client's

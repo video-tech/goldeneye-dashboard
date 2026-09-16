@@ -18,6 +18,7 @@
 // Schema:  seranking-sync/schema.sql, then supabase/sql/rename_client.sql
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { LOCAL_BASE, monthsBack, parseGbpKeywords, parseGbpMetrics, parseGbpSearches, parseReviews, parseReviewsOverview } from "./gbp-parse.ts";
 import { competitorDomain, keywordsToRetire, parseAuditList, parseAuditReport, parseCompetitorPositions, parseCompetitors, pickClientAudit, parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, parseTop10Domains, type KeywordMetricRow } from "./parse.ts";
 
 const API_BASE = "https://api.seranking.com/v1/project-management";
@@ -349,6 +350,79 @@ async function syncSiteAudit(db: any, key: string, client: { name: string; gsc_p
 }
 
 // ---------------------------------------------------------------------------
+// Google Business Profile, through SE Ranking Local Marketing (built 2026-09-16)
+// ---------------------------------------------------------------------------
+// clients.seranking_local_id (the Local Marketing location id) is the switch. Its own sync state is
+// seo_sync_state source 'gbp', so a GBP failure never marks the rank sync as failed.
+
+async function localGet(key: string, path: string): Promise<any> {
+    const res = await fetch(`${LOCAL_BASE}${path}`, { headers: authHeaders(key) });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`SE Ranking Local ${res.status} on ${path.split("?")[0]}: ${text.slice(0, 300)}`);
+    try { return JSON.parse(text); } catch { throw new Error(`SE Ranking Local returned non-JSON from ${path.split("?")[0]}: ${text.slice(0, 300)}`); }
+}
+
+async function loadGbpClients(db: any, only?: string) {
+    const { data, error } = await db.from("clients").select("name, seranking_local_id");
+    if (error) {
+        // Before supabase/sql/gbp.sql has run the column doesn't exist; rank syncing must carry on
+        if (/seranking_local_id/.test(error.message)) return [];
+        throw new Error(`clients: ${error.message}`);
+    }
+    const normalize = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return (data ?? []).filter((c: any) => c.seranking_local_id && (!only || normalize(c.name) === normalize(only)));
+}
+
+// Google keeps about 18 months of Business Profile performance data.
+const GBP_HISTORY_DAYS = 540;
+// Google restates recent days for a while; re-fetching 45 days keeps them right.
+const GBP_WINDOW_DAYS = 45;
+
+async function syncGbp(db: any, key: string, client: { name: string; seranking_local_id: number }) {
+    const loc = Number(client.seranking_local_id);
+    const today = new Date();
+    const day = (n: number) => new Date(today.getTime() - n * 86400000).toISOString().slice(0, 10);
+    const yesterday = day(1);
+
+    const { count: haveDays } = await db.from("gbp_daily").select("date", { count: "exact", head: true }).eq("client_name", client.name);
+    const metrics = parseGbpMetrics(client.name, await localGet(key, `/locations/${loc}/gbp-metrics?from=${day(haveDays ? GBP_WINDOW_DAYS : GBP_HISTORY_DAYS)}&to=${yesterday}`));
+    await upsertChunked(db, "gbp_daily", metrics, "client_name,date");
+
+    const searches = parseGbpSearches(client.name, await localGet(key, `/locations/${loc}/gbp-searches?from=${monthsBack(today, 18)[0].from}&to=${yesterday}`));
+    await upsertChunked(db, "gbp_searches_monthly", searches, "client_name,month");
+
+    const { count: haveKeywords } = await db.from("gbp_keywords_monthly").select("month", { count: "exact", head: true }).eq("client_name", client.name);
+    let keywordRows = 0;
+    for (const m of monthsBack(today, haveKeywords ? 2 : 12)) {
+        let token: string | null = null;
+        let pages = 0;
+        do {
+            const q = `from=${m.from}&to=${m.to}&page_size=1000${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
+            const { rows, next } = parseGbpKeywords(client.name, m.month, await localGet(key, `/locations/${loc}/gbp-keywords?${q}`));
+            await upsertChunked(db, "gbp_keywords_monthly", rows, "client_name,month,keyword");
+            keywordRows += rows.length;
+            token = next;
+        } while (token && ++pages < 10);
+    }
+
+    await upsertChunked(db, "gbp_reviews_daily",
+        [parseReviewsOverview(client.name, today.toISOString().slice(0, 10), await localGet(key, `/locations/${loc}/reviews/overview`))],
+        "client_name,date");
+    const reviews = parseReviews(client.name, await localGet(key, `/locations/${loc}/reviews?limit=1000&sort=created_at&sort_order=desc`));
+    await upsertChunked(db, "gbp_reviews", reviews, "client_name,review_id");
+
+    return { days: metrics.length, months: searches.length, keywords: keywordRows, reviews: reviews.length };
+}
+
+async function saveGbpState(db: any, clientName: string, patch: Record<string, unknown>) {
+    const { error } = await db.from("seo_sync_state").upsert(
+        [{ client_name: clientName, source: "gbp", last_run_at: new Date().toISOString(), ...patch }],
+        { onConflict: "client_name,source" },
+    );
+    if (error) console.error(`seo_sync_state (gbp) upsert failed for ${clientName}:`, error.message);
+}
+
+// ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 
@@ -398,6 +472,23 @@ Deno.serve(async (req: Request) => {
                 return Response.json({ error: "admin sign-in required" }, { status: 403, headers: cors });
             }
             if (!only) return Response.json({ error: "check needs a client" }, { status: 400, headers: cors });
+            // The Test Business Profile button: checks the location id typed in the box
+            if (body?.local_id !== undefined) {
+                const loc = String(body.local_id ?? "").replace(/\D/g, "");
+                if (!loc) return Response.json({ ok: false, message: "Enter the SE Ranking Local location ID first." }, { headers: cors });
+                try {
+                    const l = await localGet(key, `/locations/${loc}`);
+                    const connected = String(l?.connection_status ?? "") === "connected";
+                    return Response.json({
+                        ok: connected,
+                        message: connected
+                            ? `Connected — "${l?.title ?? "location " + loc}" is linked to its Google Business Profile.`
+                            : `Found "${l?.title ?? "location " + loc}", but its Google connection is "${l?.connection_status ?? "unknown"}". Reconnect it in SE Ranking → Local Marketing.`,
+                    }, { headers: cors });
+                } catch (err) {
+                    return Response.json({ ok: false, message: String((err as Error)?.message ?? err) }, { headers: cors });
+                }
+            }
             const [client] = await loadSeRankingClients(db, only);
             if (!client) {
                 return Response.json({ ok: false, message: `No client named "${only}" has a seranking_site_id set.` }, { headers: cors });
@@ -414,8 +505,23 @@ Deno.serve(async (req: Request) => {
         }
 
         const clients = await loadSeRankingClients(db, only);
-        if (!clients.length) {
-            return Response.json({ mode, results: {}, note: "no active clients have a seranking_site_id set" }, { headers: cors });
+        const gbpClients = await loadGbpClients(db, only);
+        if (!clients.length && !gbpClients.length) {
+            return Response.json({ mode, results: {}, note: "no clients have a seranking_site_id or seranking_local_id set" }, { headers: cors });
+        }
+
+        // Business Profile first: it's a handful of fast calls and must not be starved by a slow rank sync
+        const gbp: Record<string, unknown> = {};
+        for (const c of gbpClients) {
+            try {
+                gbp[c.name] = await syncGbp(db, key, c);
+                await saveGbpState(db, c.name, { last_daily_run: new Date().toISOString().slice(0, 10), last_error: null });
+            } catch (err) {
+                const msg = String((err as Error)?.message ?? err);
+                console.error(`seranking-sync gbp failed for ${c.name}:`, msg);
+                await saveGbpState(db, c.name, { last_error: msg.slice(0, 500) });
+                gbp[c.name] = `error: ${msg}`;
+            }
         }
 
         const results: Record<string, unknown> = {};
@@ -442,7 +548,7 @@ Deno.serve(async (req: Request) => {
             }
         }
 
-        return Response.json({ mode, results }, { headers: cors });
+        return Response.json({ mode, results, gbp }, { headers: cors });
     } catch (err) {
         console.error("seranking-sync failed:", err);
         return Response.json({ error: String((err as Error)?.message ?? err) }, { status: 500, headers: cors });

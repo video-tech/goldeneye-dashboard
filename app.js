@@ -6946,6 +6946,140 @@ async function buildChatSeoBriefing(clientName) {
      seoShowMore(tbody.closest('table'), rows.length ? [...tbody.rows] : [], 'ga4-events', 'events');
  }
 
+ // ---- Google Business Profile (via SE Ranking Local Marketing, built 2026-09-16) ----
+ let seoGbpChart = null;
+
+ function renderSeoGbp(res, clientObj, s, e) {
+     const panel = document.getElementById('seo-gbp-panel');
+     const empty = document.getElementById('seo-gbp-empty');
+     const body = document.getElementById('seo-gbp-body');
+     const when = document.getElementById('seo-gbp-when');
+     if (!panel || !empty || !body) return;
+     panel.classList.remove('hidden');
+     const showEmpty = (html) => {
+         empty.innerHTML = html; empty.classList.remove('hidden'); body.classList.add('hidden');
+         if (when) when.textContent = '';
+         if (seoGbpChart) { seoGbpChart.destroy(); seoGbpChart = null; }
+     };
+     if (!clientObj.seranking_local_id) {
+         showEmpty(`No Business Profile connected for ${escapeAttr(clientObj.name)}. Add their profile in SE Ranking → Local Marketing, connect Google, then paste the location ID under Edit.`);
+         return;
+     }
+     if (res?.error) {
+         const missing = /function|does not exist|schema cache/i.test(res.error.message || '');
+         showEmpty(missing
+             ? '<span class="text-amber-400">Business Profile needs its tables. Run supabase/sql/gbp.sql, then deploy seranking-sync.</span>'
+             : `<span class="text-red-400">Couldn't load Business Profile data: ${escapeAttr(res.error.message)}</span>`);
+         return;
+     }
+     const d = res?.data;
+     if (!d || !d.last_date) {
+         showEmpty('Connected, but nothing has synced yet. SE Ranking data arrives with the daily sync at 19:00 UTC, including about 18 months of history.');
+         return;
+     }
+     empty.classList.add('hidden');
+     body.classList.remove('hidden');
+     if (when) when.textContent = `Since ${d.first_date} · Google reports this a few days late${d.last_date < seoIso(e) ? `, data through ${d.last_date}` : ''}`;
+
+     const c = d.current || {}, p = d.prior || {};
+     const tile = (id, val, pill) => { const el = document.getElementById(id); if (el) el.innerHTML = `${val} ${pill || ''}`; };
+     tile('seo-gbp-calls', seoNum(c.calls), seoDeltaPill(Number(c.calls), Number(p.calls)));
+     tile('seo-gbp-web', seoNum(c.website_clicks), seoDeltaPill(Number(c.website_clicks), Number(p.website_clicks)));
+     tile('seo-gbp-dirs', seoNum(c.direction_requests), seoDeltaPill(Number(c.direction_requests), Number(p.direction_requests)));
+     tile('seo-gbp-msgs', seoNum(c.conversations), seoDeltaPill(Number(c.conversations), Number(p.conversations)));
+     const views = Number(c.views_search) + Number(c.views_maps), priorViews = Number(p.views_search) + Number(p.views_maps);
+     tile('seo-gbp-views', seoNum(views), seoDeltaPill(views, priorViews));
+     const rv = d.reviews;
+     const newCount = Number(d.new_reviews?.count) || 0;
+     tile('seo-gbp-reviews', rv
+         ? `${rv.average_rating != null ? Number(rv.average_rating).toFixed(1) + '<span class="text-amber-400 text-base">★</span>' : '—'} <span class="text-xs font-normal text-gray-400">${seoNum(rv.total_reviews)} total</span>`
+         : '—',
+         `<span class="block text-[10px] font-bold ${newCount ? 'text-emerald-400' : 'text-gray-500'}">${newCount ? `+${newCount} new` : 'none new'} (${seoNum(d.prior_new_reviews)} the period before)</span>`);
+
+     renderSeoGbpChart(d, s, e);
+
+     const where = document.getElementById('seo-gbp-where');
+     if (where) {
+         const bar = (label, n, total, color) => `<div>
+             <div class="flex justify-between gap-3 text-xs mb-1"><span class="text-gray-300">${label}</span><span class="tabular-nums text-gray-400"><span class="text-white font-bold">${seoNum(n)}</span> · ${seoPct(seoRatio(n, total))}</span></div>
+             <div class="h-1.5 rounded-full bg-white/5 overflow-hidden"><div class="h-full rounded-full ${color}" style="width:${((seoRatio(n, total) || 0) * 100).toFixed(1)}%"></div></div>
+         </div>`;
+         where.innerHTML = views
+             ? bar('Google Search', c.views_search, views, 'bg-blue-400') + bar('Google Maps', c.views_maps, views, 'bg-blue-400')
+               + `<p class="text-[10px] text-gray-500 pt-1">${seoPct(seoRatio(c.views_mobile, views))} on phones</p>`
+             : '<p class="text-sm text-gray-500">The profile wasn\'t shown in this range.</p>';
+     }
+
+     const fmtMonth = (m) => new Date(m + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+     const cell = (v) => (v == null ? '<span class="text-gray-600">—</span>' : seoNum(v));
+     const sBody = document.getElementById('seo-gbp-searches-tbody');
+     if (sBody) {
+         const rows = [...(d.searches || [])].reverse();
+         sBody.innerHTML = rows.length ? rows.map(r => `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300">${fmtMonth(r.month)}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${cell(r.direct)}</td>
+             <td class="py-2 text-right font-bold text-white tabular-nums">${cell(r.discovery)}</td>
+         </tr>`).join('') : '<tr><td colspan="3" class="py-4 text-center text-gray-500">No monthly search data yet.</td></tr>';
+         seoShowMore(sBody.closest('table'), rows.length ? [...sBody.rows] : [], 'gbp-searches', 'months');
+     }
+
+     const kMonths = document.getElementById('seo-gbp-kw-months');
+     const months = d.keyword_months || [];
+     if (kMonths) kMonths.textContent = months.length
+         ? `Google reports these by month: ${months.map(fmtMonth).join(', ')}. Terms under Google's minimum show —.`
+         : 'Google reports these by finished month, so a range inside the current month has none yet.';
+     const kBody = document.getElementById('seo-gbp-keywords-tbody');
+     if (kBody) {
+         const rows = d.keywords || [];
+         kBody.innerHTML = rows.length ? rows.map(r => `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[240px]" title="${escapeAttr(r.keyword)}">${escapeAttr(r.keyword)}</td>
+             <td class="py-2 text-right font-bold text-white tabular-nums">${cell(r.impressions)}</td>
+         </tr>`).join('') : '<tr><td colspan="2" class="py-4 text-center text-gray-500">No search terms for these months.</td></tr>';
+         seoShowMore(kBody.closest('table'), rows.length ? [...kBody.rows] : [], 'gbp-keywords', 'terms');
+     }
+
+     const un = document.getElementById('seo-gbp-unanswered');
+     if (un) {
+         const rows = d.unanswered || [];
+         const stars = (n) => n == null ? '' : `<span class="text-amber-400">${'★'.repeat(Math.max(0, Math.min(5, n)))}</span><span class="text-gray-600">${'★'.repeat(5 - Math.max(0, Math.min(5, n)))}</span>`;
+         un.innerHTML = rows.length ? rows.map(r => `<div class="p-3 rounded-xl border border-white/10">
+             <div class="flex flex-wrap justify-between gap-2 text-xs mb-1">
+                 <span>${stars(r.rating)} <span class="text-gray-300 ml-1">${escapeAttr(r.reviewer_name || 'Anonymous')}</span></span>
+                 <span class="text-gray-500">${escapeAttr(String(r.created_at || '').slice(0, 10))}${/^https?:\/\//i.test(r.review_url || '') ? ` · <a href="${escapeAttr(r.review_url)}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300">Reply on Google</a>` : ''}</span>
+             </div>
+             <p class="text-sm text-gray-400">${r.review_text ? escapeAttr(r.review_text) : '<span class="italic text-gray-600">Rating only, no text</span>'}</p>
+         </div>`).join('') : '<p class="text-sm text-gray-500">Every review has a reply.</p>';
+         seoShowMore(un, rows.length ? [...un.children] : [], 'gbp-unanswered', 'reviews');
+     }
+ }
+
+ function renderSeoGbpChart(d, s, e) {
+     const canvas = document.getElementById('seoGbpChart');
+     if (!canvas) return;
+     if (seoGbpChart) seoGbpChart.destroy();
+     const byDate = Object.fromEntries((d.series || []).map(r => [r.date, r]));
+     const labels = [];
+     for (let t = new Date(s); t <= e; t.setDate(t.getDate() + 1)) labels.push(seoIso(t));
+     // Days Google hasn't reported yet are left empty rather than drawn as zero
+     const val = (l, k) => (l > d.last_date ? null : Number(byDate[l]?.[k] ?? 0));
+     const isLight = document.getElementById('theme-wrapper')?.classList.contains('light-mode');
+     const surface = isLight ? '#ffffff' : '#111827';
+     const bar = (label, key, color) => ({ label, data: labels.map(l => val(l, key)), backgroundColor: color, borderColor: surface, borderWidth: { top: 2 }, borderRadius: 2, maxBarThickness: 18 });
+     seoGbpChart = new Chart(canvas.getContext('2d'), {
+         type: 'bar',
+         data: { labels, datasets: [bar('Calls', 'calls', '#60a5fa'), bar('Website clicks', 'website_clicks', '#34d399'), bar('Directions', 'direction_requests', '#fbbf24')] },
+         options: {
+             maintainAspectRatio: false,
+             interaction: { mode: 'index', intersect: false },
+             scales: {
+                 x: { stacked: true, grid: { display: false }, ticks: { color: isLight ? '#64748b' : '#9ca3af', maxTicksLimit: 8 } },
+                 y: { stacked: true, beginAtZero: true, grid: { color: isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)' }, ticks: { color: isLight ? '#64748b' : '#9ca3af', precision: 0 } }
+             },
+             plugins: { legend: { display: false } }
+         }
+     });
+ }
+
  window.renderAdminSeo = async function() {
      const notice = document.getElementById('seo-select-client-notice');
      const content = document.getElementById('seo-client-content');
@@ -6975,7 +7109,7 @@ async function buildChatSeoBriefing(clientName) {
      // for the rest of the session, breaking every later client who DOES have data.
      const noDataNotice = document.getElementById('seo-no-data-notice');
      const dataBody = document.getElementById('seo-data-body');
-     if (!clientObj.gsc_property && !clientObj.seranking_site_id && !clientObj.ga4_property_id) {
+     if (!clientObj.gsc_property && !clientObj.seranking_site_id && !clientObj.ga4_property_id && !clientObj.seranking_local_id) {
          if (noDataNotice) { noDataNotice.classList.remove('hidden'); noDataNotice.innerText = `No Search Console property, GA4 property or SE Ranking project set for ${clientName} yet — add one under Edit.`; }
          if (dataBody) dataBody.classList.add('hidden');
          return;
@@ -7060,6 +7194,11 @@ async function buildChatSeoBriefing(clientName) {
              ? await supabaseClient.rpc('seo_ga4_report', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
              : null;
          renderSeoGa4(ga4Res, clientObj, s, e);
+
+         const gbpRes = clientObj.seranking_local_id
+             ? await supabaseClient.rpc('seo_gbp_report', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
+             : null;
+         renderSeoGbp(gbpRes, clientObj, s, e);
      } catch (err) {
          console.error('renderAdminSeo failed:', err);
      }
@@ -10149,6 +10288,8 @@ window.openEditClientModal = function() {
     document.getElementById('seo-connection-result').innerHTML = '';
     document.getElementById('seranking-connection-result').innerHTML = '';
     document.getElementById('ga4-connection-result').innerHTML = '';
+    document.getElementById('edit-client-seranking-local').value = c.seranking_local_id || '';
+    document.getElementById('gbp-connection-result').innerHTML = '';
 
     document.getElementById('edit-client-retainer').value     = c.monthly_retainer || '';
     if (c.contract_type) document.getElementById('edit-client-contract').value = c.contract_type;
@@ -10165,6 +10306,40 @@ window.openEditClientModal = function() {
 // It deliberately tests the string currently IN the box, not the one already saved —
 // otherwise a correct old value would pass while the new typo sat there unsaved.
 const SEO_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/seo-sync';
+
+// Tests the SE Ranking Local location ID typed in the box: does it exist, and is its Google profile connected?
+window.testGbpConnection = async function() {
+    const out = document.getElementById('gbp-connection-result');
+    const btn = document.getElementById('btn-test-gbp-connection');
+    if (!out || !btn) return;
+    const localId = document.getElementById('edit-client-seranking-local').value.replace(/\D/g, '');
+    if (!localId) { out.innerHTML = '<span class="text-gray-500">Enter the SE Ranking Local location ID first.</span>'; return; }
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Checking...';
+    btn.disabled = true;
+    out.innerHTML = '';
+    try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+        const res = await fetch(SERANKING_FN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+            body: JSON.stringify({ mode: 'check', client: document.getElementById('edit-client-original-name').value, local_id: localId })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `the sync service returned ${res.status}`);
+        // An older seranking-sync ignores local_id and answers about the rank project instead
+        if (/Connected — project \d|seranking_site_id set/.test(data.message || '')) throw new Error('Deploy the latest seranking-sync first.');
+        out.innerHTML = data.ok
+            ? `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>${escapeAttr(data.message)}</span>`
+            : `<span class="text-amber-400 font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${escapeAttr(data.message)}</span>`;
+    } catch (err) {
+        out.innerHTML = `<span class="text-red-400">${escapeAttr(err.message)}</span>`;
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+};
 
 // Tests the GA4 property ID typed in the box (not the saved one), like Test Search Console.
 window.testGa4Connection = async function() {
@@ -10460,12 +10635,19 @@ window.saveClientEdits = async function(e) {
             // SE Ranking's project id is purely numeric — parseInt over Number so a stray
             // trailing character (a pasted URL fragment) doesn't turn the whole value NaN.
             seranking_site_id: parseInt(document.getElementById('edit-client-seranking-site').value, 10) || null,
+            // SE Ranking Local Marketing location (Business Profile data); column from supabase/sql/gbp.sql
+            seranking_local_id: parseInt(document.getElementById('edit-client-seranking-local').value.replace(/\D/g, ''), 10) || null,
             seo_start_date: document.getElementById('edit-client-seo-start').value || null,
             // Blank means no fee on record, which hides the return-per-dollar figure. 0 is a real value.
             seo_monthly_fee: (() => { const v = document.getElementById('edit-client-seo-fee').value.trim(); return v === '' || !isFinite(Number(v)) || Number(v) < 0 ? null : Number(v); })()
         };
 
         let { error } = await supabaseClient.from('clients').update(payload).eq('id', id);
+        if (error && /seranking_local_id/.test(`${error.message || ''} ${error.details || ''}`)) {
+            console.warn('clients.seranking_local_id missing: run supabase/sql/gbp.sql. Saved without it.', error);
+            delete payload.seranking_local_id;
+            ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
+        }
         // Before supabase/sql/seo_client_tab.sql has run, the two SEO columns don't exist, and
         // PostgREST rejects the whole update. Save everything else rather than block every client edit.
         if (error && /seo_start_date|seo_monthly_fee/.test(`${error.message || ''} ${error.details || ''}`)) {

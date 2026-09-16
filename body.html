@@ -1072,6 +1072,72 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Google Business Profile, via SE Ranking Local Marketing, synced by seranking-sync into
+                                     the gbp_* tables and read through seo_gbp_report (supabase/sql/gbp.sql). -->
+                                <div id="seo-gbp-panel" class="glass p-6 hidden">
+                                    <div class="flex flex-wrap justify-between items-baseline gap-2 mb-5">
+                                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Google Business Profile <span class="text-gray-600 font-normal normal-case">(Maps and the profile in Search, via SE Ranking Local)</span></h3>
+                                        <span id="seo-gbp-when" class="text-[10px] text-gray-500"></span>
+                                    </div>
+                                    <div id="seo-gbp-empty" class="hidden text-sm text-gray-500"></div>
+                                    <div id="seo-gbp-body" class="hidden space-y-8">
+                                        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Calls</p><div id="seo-gbp-calls" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Website clicks</p><div id="seo-gbp-web" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Directions</p><div id="seo-gbp-dirs" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Messages</p><div id="seo-gbp-msgs" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" title="Times the profile was shown in Google Search or Maps">Profile views</p><div id="seo-gbp-views" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Reviews</p><div id="seo-gbp-reviews" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                        </div>
+
+                                        <div>
+                                            <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Actions per day</h4>
+                                                <div class="flex gap-4 text-[10px] text-gray-400">
+                                                    <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#60a5fa"></span>Calls</span>
+                                                    <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#34d399"></span>Website clicks</span>
+                                                    <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#fbbf24"></span>Directions</span>
+                                                </div>
+                                            </div>
+                                            <div class="relative w-full h-[220px]"><canvas id="seoGbpChart" aria-label="Calls, website clicks and direction requests per day"></canvas></div>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                            <div class="space-y-5">
+                                                <div>
+                                                    <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Where the profile was seen</h4>
+                                                    <div id="seo-gbp-where" class="space-y-2.5"></div>
+                                                </div>
+                                                <div class="overflow-x-auto">
+                                                    <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">How people searched</h4>
+                                                    <p class="text-[10px] text-gray-600 mb-2">Discovery searches are people looking for the service, not the business name. That's the number SEO and Maps work grows. Google leaves small counts out (—).</p>
+                                                    <table class="w-full text-sm">
+                                                        <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                            <th class="text-left pb-2">Month</th><th class="text-right pb-2">Name or address</th><th class="text-right pb-2">Service or category</th>
+                                                        </tr></thead>
+                                                        <tbody id="seo-gbp-searches-tbody"></tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div class="overflow-x-auto">
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Search terms that showed the profile</h4>
+                                                <p id="seo-gbp-kw-months" class="text-[10px] text-gray-600 mb-2"></p>
+                                                <table class="w-full text-sm">
+                                                    <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                        <th class="text-left pb-2">Search term</th><th class="text-right pb-2">Views</th>
+                                                    </tr></thead>
+                                                    <tbody id="seo-gbp-keywords-tbody"></tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Reviews waiting for a reply</h4>
+                                            <div id="seo-gbp-unanswered" class="space-y-3"></div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2530,9 +2596,14 @@
                             <p class="text-[10px] text-gray-500 mt-1">Digits only, from GA4 Admin &rarr; Property details.</p>
                         </div>
                         <div>
-                            <label class="modal-label">Business Profile Location ID</label>
+                            <label class="modal-label">Business Profile: SE Ranking Local ID</label>
+                            <input type="text" id="edit-client-seranking-local" class="glass-input" placeholder="42103">
+                            <p class="text-[10px] text-gray-500 mt-1">Add their profile in SE Ranking &rarr; Local Marketing and connect Google, then paste the location&rsquo;s number from its URL. Brings in calls, website clicks, directions, search terms and reviews.</p>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Google Location ID <span class="normal-case font-normal text-gray-600">(not used yet)</span></label>
                             <input type="text" id="edit-client-gbp-location" class="glass-input" placeholder="1234567890">
-                            <p class="text-[10px] text-gray-500 mt-1">Digits only. Not live yet &mdash; Google has to approve our project first.</p>
+                            <p class="text-[10px] text-gray-500 mt-1">For Google&rsquo;s own API later. Business Profile data comes through SE Ranking for now.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">GHL Location ID</label>
@@ -2564,9 +2635,13 @@
                             <button type="button" id="btn-test-ga4-connection" onclick="testGa4Connection()" class="glass-pill px-4 py-2 text-xs font-bold ml-2">
                                 <i class="fa-solid fa-chart-line mr-1"></i> Test GA4
                             </button>
+                            <button type="button" id="btn-test-gbp-connection" onclick="testGbpConnection()" class="glass-pill px-4 py-2 text-xs font-bold ml-2">
+                                <i class="fa-solid fa-store mr-1"></i> Test Business Profile
+                            </button>
                             <div id="seo-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
                             <div id="seranking-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
                             <div id="ga4-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
+                            <div id="gbp-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
                         </div>
 
                         <div>

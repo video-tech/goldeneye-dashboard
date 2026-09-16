@@ -4,6 +4,14 @@
     {
       "date": "2026-09-16",
       "area": "SEO",
+      "title": "Google Business Profile on the SEO tab",
+      "what": "A Business Profile section now sits under Site Analytics: calls, website clicks, direction requests, messages and profile views against the period before, actions per day, how much of the profile's visibility came from Search vs Maps, how people searched (the business name, or the service), the search terms that showed the profile, and the reviews still waiting for a reply with a link to answer them on Google.",
+      "note": "The data comes through SE Ranking's Local Marketing tool, free to read, so there's no waiting on Google's API approval. Each client's profile has to be added as a location in SE Ranking first. Midas is connected; set its SE Ranking Local ID (42103) under Edit.",
+      "action": "Run supabase/sql/gbp.sql, then supabase/sql/rename_client.sql, then deploy seranking-sync"
+    },
+    {
+      "date": "2026-09-16",
+      "area": "SEO",
       "title": "Site Analytics from Google Analytics",
       "what": "The bottom of the SEO tab now has a Wix-style analytics section for clients with a GA4 property: site sessions, page views, average session length, pages per session, engaged visits, key events and post views, each against the period before. Below that: sessions over time, top traffic sources, visits from AI assistants like ChatGPT and the pages they landed on, top pages with time on page and exit rate, the pages visits start on, top posts, a navigation flow for any page (where people came from and where they went next), and form submissions.",
       "note": "Exit rate and the navigation flow are close estimates worked out from where each page view came from. Form submissions only show once the site's form sends a GA4 event marked as a key event. Midas is connected; add 3Sixty's GA4 property ID under Edit.",

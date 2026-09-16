@@ -121,6 +121,12 @@ begin
     update ga4_page_flows_daily       set client_name = new_name where client_name = old_name;
     update ga4_events_daily           set client_name = new_name where client_name = old_name;
     update ga4_ai_daily               set client_name = new_name where client_name = old_name;
+    -- Added 2026-09-16 with Business Profile (supabase/sql/gbp.sql):
+    update gbp_daily                  set client_name = new_name where client_name = old_name;
+    update gbp_searches_monthly       set client_name = new_name where client_name = old_name;
+    update gbp_keywords_monthly       set client_name = new_name where client_name = old_name;
+    update gbp_reviews_daily          set client_name = new_name where client_name = old_name;
+    update gbp_reviews                set client_name = new_name where client_name = old_name;
     -- Added 2026-09-14 with service-based onboarding (supabase/sql/service_onboarding.sql):
     update client_services            set client_name = new_name where client_name = old_name;
     -- Added 2026-09-15 with built-in onboarding questions (supabase/sql/onboarding_questions.sql):
