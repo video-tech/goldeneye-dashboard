@@ -21,7 +21,8 @@ select cron.schedule(
         url     := 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/client-summary',
         headers := jsonb_build_object(
             'Content-Type',  'application/json',
-            'Authorization', 'Bearer <CURRENT ANON KEY>'
+            'Authorization', 'Bearer <CURRENT ANON KEY>',
+            'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'make_onboarding_hook_secret')
         ),
         body    := '{}'::jsonb,
         -- pg_net gives up after 5s by default, far shorter than these functions run
@@ -30,6 +31,12 @@ select cron.schedule(
     $$
 );
 
+-- x-cron-secret (added 2026-09-16) is what actually lets this job run: the function refuses
+-- any caller without it or an admin sign-in. It's read from Vault when the job runs, so
+-- cron.job stores only the lookup. An existing job was migrated with
+-- supabase/sql/client_summary_cron_secret.sql. The note below about the anon key predates that:
+-- it's still what gets past the gateway, but it no longer grants anything by itself.
+--
 -- The Authorization header carries the anon key, same as morning-audit's schedule.
 -- This is not about who is *allowed* to run the summary — nothing outside this project
 -- ever calls this function on its own — it is Supabase's edge-function gateway itself,

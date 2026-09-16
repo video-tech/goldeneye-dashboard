@@ -7,7 +7,9 @@
 // to (client_work_summaries) straight through Supabase, the same way it already reads
 // daily_reports, with RLS deciding what each signed-in client can see. So unlike
 // morning-audit this needs no CORS handling: it is invoked only by cron, or by hand
-// with curl for testing.
+// with curl for testing. The caller check at the top of the handler is what stops anyone
+// else (the gateway accepts the public anon key): cron sends x-cron-secret, an admin JWT
+// may force. See supabase/sql/client_summary_cron_secret.sql.
 //
 // Deploy:  supabase functions deploy client-summary
 // Secrets: OPENAI_API_KEY — same project-wide secret morning-audit already uses.
@@ -16,6 +18,7 @@
 
 import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { adminCheck, cronCheck } from "../_shared/admin-auth.ts";
 
 const RECENT_DAYS = 7;
 
@@ -103,6 +106,27 @@ Deno.serve(async (req: Request) => {
             Deno.env.get("SUPABASE_URL")!,
             Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
         );
+
+        // Who's asking, decided before any task is read or any model call is made. Until
+        // 2026-09-16 this checked nothing: the public anon key could send force:true and make it
+        // rewrite every client's portal summary on our OpenAI account. Same rule as morning-audit:
+        //   - pg_cron sends x-cron-secret (Vault make_onboarding_hook_secret = MAKE_WEBHOOK_SECRET),
+        //     which unlocks only the normal idempotent daily run.
+        //   - A signed-in admin can also force a regeneration.
+        //   - Anyone else is refused, with the reason in the log.
+        if (cronCheck(req, Deno.env.get("MAKE_WEBHOOK_SECRET"))) {
+            if (force) {
+                console.warn("client-summary REFUSED: cron secret used for force");
+                return Response.json({ error: "The schedule can only run the daily summaries." }, { status: 403 });
+            }
+        } else {
+            const who = await adminCheck(db, req);
+            if (!who.ok) {
+                console.warn("client-summary REFUSED:", who.reason);
+                return Response.json({ error: who.reason }, { status: 403 });
+            }
+        }
+
         const openai = new OpenAI({ apiKey: Deno.env.get("OPENAI_API_KEY")! });
 
         const todayNum = Math.floor(Date.now() / 86400000);
