@@ -5823,16 +5823,48 @@ async function buildReportSeoBlock(clientName, s, e) {
      renderSeoMarketLeaders(marketRes);
  }
 
+ // Directories (Yelp, Houzz, Trex, booking widgets…) are flagged by seo_market_leaders and hidden
+ // by default: they own page 1 but aren't who a contractor loses the job to. One click shows them.
+ let seoMarketShowDirectories = false;
+ let seoMarketLastRes = null;
+ window.toggleSeoMarketDirectories = function() {
+     seoMarketShowDirectories = !seoMarketShowDirectories;
+     renderSeoMarketLeaders(seoMarketLastRes);
+ };
+
  function renderSeoMarketLeaders(marketRes) {
      const host = document.getElementById('seo-market-leaders');
      if (!host) return;
+     seoMarketLastRes = marketRes;
+     const toggleId = 'seo-market-dir-toggle';
+     document.getElementById(toggleId)?.remove();
      if (marketRes?.error) {
          host.innerHTML = '<p class="text-sm text-gray-500">Run supabase/sql/seo_competitors.sql to collect this.</p>';
+         seoShowMore(host, [], 'market', 'sites');
          return;
      }
-     const rows = marketRes?.data || [];
-     if (!rows.length) {
+     const all = marketRes?.data || [];
+     if (!all.length) {
          host.innerHTML = '<p class="text-sm text-gray-500">No top-10 snapshot in this range yet. The next sync stores one, and SE Ranking only keeps about 14 days of its own, so this list starts from today.</p>';
+         seoShowMore(host, [], 'market', 'sites');
+         return;
+     }
+     const dirCount = all.filter(r => r.is_directory).length;
+     const rows = seoMarketShowDirectories ? all : all.filter(r => !r.is_directory);
+     if (dirCount) {
+         const btn = document.createElement('button');
+         btn.id = toggleId;
+         btn.type = 'button';
+         btn.className = 'mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-500 hover:text-gray-300 transition';
+         btn.textContent = seoMarketShowDirectories
+             ? `Hide ${dirCount} ${dirCount === 1 ? 'directory' : 'directories'}`
+             : `Show ${dirCount} ${dirCount === 1 ? 'directory' : 'directories'} (Yelp, Houzz, manufacturers…)`;
+         btn.onclick = window.toggleSeoMarketDirectories;
+         host.before(btn);
+     }
+     if (!rows.length) {
+         host.innerHTML = '<p class="text-sm text-gray-500">Only directories are in the top 10 right now — no local business to pick yet.</p>';
+         seoShowMore(host, [], 'market', 'sites');
          return;
      }
      host.innerHTML = rows.map(r => {
@@ -5841,7 +5873,9 @@ async function buildReportSeoBlock(clientName, s, e) {
              ? '<span class="text-[9px] uppercase tracking-widest text-yellow-400 border border-yellow-400/30 rounded px-1">this client</span>'
              : r.tracked
                  ? '<span class="text-[9px] uppercase tracking-widest text-purple-400 border border-purple-400/30 rounded px-1">tracked</span>'
-                 : '';
+                 : r.is_directory
+                     ? '<span class="text-[9px] uppercase tracking-widest text-gray-500 border border-white/10 rounded px-1">directory</span>'
+                     : '';
          return `<div class="flex items-center justify-between gap-3 py-1.5 border-b border-white/5 last:border-0">
              <div class="flex items-center gap-2 min-w-0">
                  <span class="text-sm ${r.is_client ? 'text-yellow-400 font-bold' : 'text-gray-300'} truncate" title="${escapeAttr(r.domain)}">${escapeAttr(r.domain)}</span>

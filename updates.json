@@ -2,6 +2,13 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-09-16",
+      "area": "SEO",
+      "title": "Competitor numbers fixed, directories hidden",
+      "what": "Fixed: a competitor who isn't in Google's top 100 was being counted as ranking #100, so every comparison said we were ahead. Midas showed \"ahead on 14, behind on 0\" against all five competitors when four of them don't rank for those searches at all. They now count as not ranking. \"Who owns this market\" also hides directories and manufacturers (Yelp, Houzz, Trex, booking widgets) by default, with a button to show them, so the list shows the local businesses worth tracking.",
+      "action": "Re-run supabase/sql/seo_competitors.sql (it also clears the bad rows), then deploy seranking-sync"
+    },
+    {
       "date": "2026-09-15",
       "area": "SEO",
       "title": "Competitors",

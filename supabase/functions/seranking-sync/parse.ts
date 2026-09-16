@@ -295,8 +295,13 @@ export function parseCompetitorPositions(raw: unknown, keywordById: Map<number, 
                 const date = String(p?.date ?? "").slice(0, 10);
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
                 const pos = Number(p?.pos);
-                // 0 is SE Ranking's "not ranking", the same sentinel as our own positions
-                out.push({ keyword, site_engine_id: siteEngineId, date, rank: Number.isFinite(pos) && pos > 0 ? pos : null });
+                // NOT the same sentinel as our own positions. Real Midas data (2026-09-16): a
+                // competitor outside the top 100 comes back as pos 100 with url null, every day, on
+                // 18 of 19 keywords — our own positions call uses 0 for that instead. Storing 100 as
+                // a rank made every one of them read as "we're ahead", beating a rank nobody holds.
+                // So anything outside 1-99 is not ranking. A genuine #100 is lost, which is the
+                // honest side to err on.
+                out.push({ keyword, site_engine_id: siteEngineId, date, rank: Number.isFinite(pos) && pos > 0 && pos < 100 ? pos : null });
             }
         }
     }

@@ -187,6 +187,13 @@ grant execute on function seo_competitor_overview(text, date, date) to authentic
 -- with how many of those cities it shows up in — the number that actually picks a competitor,
 -- because one city at 90% is usually one lucky keyword. `tracked` marks the ones already
 -- added as competitors, and `is_client` marks the client themselves.
+--
+-- `is_directory` marks sites no local business competes with for the job: directories, review
+-- sites, manufacturers, big-box stores, social networks and booking-widget hosts. On 3Sixty's
+-- first snapshot (2026-09-15) the top four were book.xapp.ai, Houzz, Yelp and Trex — all noise
+-- when choosing a competitor. They sort after real businesses and the tab hides them by default,
+-- but they stay in the data, because a directory owning page 1 is still worth knowing. Add to the
+-- list below; a domain matches itself and any of its subdomains.
 drop function if exists seo_market_leaders(text, date, date, integer);
 create or replace function seo_market_leaders(p_client text, p_start date, p_end date, p_limit integer default 25)
 returns table (
@@ -196,6 +203,7 @@ returns table (
     best_visibility numeric,
     tracked boolean,
     is_client boolean,
+    is_directory boolean,
     snapshot_date date
 )
 language sql stable security invoker set search_path = public as $$
@@ -204,27 +212,54 @@ language sql stable security invoker set search_path = public as $$
         where client_name = p_client and date between p_start and p_end
     ),
     rows as (
-        select s.domain, s.site_engine_id, s.visibility, s.date
+        select s.domain, regexp_replace(s.domain, '^www\.', '') as host, s.site_engine_id, s.visibility, s.date
         from seo_serp_top10_daily s, latest
         where s.client_name = p_client and s.date = latest.d
     ),
     own as (
-        select lower(regexp_replace(regexp_replace(coalesce(c.gsc_property, ''), '^sc-domain:|^https?://', ''), '^www\.|/.*$', '')) as domain
+        -- One step at a time: an anchored ^www\. can't match once "https://" is removed in the same pass
+        select lower(regexp_replace(regexp_replace(regexp_replace(coalesce(c.gsc_property, ''),
+                   '^sc-domain:|^https?://', ''), '^www\.', ''), '/.*$', '')) as domain
         from clients c where c.name = p_client
+    ),
+    directories(d) as (values
+        ('yelp.com'), ('houzz.com'), ('angi.com'), ('angieslist.com'), ('homeadvisor.com'),
+        ('thumbtack.com'), ('bbb.org'), ('yellowpages.com'), ('expertise.com'), ('porch.com'),
+        ('networx.com'), ('buildzoom.com'), ('nextdoor.com'), ('mapquest.com'), ('provenexpert.com'),
+        ('birdeye.com'), ('about.me'), ('facebook.com'), ('instagram.com'), ('pinterest.com'),
+        ('youtube.com'), ('reddit.com'), ('linkedin.com'), ('tiktok.com'), ('google.com'),
+        ('homedepot.com'), ('lowes.com'), ('trex.com'), ('timbertech.com'), ('azek.com'),
+        ('fiberondecking.com'), ('decks.com'), ('decksdirect.com'), ('bobvila.com'),
+        ('thisoldhouse.com'), ('forbes.com'), ('wikipedia.org'), ('xapp.ai')
+    ),
+    grouped as (
+        select r.domain,
+               r.host,
+               count(distinct r.site_engine_id)::int as cities,
+               round(avg(r.visibility), 2) as avg_visibility,
+               round(max(r.visibility), 2) as best_visibility,
+               max(r.date) as snapshot_date
+        from rows r
+        group by r.domain, r.host
     )
-    select r.domain,
-           count(distinct r.site_engine_id)::int,
-           round(avg(r.visibility), 2),
-           round(max(r.visibility), 2),
-           exists (select 1 from seo_competitors c where c.client_name = p_client and c.active
-                     and c.domain = regexp_replace(r.domain, '^www\.', '')),
-           regexp_replace(r.domain, '^www\.', '') = (select domain from own),
-           max(r.date)
-    from rows r
-    group by r.domain
-    order by count(distinct r.site_engine_id) desc, avg(r.visibility) desc
+    select g.domain,
+           g.cities,
+           g.avg_visibility,
+           g.best_visibility,
+           exists (select 1 from seo_competitors c where c.client_name = p_client and c.active and c.domain = g.host),
+           g.host = (select domain from own),
+           exists (select 1 from directories x where g.host = x.d or g.host like '%.' || x.d),
+           g.snapshot_date
+    from grouped g
+    order by exists (select 1 from directories x where g.host = x.d or g.host like '%.' || x.d),
+             g.cities desc, g.avg_visibility desc
     limit greatest(p_limit, 1);
 $$;
 grant execute on function seo_market_leaders(text, date, date, integer) to authenticated;
+
+-- One-time repair, safe to re-run. The first seranking-sync build stored SE Ranking's competitor
+-- "outside the top 100" value (pos 100) as rank 100. The parser now stores null; this clears the
+-- rows written before that fix instead of waiting for the next sync to overwrite them.
+update seo_competitor_ranks set rank = null where rank >= 100;
 
 notify pgrst, 'reload schema';

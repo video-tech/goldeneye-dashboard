@@ -1361,6 +1361,16 @@ real client data; see the Known gaps entry on that.
     `gsc_property`). One city at 90% is usually one lucky keyword.
   - **History never backfills**: competitor positions start at the next daily check after they're
     added, so add them early. `/competitors/positions` returns empty until then.
+  - **"Not in the top 100" is `pos: 100` for competitors, not 0** — the opposite of our own positions
+    call. Found on real Midas data 2026-09-16: 18 of 19 keywords came back `pos 100, url null` every
+    day. The first build stored that as rank 100, so every comparison read "we're ahead" (Midas:
+    ahead on 14, behind on 0, against competitors who don't rank at all). `parseCompetitorPositions`
+    now keeps only 1–99; `seo_competitors.sql` ends with a re-runnable repair. A real rank can arrive
+    with `url: null`, so the URL is not the signal.
+  - **Directories are flagged, not deleted.** `seo_market_leaders` returns `is_directory` from a list
+    in the function (Yelp, Houzz, Angi, Thumbtack, BBB, Trex, Home Depot, social networks, the
+    `xapp.ai` booking widget…), matching subdomains too. They sort last and the tab hides them behind
+    a "Show N directories" button. 3Sixty's first snapshot had four of them in the top four.
   - **Cost per client per day:** 1 + (competitors) + (cities) extra calls — 11 for 3Sixty.
     A competitor failure is isolated like the snapshot's, reported in `last_error`, never failing
     the rank sync.
@@ -1369,7 +1379,7 @@ real client data; see the Known gaps entry on that.
     quarterly, and cross-check the map pack and the client's own list.
   - **3Sixty, 2026-09-15:** Backyard Builders Utah, Blackrock Decks, TC Decks Utah, Eremos Decks,
     Quality Decking of Utah. Domain trust 16 / 38 / 19 / 4 / 13 against 3Sixty's 7.
-  - **Tests:** 25 PGlite checks, 18 parser checks, 23 jsdom checks.
+  - **Tests:** 30 PGlite checks, 20 parser checks, 30 jsdom checks.
 - **Keywords removed in SE Ranking are retired, not deleted** (`keywordsToRetire()` in `parse.ts`):
   the sync marks them `active = false` and keeps their stored history. It never retires anything when
   SE Ranking returns an empty keyword list, so a bad response can't wipe a client's list.
