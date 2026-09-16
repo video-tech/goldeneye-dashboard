@@ -7295,6 +7295,82 @@ async function buildChatSeoBriefing(clientName) {
      catch (err) { console.error('print failed:', err); }
  };
 
+ // ---- Content Ideas (built 2026-09-16) ----
+ // Question and long-tail keywords from SE Ranking's Data API (seo_content_ideas, filled monthly
+ // by seranking-sync's content_ideas mode). The only thing on this tab that spends Data API
+ // units — see the cost comment in seranking-sync/index.ts before changing how much is fetched.
+ let seoIdeasRows = [];
+ let seoIdeasClient = null;
+
+ function renderSeoIdeasList() {
+     const tbody = document.getElementById('seo-ideas-tbody');
+     if (!tbody) return;
+     const showDismissed = document.getElementById('seo-ideas-show-dismissed')?.checked;
+     const rows = seoIdeasRows.filter(r => showDismissed || !r.dismissed);
+     tbody.innerHTML = rows.length ? rows.map(r => `<tr class="hover:bg-white/5 transition ${r.dismissed ? 'opacity-40' : ''}">
+         <td class="py-2 pr-2 text-gray-300 truncate max-w-[320px]" title="${escapeAttr(r.keyword)}">${escapeAttr(r.keyword)}</td>
+         <td class="py-2 pr-2 text-gray-500 text-xs truncate max-w-[160px]" title="${escapeAttr(r.seed_keyword)}">${escapeAttr(seoIdeasKindLabel(r.kind))} · ${escapeAttr(r.seed_keyword)}</td>
+         <td class="py-2 text-right text-gray-300 tabular-nums">${r.volume != null ? seoNum(r.volume) : '—'}</td>
+         <td class="py-2 text-right text-gray-400 tabular-nums">${r.difficulty != null ? r.difficulty : '—'}</td>
+         <td class="py-2 pl-2 text-right">${r.dismissed
+             ? `<button type="button" onclick="undismissSeoIdea(${r.id})" class="text-[10px] font-bold text-blue-400 hover:text-blue-300">Restore</button>`
+             : `<button type="button" onclick="dismissSeoIdea(${r.id})" class="text-[10px] font-bold text-gray-500 hover:text-red-400">Dismiss</button>`}</td>
+     </tr>`).join('') : `<tr><td colspan="5" class="py-4 text-center text-gray-500">${showDismissed ? 'Nothing dismissed yet.' : 'No ideas left — try "Show dismissed", or wait for next month\'s refresh.'}</td></tr>`;
+     seoShowMore(tbody.closest('table'), rows.length ? [...tbody.rows] : [], 'ideas', 'ideas');
+ }
+ function seoIdeasKindLabel(kind) { return kind === 'question' ? 'Question' : 'Related search'; }
+
+ async function renderSeoContentIdeas(clientObj) {
+     const panel = document.getElementById('seo-ideas-panel');
+     const empty = document.getElementById('seo-ideas-empty');
+     const body = document.getElementById('seo-ideas-body');
+     const when = document.getElementById('seo-ideas-when');
+     if (!panel || !empty || !body) return;
+     panel.classList.remove('hidden');
+     const showEmpty = (html) => { empty.innerHTML = html; empty.classList.remove('hidden'); body.classList.add('hidden'); if (when) when.textContent = ''; };
+     if (!clientObj.seranking_site_id) {
+         showEmpty(`No SE Ranking project set for ${escapeAttr(clientObj.name)}, so there are no tracked searches to build ideas from.`);
+         return;
+     }
+     seoIdeasClient = clientObj.name;
+     const { data, error } = await supabaseClient.from('seo_content_ideas').select('*')
+         .eq('client_name', clientObj.name).order('volume', { ascending: false, nullsFirst: false });
+     if (error) {
+         const missing = /relation .* does not exist|schema cache/i.test(error.message || '');
+         showEmpty(missing
+             ? '<span class="text-amber-400">Content Ideas needs its table. Run supabase/sql/seo_content_ideas.sql, then deploy seranking-sync.</span>'
+             : `<span class="text-red-400">Couldn't load content ideas: ${escapeAttr(error.message)}</span>`);
+         return;
+     }
+     seoIdeasRows = data || [];
+     if (!seoIdeasRows.length) {
+         showEmpty('Nothing pulled yet — the monthly job runs on the 1st, once this client has tracked keywords with real search volume to seed from.');
+         return;
+     }
+     empty.classList.add('hidden');
+     body.classList.remove('hidden');
+     if (when) {
+         const newest = seoIdeasRows.reduce((max, r) => (r.last_seen > max ? r.last_seen : max), seoIdeasRows[0].last_seen);
+         when.textContent = `Refreshed ${seoCaseStudyFmtDate ? seoCaseStudyFmtDate(newest) : newest}`;
+     }
+     renderSeoIdeasList();
+ }
+
+ window.dismissSeoIdea = async function(id) { await seoSetIdeaDismissed(id, true); };
+ window.undismissSeoIdea = async function(id) { await seoSetIdeaDismissed(id, false); };
+ async function seoSetIdeaDismissed(id, dismissed) {
+     const row = seoIdeasRows.find(r => r.id === id);
+     if (!row) return;
+     const { data: { user } } = await supabaseClient.auth.getUser();
+     const patch = dismissed
+         ? { dismissed: true, dismissed_at: new Date().toISOString(), dismissed_by: user?.email || null }
+         : { dismissed: false, dismissed_at: null, dismissed_by: null };
+     const { error } = await supabaseClient.from('seo_content_ideas').update(patch).eq('id', id);
+     if (error) { alert("Couldn't update: " + error.message); return; }
+     Object.assign(row, patch);
+     renderSeoIdeasList();
+ }
+
  // ---- Google Business Profile (via SE Ranking Local Marketing, built 2026-09-16) ----
  let seoGbpChart = null;
 
@@ -7536,6 +7612,7 @@ async function buildChatSeoBriefing(clientName) {
              ? await supabaseClient.rpc('seo_map_pack_report', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
              : null;
          renderSeoMapPack(mapPackRes, clientObj);
+         await renderSeoContentIdeas(clientObj);
 
          // The latest site audit and the one before it, for "what changed". Not tied to the date
          // range: an audit is a monthly snapshot, and the newest one is always the one to act on.

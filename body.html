@@ -968,6 +968,30 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Content ideas: question and long-tail keywords from SE Ranking's Data API
+                                     (seo_content_ideas, filled monthly by seranking-sync's content_ideas mode —
+                                     the one thing on this tab that spends Data API units, not the free Project API). -->
+                                <div id="seo-ideas-panel" class="glass p-6 hidden">
+                                    <div class="flex flex-wrap justify-between items-baseline gap-2 mb-1">
+                                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Content Ideas <span class="text-gray-600 font-normal normal-case">(from the client's top tracked searches, refreshed monthly)</span></h3>
+                                        <div class="flex items-center gap-3">
+                                            <label class="flex items-center gap-1.5 text-[10px] text-gray-500"><input type="checkbox" id="seo-ideas-show-dismissed" onchange="renderSeoIdeasList()"> Show dismissed</label>
+                                            <span id="seo-ideas-when" class="text-[10px] text-gray-500"></span>
+                                        </div>
+                                    </div>
+                                    <p class="text-[11px] text-gray-600 mb-4">Real questions people ask and phrases they search around this client's own top searches — a starting list for the next article or page, not a guarantee any one is worth writing.</p>
+                                    <div id="seo-ideas-empty" class="hidden text-sm text-gray-500"></div>
+                                    <div id="seo-ideas-body" class="hidden overflow-x-auto">
+                                        <table class="w-full text-sm">
+                                            <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                <th class="text-left pb-2">Idea</th><th class="text-left pb-2">From</th><th class="text-right pb-2">Volume</th><th class="text-right pb-2" title="0-100, higher is harder to rank for">Difficulty</th><th class="pb-2"></th>
+                                            </tr></thead>
+                                            <tbody id="seo-ideas-tbody"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
                                 <div id="seo-audit-panel" class="glass p-6 hidden">
                                     <div class="flex flex-wrap justify-between items-baseline gap-2 mb-4">
                                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Site Audit <span class="text-gray-600 font-normal normal-case">(SE Ranking, runs monthly on the 1st)</span></h3>

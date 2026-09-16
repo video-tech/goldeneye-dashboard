@@ -41,6 +41,35 @@ select cron.schedule(
 -- environment; SERANKING_API_KEY is a separate secret, read inside the function.
 
 -- ---------------------------------------------------------------------------
+-- Content ideas — a second, MONTHLY job. Added 2026-09-16 with supabase/sql/seo_content_ideas.sql.
+-- ---------------------------------------------------------------------------
+-- Unlike the daily rank sync above, this spends real SE Ranking Data API units (see the cost
+-- comment on syncContentIdeasForClient in index.ts) — approved sizing is 5 seed keywords per
+-- client, at most 875 units per client per run. The function itself also refuses to run twice in
+-- the same calendar month per client even if this job fires more often, and checks the account's
+-- remaining units before spending anything.
+select cron.schedule(
+    'seranking-content-ideas-monthly',
+    -- 1st of the month, 10:00 UTC — after that day's seo-sync (18:00) and seranking-sync-daily
+    -- (19:00) runs from the day before have already landed, so seo_keywords.search_volume (which
+    -- seed selection reads) is current when this picks its seeds.
+    '0 10 1 * *',
+    $job$
+    select net.http_post(
+        url     := 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/seranking-sync',
+        headers := jsonb_build_object(
+            'Content-Type',  'application/json',
+            'Authorization', 'Bearer <CURRENT ANON KEY>'
+        ),
+        body    := '{"mode":"content_ideas"}'::jsonb,
+        timeout_milliseconds := 150000
+    );
+    $job$
+);
+-- select client_name, last_daily_run, last_error from seo_sync_state where source = 'content_ideas';
+-- select cron.unschedule('seranking-content-ideas-monthly');
+
+-- ---------------------------------------------------------------------------
 -- Checking on it
 -- ---------------------------------------------------------------------------
 

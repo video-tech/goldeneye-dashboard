@@ -4,6 +4,14 @@
     {
       "date": "2026-09-16",
       "area": "SEO",
+      "title": "Content ideas",
+      "what": "A new Content Ideas panel on the SEO tab lists real questions people search and phrases they use around a client's own top tracked searches — a starting list for the next article, refreshed once a month. Each idea shows where it came from, its search volume and how hard it'd be to rank for, when SE Ranking provides those numbers. Dismiss the ones that aren't worth writing; dismissed ideas stay out of the way (with a \"Show dismissed\" toggle) and are never brought back by the next refresh.",
+      "note": "This is the first SEO feature that spends SE Ranking's paid Data API units rather than the free rank-tracking API — sized at roughly 150-875 units per client per month against the 25,000/month budget, and it checks remaining units before running so it can never starve other SE Ranking features.",
+      "action": "Run supabase/sql/seo_content_ideas.sql, then supabase/sql/rename_client.sql, then deploy seranking-sync"
+    },
+    {
+      "date": "2026-09-16",
+      "area": "SEO",
       "title": "Printable SEO case studies",
       "what": "A new Case Study button at the top of the SEO tab builds a one-page before-and-after: visits, leads, rankings, site sessions and revenue from before SEO started, now, and (once there's a full year of history) a year ago — with the work completed along the way. Print it or save it as a PDF straight from the preview.",
       "note": "Anything that predates what measures it — leads before tracking began, rankings before a keyword was added, GA4 before it was connected — shows as not measured, never a false zero. A new Capture Baseline button saves exactly what's on screen as a permanent snapshot, so the number you tell a client at signing can't drift if Search Console later revises that period.",

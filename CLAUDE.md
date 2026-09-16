@@ -1240,6 +1240,43 @@ then `rename_client.sql`, then deploy `seo-sync`. **No new cron job:** `seo-sync
 - **Connected 2026-09-16:** Midas Media (property 511204105). 3Sixty has no GA4 ID yet.
 - **Tests:** 20 parser checks, 16 PGlite checks, 28 jsdom checks.
 
+### Content ideas (built 2026-09-16)
+
+The **first thing in Golden Eye that spends SE Ranking Data API units** — every other SE Ranking
+pull (rank checks, competitors, audits, Business Profile via Local Marketing) uses the Project or
+Local Marketing APIs, which don't draw from the account's 25,000-unit/month budget. A new panel on
+the admin SEO tab, filled monthly.
+- **Cost, confirmed with the user before building** (seranking.com/api/data/keyword-research):
+  questions cost 10 units per RETURNED keyword, long-tail 1 unit per RETURNED keyword — cost
+  follows real rows returned, not the `limit` asked for. Approved sizing: **5 seed keywords per
+  client**, long-tail capped at 25 results, questions at 15 — at most 875 units per client per
+  monthly run.
+- **Seeds are the client's own top tracked keywords by search volume**, never a guess — with
+  anything containing a token of the client's own name filtered out first (`pickSeedKeywords` in
+  `seranking-sync/content-ideas-parse.ts`), since a brand search makes a poor content seed. **Midas
+  is a live example of why this matters**: its currently tracked keywords are brand searches (see
+  Competitors above — parked pending the HVAC keyword swap), so its content ideas will look
+  brand-skewed too until that swap happens.
+- **Run `supabase/sql/seo_content_ideas.sql`** (also widens `seo_sync_state.source`'s check
+  constraint to allow `'content_ideas'` — it has its own source, never `'seranking'`, or a
+  content-ideas run would collide with the daily rank sync's own "already ran today" tracking),
+  then `rename_client.sql`, then deploy `seranking-sync`. Schedule is in
+  `seranking-sync/schedule.sql`'s second job, monthly on the 1st.
+- **Checks `units_left` before spending anything** (`/v1/account/subscription`), and skips the
+  whole run if the account is low this cycle (below 3,000) rather than spend into a shortage that
+  would starve the audit or snapshot calls sharing the same budget. A metering read that fails
+  (can't parse the response) **fails open** — a null never blocks every client's run.
+- **`seo_content_ideas`**, admin-only (this is a planning tool, not something a client needs to
+  see): keyword, kind (question/longtail), which seed it came from, volume/cpc/difficulty when the
+  question endpoint provided them (long-tail returns bare strings — no metrics at all), and
+  `dismissed`/`dismissed_by`/`dismissed_at` for the admin's own triage. `first_seen` and
+  `dismissed` are deliberately left out of the sync's upsert payload, so a repeat monthly sighting
+  can never reset either — a dismissed idea stays dismissed until an admin restores it.
+  - A question and a long-tail call can return the same phrase for the same client; the richer
+    question row (with real metrics) always wins the merge, regardless of which call ran second.
+- **Tests:** 17 checks on the parser (real SE Ranking response shapes, seed selection, the merge
+  rule, the units-left reader), 18 jsdom checks on the panel and the dismiss/restore flow.
+
 ### Case studies (built 2026-09-16)
 
 A printable "before SEO / now / a year ago" one-pager, from the new **Case Study** button at the

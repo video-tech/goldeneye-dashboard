@@ -19,6 +19,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { LOCAL_BASE, monthsBack, parseGbpKeywords, parseGbpMetrics, parseGbpSearches, parseReviews, parseReviewsOverview } from "./gbp-parse.ts";
+import { mergeIdeaRows, parseLongtailKeywords, parseQuestionKeywords, pickSeedKeywords, unitsLeft } from "./content-ideas-parse.ts";
 import { competitorDomain, keywordsToRetire, parseAuditList, parseAuditReport, parseCompetitorPositions, parseCompetitors, pickClientAudit, parseKeywordMetrics, parseKeywords, parsePositions, parsePotential, parseSearchEngines, parseSummary, parseTop10Domains, type KeywordMetricRow } from "./parse.ts";
 
 const API_BASE = "https://api.seranking.com/v1/project-management";
@@ -423,6 +424,80 @@ async function saveGbpState(db: any, clientName: string, patch: Record<string, u
 }
 
 // ---------------------------------------------------------------------------
+// Content ideas (built 2026-09-16) — the first thing here that spends Data API units
+// ---------------------------------------------------------------------------
+// Every other SE Ranking pull in this codebase uses the Project API (rank checks, competitors,
+// audits), which the account's 25,000/month unit budget doesn't meter. The Data API's keyword
+// discovery endpoints do: questions cost 10 credits per RETURNED keyword, longtail 1 credit per
+// RETURNED keyword (seranking.com/api/data/keyword-research) — cost follows real rows returned,
+// not the limit asked for, so a niche seed with few real questions costs less than the cap below
+// suggests. Approved sizing (2026-09-16): 5 seeds/client, longtail capped at 25, questions at 15 —
+// at most 5 * (25 + 15*10) = 875 units per client per run, run at most once a month per client.
+const DATA_BASE = "https://api.seranking.com";
+const IDEA_SEEDS_PER_CLIENT = 5;
+const IDEA_LONGTAIL_LIMIT = 25;
+const IDEA_QUESTIONS_LIMIT = 15;
+// A floor, not a hope: if the account is already low this billing cycle (site audits, snapshots
+// and the rest of this file all draw from the same pool), skip content ideas entirely this run
+// rather than spend into a shortage that would starve something else. null (subscription
+// endpoint's shape couldn't be read) fails OPEN — a metering hiccup shouldn't silently cancel
+// every client's run every month.
+const IDEA_UNITS_FLOOR = 3000;
+
+async function dataApiGet(key: string, path: string): Promise<any> {
+    const res = await fetch(`${DATA_BASE}${path}`, { headers: authHeaders(key) });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`SE Ranking Data API ${res.status} on ${path.split("?")[0]}: ${text.slice(0, 300)}`);
+    try { return JSON.parse(text); } catch { throw new Error(`SE Ranking Data API returned non-JSON from ${path.split("?")[0]}: ${text.slice(0, 300)}`); }
+}
+
+// Its own source ('content_ideas', added to seo_sync_state's check constraint by
+// seo_content_ideas.sql) — never "seranking", which the rank sync above already owns. Sharing it
+// would make a content-ideas run falsely mark the rank sync as "already ran today", or the reverse.
+async function saveIdeasState(db: any, clientName: string, patch: Record<string, unknown>) {
+    const { error } = await db.from("seo_sync_state").upsert(
+        [{ client_name: clientName, source: "content_ideas", last_run_at: new Date().toISOString(), ...patch }],
+        { onConflict: "client_name,source" },
+    );
+    if (error) console.error(`seo_sync_state (content_ideas) upsert failed for ${clientName}:`, error.message);
+}
+
+async function loadContentIdeaClients(db: any, only?: string) {
+    const { data, error } = await db.from("clients").select("name, seranking_site_id");
+    if (error) throw new Error(`clients: ${error.message}`);
+    const normalize = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return (data ?? []).filter((c: any) => c.seranking_site_id && (!only || normalize(c.name) === normalize(only)));
+}
+
+async function syncContentIdeasForClient(db: any, key: string, client: { name: string }) {
+    const { data: activeKeywords, error } = await db.from("seo_keywords")
+        .select("keyword, search_volume").eq("client_name", client.name).eq("active", true);
+    if (error) throw new Error(`seo_keywords: ${error.message}`);
+    if (!activeKeywords?.length) return "no tracked keywords yet";
+
+    const seeds = pickSeedKeywords(client.name, activeKeywords, IDEA_SEEDS_PER_CLIENT);
+    if (!seeds.length) return "every tracked keyword looks like a brand search — nothing usable as a seed";
+
+    const rows: any[] = [];
+    for (const seed of seeds) {
+        const q = encodeURIComponent(seed);
+        const longtail = parseLongtailKeywords(client.name, seed,
+            await dataApiGet(key, `/v1/keywords/longtail?source=us&keyword=${q}&limit=${IDEA_LONGTAIL_LIMIT}`));
+        const questions = parseQuestionKeywords(client.name, seed,
+            await dataApiGet(key, `/v1/keywords/questions?source=us&keyword=${q}&limit=${IDEA_QUESTIONS_LIMIT}`));
+        rows.push(...longtail, ...questions);
+    }
+
+    const merged = mergeIdeaRows(rows).map((r) => ({ ...r, last_seen: new Date().toISOString().slice(0, 10) }));
+    // first_seen and dismissed are deliberately left out of the payload: PostgREST's upsert sets
+    // every column it's given, and a column a row doesn't mention keeps its stored value (or the
+    // table default, on insert) — so a repeat sighting never resets first_seen, and a sync can
+    // never un-dismiss something an admin already dismissed.
+    if (merged.length) await upsertChunked(db, "seo_content_ideas", merged, "client_name,keyword");
+    return `${seeds.length} seed(s), ${merged.length} idea(s)`;
+}
+
+// ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 
@@ -502,6 +577,41 @@ Deno.serve(async (req: Request) => {
             } catch (err) {
                 return Response.json({ ok: false, message: String((err as Error)?.message ?? err) }, { headers: cors });
             }
+        }
+
+        if (mode === "content_ideas") {
+            const ideaClients = await loadContentIdeaClients(db, only);
+            if (!ideaClients.length) {
+                return Response.json({ mode, results: {}, note: "no clients have a seranking_site_id set" }, { headers: cors });
+            }
+            const left = unitsLeft(await dataApiGet(key, "/v1/account/subscription").catch((err) => {
+                console.error("seranking-sync: couldn't read units_left, proceeding anyway:", err);
+                return null;
+            }));
+            if (left !== null && left < IDEA_UNITS_FLOOR) {
+                return Response.json({ mode, results: {}, skipped: `only ${left} units left this cycle (floor is ${IDEA_UNITS_FLOOR})` }, { headers: cors });
+            }
+            const todayISO = new Date().toISOString().slice(0, 10);
+            const ideaResults: Record<string, unknown> = {};
+            for (const c of ideaClients) {
+                try {
+                    const st = await loadState(db, c.name, "content_ideas");
+                    // Once a month per client, like the SEO-potential fetch — this call spends
+                    // real units, unlike the daily rank sync it shares a function with.
+                    if (!force && st?.last_daily_run && st.last_daily_run.slice(0, 7) === todayISO.slice(0, 7)) {
+                        ideaResults[c.name] = "already ran this month";
+                        continue;
+                    }
+                    ideaResults[c.name] = await syncContentIdeasForClient(db, key, c);
+                    await saveIdeasState(db, c.name, { last_daily_run: todayISO, last_error: null });
+                } catch (err) {
+                    const msg = String((err as Error)?.message ?? err);
+                    console.error(`seranking-sync content ideas failed for ${c.name}:`, msg);
+                    await saveIdeasState(db, c.name, { last_error: msg.slice(0, 500) });
+                    ideaResults[c.name] = `error: ${msg}`;
+                }
+            }
+            return Response.json({ mode, results: ideaResults }, { headers: cors });
         }
 
         const clients = await loadSeRankingClients(db, only);
