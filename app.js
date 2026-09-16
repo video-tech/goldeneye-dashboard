@@ -1316,6 +1316,27 @@ async function callMakeRelay(hook, payload) {
     return data;
 }
 
+// The dashboard's model calls (the chat agent and Generate Report) go through the ai-chat edge
+// function, which only answers a signed-in admin. So this sends the session token, never the
+// public anon key: before 2026-09-16 the anon key was enough, and anyone who read the page source
+// could run requests on our OpenAI account.
+const AI_CHAT_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ai-chat";
+async function callAiChat(messages) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+    const res = await fetch(AI_CHAT_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ messages })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+        const e = data.error;
+        throw new Error((e && (e.message || (typeof e === 'string' ? e : ''))) || `the AI service returned ${res.status}`);
+    }
+    return data;
+}
+
 // Meta's placement identifiers, with names a person would use
 const AD_PLACEMENT_LABELS = {
     MOBILE_FEED_STANDARD:  'Facebook feed',
@@ -5126,16 +5147,7 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             try {
                 const askModel = async (messages) => {
-                    const res = await fetch("https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ai-chat", {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${wrapper.dataset.supaKey}`
-                        },
-                        body: JSON.stringify({ messages })
-                    });
-                    const j = await res.json();
-                    if (j.error) throw new Error(j.error.message);
+                    const j = await callAiChat(messages);
                     const raw = j.choices[0].message.content;
                     return { raw, parsed: JSON.parse(raw.replace(/```json/gi, '').replace(/```/g, '').trim()) };
                 };
@@ -6995,6 +7007,16 @@ async function buildReportSeoBlock(clientName, s, e) {
         
         window.currentChatHistory = [];
 
+        // The model's reply, made safe to put on the page. Everything is escaped FIRST, then only
+        // **bold** and line breaks are turned back into markup. The reply can repeat anything in its
+        // briefing, including task titles a client typed into a request, so treating it as HTML let
+        // a title like <img onerror=…> run in the admin's session.
+        function formatChatReply(text) {
+            return escapeAttr(String(text ?? ''))
+                .replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+        }
+
         window.sendChatMessage = async function() {
             const inputEl = document.getElementById('chat-input');
             const msg = inputEl.value.trim();
@@ -7002,11 +7024,11 @@ async function buildReportSeoBlock(clientName, s, e) {
             
             inputEl.value = '';
             
-            // 1. Render User Message
+            // 1. Render User Message (escapeAttr: escapeHTML is a JS-string escaper and doesn't stop markup)
             const msgBox = document.getElementById('chat-messages');
             msgBox.innerHTML += `
                 <div class="flex items-start gap-3 justify-end">
-                    <div class="bg-blue-600 p-3 rounded-2xl rounded-tr-none shadow-lg text-sm text-white max-w-[80%]">${escapeHTML(msg)}</div>
+                    <div class="bg-blue-600 p-3 rounded-2xl rounded-tr-none shadow-lg text-sm text-white max-w-[80%]">${escapeAttr(msg)}</div>
                     <div class="w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center shrink-0"><i class="fa-solid fa-user"></i></div>
                 </div>`;
             msgBox.scrollTop = msgBox.scrollHeight;
@@ -7087,29 +7109,14 @@ async function buildReportSeoBlock(clientName, s, e) {
             
             window.currentChatHistory.push({ role: 'user', content: msg });
             
-            // 3. Make the Secure API Call through Supabase (Bypasses CORS completely)
+            // 3. Ask the model, as the signed-in admin (see callAiChat)
             try {
-                const res = await fetch("https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ai-chat", {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${wrapper.dataset.supaKey}`
-                    },
-                    body: JSON.stringify({
-                        messages: window.currentChatHistory
-                    })
-                });
-                
-                const data = await res.json();
-                if(data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-                
+                const data = await callAiChat(window.currentChatHistory);
+
                 const aiResponse = data.choices[0].message.content;
                 window.currentChatHistory.push({ role: 'assistant', content: aiResponse });
-                
-                // Format markdown to HTML
-                const formattedHtml = aiResponse
-                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                    .replace(/\n/g, '<br>');
+
+                const formattedHtml = formatChatReply(aiResponse);
                 
                 msgBox.innerHTML += `
                     <div class="flex items-start gap-3">
@@ -7122,7 +7129,7 @@ async function buildReportSeoBlock(clientName, s, e) {
                 msgBox.innerHTML += `
                     <div class="flex items-start gap-3">
                         <div class="w-8 h-8 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-triangle-exclamation"></i></div>
-                        <div class="bg-red-500/10 p-3 rounded-2xl rounded-tl-none border border-red-500/20 text-sm text-red-400 max-w-[80%]">API Error: ${e.message}</div>
+                        <div class="bg-red-500/10 p-3 rounded-2xl rounded-tl-none border border-red-500/20 text-sm text-red-400 max-w-[80%]">API Error: ${escapeAttr(e.message)}</div>
                     </div>`;
                 msgBox.scrollTop = msgBox.scrollHeight;
                 window.currentChatHistory.pop(); // Remove failed user message
@@ -8287,11 +8294,15 @@ window.logQuickPayment = async function() {
         const AUDIT_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/morning-audit';
 
         async function callAuditFunction(payload) {
+            // The session token, not the public anon key, so the function can check for an admin.
+            // The version deployed on 2026-09-16 doesn't check yet and accepts either.
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
             const res = await fetch(AUDIT_FN, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${wrapper.dataset.supaKey}`
+                    'Authorization': `Bearer ${session.access_token}`
                 },
                 body: JSON.stringify(payload || {})
             });

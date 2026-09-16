@@ -721,9 +721,22 @@ Consequences of that, worth knowing before editing:
   button and the "ALL" mode of the AI chat break until you do.
 - The chat degrades rather than dies: a failed context fetch returns a
   `[MATRIX UNAVAILABLE: ...]` string and the model is told to say so rather than guess.
-- The chat, the weekly report and the portal summary still call the old `ai-chat`
-  function, which is on GPT-4o. Only the audit is on `gpt-5.6-sol`, so the four AI
-  features share a vendor but not a model.
+- The chat and the weekly report call `ai-chat`, on **gpt-4o-mini** (not GPT-4o, as this
+  file used to say). Only the audit is on `gpt-5.6-sol`, so the AI features share a vendor
+  but not a model.
+- **`ai-chat` was an open proxy until 2026-09-16.** It was never in this repo; the deployed code
+  (downloaded with `supabase functions download ai-chat --use-api --workdir <dir>`) had no sign-in
+  check, `Access-Control-Allow-Origin: *`, and forwarded any `messages` to OpenAI. It now lives in
+  `supabase/functions/ai-chat/`: a signed-in **admin** only (same check as `make-relay`), Golden
+  Eye's origins only, role + content only, at most 100 messages / 300,000 characters
+  (`validate.ts`). Same model, temperature and response shape, so neither caller changed beyond
+  auth. app.js calls it through `callAiChat()` with the session token.
+  - **Order:** push app.js first (the old function accepts the session token too), then deploy.
+  - **Replies are escaped before `**bold**` and line breaks are restored** (`formatChatReply`). The
+    model can repeat anything in its briefing, including client-typed task titles, and the old code
+    put its reply straight into `innerHTML`. The Generate Report preview iframe is now
+    `sandbox=""`, like the portal's report viewer already was.
+  - **Tests:** 20 checks (validation, origins, callers, reply escaping, the sandbox).
 
 ## Client work summary
 
@@ -1578,9 +1591,13 @@ GitHub Pages copy but not from the GHL domain.
 - Morning audit thresholds in `AUDIT_CONFIG` are reasoned defaults, not tuned against
   real history — worth a backtest over a few months of `daily_reports`
 - `clients.target_cpl` is read by the audit but the column does not exist yet
-- `ai-chat` still accepts an arbitrary prompt from the browser using the anon key, which
-  is visible to every portal user — an open proxy to our OpenAI account. The audit no
-  longer uses it, but the weekly report and the per-client chat still do
+- **`morning-audit` checks no caller (found 2026-09-16).** Anyone with the public anon key can call
+  `mode: "context"` and get every client's name, spend, leads, CPL and verdict, or `force: true`
+  to run a gpt-5.6-sol audit and possibly text the admins a critical alert. Its CORS allowlist
+  doesn't stop curl. The fix needs the cron job to prove itself too (it calls with the anon key):
+  have `schedule.sql` send the Vault secret as a header and the function accept an admin JWT or
+  that secret. app.js already sends the session token (`callAuditFunction`), so only the cron
+  change and the function remain
 - `preview/app.js` and `preview/body.html` are a stale snapshot that predates the signal
   engine and still carries the dead OpenAI key box. The deploy serves the repo root, so
   they affect nothing — but they will mislead anyone who greps

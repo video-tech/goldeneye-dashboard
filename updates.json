@@ -3,6 +3,13 @@
   "updates": [
     {
       "date": "2026-09-16",
+      "area": "Security",
+      "title": "AI chat and reports locked to admins",
+      "what": "The AI behind the Client Intelligence Agent and Generate Report now only answers a signed-in admin. Before, anyone who read the page's source could use it to run requests on our OpenAI account, from any website. Chat replies are also shown as safe text now, so a task title containing code can't run in your browser, and the report preview in Generate Report can no longer run scripts. The chat and reports work exactly as before, on the same model.",
+      "action": "Deploy ai-chat (after this update is live)"
+    },
+    {
+      "date": "2026-09-16",
       "area": "SEO",
       "title": "Monthly site audit",
       "what": "The bottom of the SEO tab now shows the client's latest site audit from SE Ranking: a health score out of 100, errors, warnings and notices, and every issue found with how many pages it affects. Errors and warnings show first; notices are behind a button. From the second month on, it shows the change since last time — the score going up or down, issues that are new, counts that rose or fell, and what got fixed.",
