@@ -114,6 +114,13 @@ begin
     update seo_serp_top10_daily       set client_name = new_name where client_name = old_name;
     -- Added 2026-09-16 with site audits (supabase/sql/seo_site_audits.sql):
     update seo_site_audits            set client_name = new_name where client_name = old_name;
+    -- Added 2026-09-16 with GA4 site analytics (supabase/sql/ga4_analytics.sql):
+    update ga4_daily                  set client_name = new_name where client_name = old_name;
+    update ga4_sources_daily          set client_name = new_name where client_name = old_name;
+    update ga4_pages_daily            set client_name = new_name where client_name = old_name;
+    update ga4_page_flows_daily       set client_name = new_name where client_name = old_name;
+    update ga4_events_daily           set client_name = new_name where client_name = old_name;
+    update ga4_ai_daily               set client_name = new_name where client_name = old_name;
     -- Added 2026-09-14 with service-based onboarding (supabase/sql/service_onboarding.sql):
     update client_services            set client_name = new_name where client_name = old_name;
     -- Added 2026-09-15 with built-in onboarding questions (supabase/sql/onboarding_questions.sql):

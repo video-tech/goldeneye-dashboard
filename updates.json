@@ -4,6 +4,14 @@
     {
       "date": "2026-09-16",
       "area": "SEO",
+      "title": "Site Analytics from Google Analytics",
+      "what": "The bottom of the SEO tab now has a Wix-style analytics section for clients with a GA4 property: site sessions, page views, average session length, pages per session, engaged visits, key events and post views, each against the period before. Below that: sessions over time, top traffic sources, visits from AI assistants like ChatGPT and the pages they landed on, top pages with time on page and exit rate, the pages visits start on, top posts, a navigation flow for any page (where people came from and where they went next), and form submissions.",
+      "note": "Exit rate and the navigation flow are close estimates worked out from where each page view came from. Form submissions only show once the site's form sends a GA4 event marked as a key event. Midas is connected; add 3Sixty's GA4 property ID under Edit.",
+      "action": "Run supabase/sql/ga4_analytics.sql, then supabase/sql/rename_client.sql, then deploy seo-sync"
+    },
+    {
+      "date": "2026-09-16",
+      "area": "SEO",
       "title": "The chat agent now knows a client's real SEO",
       "what": "Ask the Client Intelligence Agent about a client's SEO and it now answers from the same numbers as the SEO tab: visits, position and leads from Google over the last 28 days, a 16-week weekly trend, the SEO work logged with dates, top pages, what moved, wrong pages ranking, competitors, and the latest site audit. Try \"why did traffic change?\" or \"what should we work on next?\". Before, it was reading an old table that stopped updating when Make's SEO pull was switched off."
     },

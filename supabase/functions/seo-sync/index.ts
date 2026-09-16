@@ -23,6 +23,10 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getGoogleToken, SCOPES, serviceAccountEmail } from "../_shared/google-auth.ts";
+import {
+    GA4_REPORTS, reportRows, explainGa4Error, type ReportRow,
+    buildDailyRows, buildSourceRows, buildPageRows, buildFlowRows, buildEventRows, buildAiRows,
+} from "./ga4-parse.ts";
 
 // The rolling window. Ten days comfortably covers GSC's 2-3 day finalisation lag plus
 // a few days of a cron outage, at three cheap API calls per client per day.
@@ -320,6 +324,173 @@ async function runBackfill(db: any, clients: any[], startedAt: number) {
     return { earliest_month: toISO(earliestMonth), results };
 }
 
+// ---------------------------------------------------------------------------
+// Google Analytics 4 (built 2026-09-16)
+// ---------------------------------------------------------------------------
+// Same shape as the Search Console pull: a rolling 10-day window every day (GA4 keeps processing
+// a day for 24-48 hours) and a month-at-a-time backfill with its own cursor under source 'ga4'.
+// Presence of clients.ga4_property_id is the switch, like gsc_property.
+
+const GA4_ROW_LIMIT = 10000;
+
+async function ga4Report(token: string, propertyId: string, startDate: string, endDate: string, spec: any): Promise<ReportRow[]> {
+    const url = `https://analyticsdata.googleapis.com/v1beta/properties/${encodeURIComponent(propertyId)}:runReport`;
+    const out: ReportRow[] = [];
+    let offset = 0;
+    for (;;) {
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dateRanges: [{ startDate, endDate }],
+                dimensions: spec.dimensions.map((name: string) => ({ name })),
+                metrics: spec.metrics.map((name: string) => ({ name })),
+                ...(spec.dimensionFilter ? { dimensionFilter: spec.dimensionFilter } : {}),
+                limit: GA4_ROW_LIMIT,
+                offset,
+            }),
+        });
+        if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(explainGa4Error(res.status, text, serviceAccountEmail()));
+        }
+        const body = await res.json();
+        const batch = reportRows(body);
+        for (const r of batch) out.push(r);
+        offset += batch.length;
+        if (batch.length < GA4_ROW_LIMIT || offset >= Number(body.rowCount ?? 0)) break;
+        if (offset > 200_000) break;   // a month that large means something is wrong
+    }
+    return out;
+}
+
+async function syncGa4Window(db: any, token: string, client: any, startDate: string, endDate: string) {
+    const pid = String(client.ga4_property_id).replace(/\D/g, "");
+    const name = client.name;
+    const R = GA4_REPORTS;
+    const get = (spec: any) => ga4Report(token, pid, startDate, endDate, spec);
+
+    const daily = buildDailyRows(name, await get(R.daily));
+    await upsertChunked(db, "ga4_daily", daily, "client_name,date");
+
+    const sources = buildSourceRows(name, await get(R.sources));
+    await upsertChunked(db, "ga4_sources_daily", sources, "client_name,date,channel,source,medium");
+
+    const pages = buildPageRows(name, await get(R.pages), await get(R.landing));
+    await upsertChunked(db, "ga4_pages_daily", pages, "client_name,date,page_path");
+
+    const flows = buildFlowRows(name, await get(R.flows));
+    await upsertChunked(db, "ga4_page_flows_daily", flows, "client_name,date,from_path,to_path");
+
+    const events = buildEventRows(name, await get(R.events));
+    await upsertChunked(db, "ga4_events_daily", events, "client_name,date,event_name");
+
+    const ai = buildAiRows(name, await get(R.ai));
+    await upsertChunked(db, "ga4_ai_daily", ai, "client_name,date,source,landing_page");
+
+    return { days: daily.length, sources: sources.length, pages: pages.length, flows: flows.length, events: events.length, ai: ai.length };
+}
+
+async function loadGa4Clients(db: any, only?: string) {
+    const { data, error } = await db.from("clients").select("name, ga4_property_id");
+    if (error) throw new Error(`clients: ${error.message}`);
+    return (data ?? []).filter((c: any) => {
+        if (!String(c.ga4_property_id ?? "").replace(/\D/g, "")) return false;
+        if (only && normalize(c.name) !== normalize(only)) return false;
+        return true;
+    });
+}
+
+function lazyGa4Token() {
+    let pending: Promise<string> | null = null;
+    return () => (pending ??= getGoogleToken([SCOPES.ga4]));
+}
+
+async function runGa4Daily(db: any, clients: any[], force: boolean) {
+    const token = lazyGa4Token();
+    const today = new Date();
+    const todayISO = toISO(today);
+    const start = toISO(addDaysUTC(today, -DAILY_WINDOW_DAYS));
+    const end = toISO(addDaysUTC(today, -1));
+    const results: Record<string, unknown> = {};
+    for (const c of clients) {
+        try {
+            const st = await loadState(db, c.name, "ga4");
+            if (!force && st?.last_daily_run === todayISO) { results[c.name] = "already ran today"; continue; }
+            results[c.name] = await syncGa4Window(db, await token(), c, start, end);
+            await saveState(db, c.name, "ga4", { last_daily_run: todayISO, last_error: null });
+        } catch (err) {
+            const msg = String((err as Error)?.message ?? err);
+            console.error(`seo-sync ga4 daily failed for ${c.name}:`, msg);
+            await saveState(db, c.name, "ga4", { last_error: msg.slice(0, 500) });
+            results[c.name] = `error: ${msg}`;
+        }
+    }
+    return { window: { start, end }, results };
+}
+
+async function runGa4Backfill(db: any, clients: any[], startedAt: number) {
+    const token = lazyGa4Token();
+    const today = new Date();
+    const yesterday = addDaysUTC(today, -1);
+    const earliestMonth = addMonthsUTC(monthStartUTC(today), -(GSC_MAX_MONTHS - 1));
+    const results: Record<string, unknown> = {};
+    for (const c of clients) {
+        if (Date.now() - startedAt > TIME_BUDGET_MS) { results[c.name] = "deferred — out of time this run"; continue; }
+        const st = await loadState(db, c.name, "ga4");
+        if (st?.backfill_done) { results[c.name] = "complete"; continue; }
+        let cursor = st?.backfill_cursor ? parseISO(st.backfill_cursor) : monthStartUTC(today);
+        let monthsDone = 0;
+        try {
+            while (cursor >= earliestMonth && monthsDone < MAX_MONTHS_PER_CLIENT_PER_RUN && Date.now() - startedAt <= TIME_BUDGET_MS) {
+                let mEnd = monthEndUTC(cursor);
+                if (mEnd > yesterday) mEnd = yesterday;
+                if (mEnd >= cursor) {
+                    await syncGa4Window(db, await token(), c, toISO(cursor), toISO(mEnd));
+                    monthsDone++;
+                }
+                cursor = addMonthsUTC(cursor, -1);
+                // Saved after every month, so a run cut off by the clock never re-fetches one
+                await saveState(db, c.name, "ga4", { backfill_cursor: toISO(cursor), last_error: null });
+            }
+            if (cursor < earliestMonth) {
+                await saveState(db, c.name, "ga4", { backfill_done: true, last_error: null });
+                results[c.name] = `complete (${monthsDone} month(s) this run)`;
+            } else {
+                results[c.name] = `${monthsDone} month(s) this run, next ${toISO(cursor)}`;
+            }
+        } catch (err) {
+            const msg = String((err as Error)?.message ?? err);
+            console.error(`seo-sync ga4 backfill failed for ${c.name}:`, msg);
+            await saveState(db, c.name, "ga4", { last_error: msg.slice(0, 500) });
+            results[c.name] = `error: ${msg}`;
+        }
+    }
+    return { earliest_month: toISO(earliestMonth), results };
+}
+
+// The Test button beside the GA4 field: can the service account read the ID typed in the box?
+async function runGa4Check(propertyId: string) {
+    const sa = serviceAccountEmail();
+    const pid = String(propertyId ?? "").replace(/\D/g, "");
+    if (!pid) return { ok: false, service_account: sa, message: "Enter the GA4 property ID (digits only) first." };
+    try {
+        const token = await getGoogleToken([SCOPES.ga4]);
+        const today = new Date();
+        const rows = await ga4Report(token, pid, toISO(addDaysUTC(today, -7)), toISO(addDaysUTC(today, -1)),
+            { dimensions: [], metrics: ["sessions"] });
+        const sessions = Math.round(rows[0]?.m[0] ?? 0);
+        return {
+            ok: true, service_account: sa, property: pid, sessions_7d: sessions,
+            message: sessions
+                ? `Connected — ${sessions.toLocaleString("en-US")} sessions in the last 7 days.`
+                : "Connected, but GA4 recorded no sessions in the last 7 days. Check the GA4 tag is on the site.",
+        };
+    } catch (err) {
+        return { ok: false, service_account: sa, message: String((err as Error)?.message ?? err) };
+    }
+}
+
 // Answers "is this wired up correctly?" at the moment an admin types the property
 // string, rather than three days later when a chart is still empty and nobody knows
 // whether that means no traffic, a typo, or a missing permission.
@@ -449,6 +620,12 @@ Deno.serve(async (req: Request) => {
             const override = body?.property ? String(body.property) : undefined;
             return Response.json(await runCheck(db, only, override), { headers: cors });
         }
+        if (mode === "check_ga4") {
+            if (!await callerIsAdmin(db, req)) {
+                return Response.json({ error: "admin sign-in required" }, { status: 403, headers: cors });
+            }
+            return Response.json(await runGa4Check(String(body?.property ?? "")), { headers: cors });
+        }
 
         // force re-fetches a window that has already run today — cheap, but it spends
         // Google quota on demand, so it is not something the public anon key can do.
@@ -457,15 +634,22 @@ Deno.serve(async (req: Request) => {
         }
 
         const clients = await loadSeoClients(db, only);
-        if (!clients.length) {
-            return Response.json({ mode, results: {}, note: "no active clients have a Search Console property set" }, { headers: cors });
+        const ga4Clients = await loadGa4Clients(db, only);
+        if (!clients.length && !ga4Clients.length) {
+            return Response.json({ mode, results: {}, note: "no clients have a Search Console property or GA4 property set" }, { headers: cors });
         }
 
+        // Search Console first, then GA4 on whatever time is left. GA4 is isolated: its failure is
+        // recorded under source 'ga4' and never touches the Search Console result.
         if (mode === "backfill") {
-            return Response.json({ mode, ...await runBackfill(db, clients, startedAt) }, { headers: cors });
+            const gsc = await runBackfill(db, clients, startedAt);
+            const ga4 = await runGa4Backfill(db, ga4Clients, startedAt).catch((err) => ({ error: String(err?.message ?? err) }));
+            return Response.json({ mode, ...gsc, ga4 }, { headers: cors });
         }
         if (mode === "daily") {
-            return Response.json({ mode, ...await runDaily(db, clients, force) }, { headers: cors });
+            const gsc = await runDaily(db, clients, force);
+            const ga4 = await runGa4Daily(db, ga4Clients, force).catch((err) => ({ error: String(err?.message ?? err) }));
+            return Response.json({ mode, ...gsc, ga4 }, { headers: cors });
         }
         return Response.json({ error: `unknown mode "${mode}"` }, { status: 400, headers: cors });
     } catch (err) {

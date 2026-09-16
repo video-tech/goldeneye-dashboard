@@ -6635,6 +6635,317 @@ async function buildChatSeoBriefing(clientName) {
      });
  }
 
+ // ---- Site Analytics (GA4, built 2026-09-16) ----
+ // One call, seo_ga4_report, returns everything for the range and the period before. Every number is
+ // worked out in SQL or here; nothing on this panel is estimated by a model.
+ let seoGa4Chart = null;
+ let seoGa4Data = null;
+ let seoGa4FlowPage = null;
+
+ const SEO_AI_SOURCES = [
+     [/chatgpt|openai/, 'ChatGPT'], [/perplexity/, 'Perplexity'], [/gemini|bard/, 'Gemini'],
+     [/copilot/, 'Copilot'], [/claude/, 'Claude'], [/deepseek/, 'DeepSeek'], [/meta\.ai/, 'Meta AI'],
+     [/grok/, 'Grok'], [/you\.com/, 'You.com'], [/poe\.com/, 'Poe']
+ ];
+ function seoAiLabel(source) {
+     const s = String(source || '').toLowerCase();
+     const hit = SEO_AI_SOURCES.find(([re]) => re.test(s));
+     return hit ? hit[1] : s;
+ }
+
+ function seoFmtDuration(sec) {
+     const n = Math.round(Number(sec) || 0);
+     if (n < 60) return `${n}s`;
+     const m = Math.floor(n / 60), s = n % 60;
+     return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m ${String(s).padStart(2, '0')}s`;
+ }
+ const seoRatio = (a, b) => (Number(b) > 0 ? Number(a) / Number(b) : null);
+ const seoPct = (v) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+ const seoNum = (v) => Math.round(Number(v) || 0).toLocaleString();
+
+ // Tile values and their change from the period before, all from the two totals objects.
+ function seoGa4Kpis(cur, pri) {
+     const c = cur || {}, p = pri || {};
+     return {
+         sessions: [Number(c.sessions) || 0, Number(p.sessions) || 0],
+         views: [Number(c.page_views) || 0, Number(p.page_views) || 0],
+         duration: [seoRatio(c.session_duration_sec, c.sessions), seoRatio(p.session_duration_sec, p.sessions)],
+         pps: [seoRatio(c.page_views, c.sessions), seoRatio(p.page_views, p.sessions)],
+         engaged: [seoRatio(c.engaged_sessions, c.sessions), seoRatio(p.engaged_sessions, p.sessions)],
+         key: [Number(c.key_events) || 0, Number(p.key_events) || 0]
+     };
+ }
+
+ function renderSeoGa4(res, clientObj, s, e) {
+     const panel = document.getElementById('seo-ga4-panel');
+     const empty = document.getElementById('seo-ga4-empty');
+     const body = document.getElementById('seo-ga4-body');
+     const when = document.getElementById('seo-ga4-when');
+     if (!panel || !empty || !body) return;
+     panel.classList.remove('hidden');
+     const showEmpty = (html) => {
+         empty.innerHTML = html; empty.classList.remove('hidden'); body.classList.add('hidden');
+         if (when) when.textContent = '';
+         if (seoGa4Chart) { seoGa4Chart.destroy(); seoGa4Chart = null; }
+     };
+
+     if (!clientObj.ga4_property_id) {
+         showEmpty(`No GA4 property set for ${escapeAttr(clientObj.name)}. Add the property ID under Edit, after adding our service account as a Viewer in GA4.`);
+         return;
+     }
+     if (res?.error) {
+         const missing = /function|does not exist|schema cache/i.test(res.error.message || '');
+         showEmpty(missing
+             ? '<span class="text-amber-400">Site Analytics needs its tables. Run supabase/sql/ga4_analytics.sql, then deploy seo-sync.</span>'
+             : `<span class="text-red-400">Couldn't load site analytics: ${escapeAttr(res.error.message)}</span>`);
+         return;
+     }
+     const d = res?.data;
+     if (!d || !d.last_date) {
+         showEmpty('GA4 is connected but nothing has synced yet. The backfill runs every 15 minutes and fills 16 months within about an hour. If this stays empty, use Test GA4 under Edit.');
+         return;
+     }
+
+     seoGa4Data = d;
+     empty.classList.add('hidden');
+     body.classList.remove('hidden');
+     if (when) {
+         const lag = d.last_date < seoIso(e) ? ` · data through ${d.last_date} (GA4 takes a day or two to finish counting)` : '';
+         when.textContent = `Since ${d.first_date}${lag}`;
+     }
+
+     const k = seoGa4Kpis(d.current, d.prior);
+     const tile = (id, val, pill) => { const el = document.getElementById(id); if (el) el.innerHTML = `${val} ${pill}`; };
+     tile('seo-ga4-sessions', seoNum(k.sessions[0]), seoDeltaPill(k.sessions[0], k.sessions[1]));
+     tile('seo-ga4-views', seoNum(k.views[0]), seoDeltaPill(k.views[0], k.views[1]));
+     tile('seo-ga4-duration', k.duration[0] == null ? '—' : seoFmtDuration(k.duration[0]), seoDeltaPill(k.duration[0], k.duration[1]));
+     tile('seo-ga4-pps', k.pps[0] == null ? '—' : k.pps[0].toFixed(1), seoDeltaPill(k.pps[0], k.pps[1]));
+     tile('seo-ga4-engaged', seoPct(k.engaged[0]), seoDeltaPill(k.engaged[0], k.engaged[1]));
+     tile('seo-ga4-key', seoNum(k.key[0]), seoDeltaPill(k.key[0], k.key[1]));
+     const postsTile = document.getElementById('seo-ga4-posts-tile');
+     if (postsTile) postsTile.classList.toggle('hidden', !d.blog_path);
+     if (d.blog_path) tile('seo-ga4-posts', seoNum(d.post_views), seoDeltaPill(Number(d.post_views), Number(d.prior_post_views)));
+
+     renderSeoGa4Chart(d, s, e);
+     renderSeoGa4Sources(d);
+     renderSeoGa4Ai(d);
+     renderSeoGa4Pages(d);
+     renderSeoGa4Flow(d);
+     renderSeoGa4Events(d);
+ }
+
+ // Sessions per day for the range, with the period before laid over it day-for-day (dashed).
+ // One axis: both lines are sessions.
+ function renderSeoGa4Chart(d, s, e) {
+     const canvas = document.getElementById('seoGa4Chart');
+     if (!canvas) return;
+     if (seoGa4Chart) seoGa4Chart.destroy();
+     const byDate = Object.fromEntries((d.series || []).map(r => [r.date, r.sessions]));
+     const labels = [];
+     for (let t = new Date(s); t <= e; t.setDate(t.getDate() + 1)) labels.push(seoIso(t));
+     const priorByDate = Object.fromEntries((d.prior_series || []).map(r => [r.date, r.sessions]));
+     // The day the same distance into the period before; a gap (null) before GA4 history starts
+     const priorAt = (i) => {
+         const t = new Date(labels[0] + 'T12:00:00'); t.setDate(t.getDate() - labels.length + i);
+         const iso = seoIso(t);
+         return iso < d.first_date ? null : (priorByDate[iso] ?? 0);
+     };
+     const last = d.last_date;
+     const isLight = document.getElementById('theme-wrapper')?.classList.contains('light-mode');
+     const grid = isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)';
+     const tick = isLight ? '#64748b' : '#9ca3af';
+     seoGa4Chart = new Chart(canvas.getContext('2d'), {
+         type: 'line',
+         data: {
+             labels,
+             datasets: [
+                 // Days GA4 hasn't delivered yet are gaps, not zeros
+                 { label: 'Sessions', data: labels.map(l => (l > last ? null : (byDate[l] ?? 0))), borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.12)', fill: true, borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 0, pointHoverRadius: 4 },
+                 { label: 'Period before', data: labels.map((_, i) => priorAt(i)), borderColor: isLight ? '#94a3b8' : '#6b7280', borderDash: [5, 4], borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 0, pointHoverRadius: 4, fill: false }
+             ]
+         },
+         options: {
+             maintainAspectRatio: false,
+             interaction: { mode: 'index', intersect: false },
+             scales: {
+                 x: { grid: { display: false }, ticks: { color: tick, maxTicksLimit: 8 } },
+                 y: { beginAtZero: true, grid: { color: grid }, ticks: { color: tick, precision: 0 } }
+             },
+             plugins: { legend: { display: false } }
+         }
+     });
+ }
+
+ function renderSeoGa4Sources(d) {
+     const host = document.getElementById('seo-ga4-channels');
+     const tbody = document.getElementById('seo-ga4-sources-tbody');
+     const channels = d.channels || [];
+     const total = channels.reduce((a, c) => a + Number(c.sessions), 0);
+     if (host) {
+         host.innerHTML = channels.length ? channels.map(c => {
+             const share = total ? Number(c.sessions) / total : 0;
+             return `<div>
+                 <div class="flex justify-between gap-3 text-xs mb-1">
+                     <span class="text-gray-300">${escapeAttr(c.channel)}</span>
+                     <span class="tabular-nums text-gray-400"><span class="text-white font-bold">${seoNum(c.sessions)}</span> · ${seoPct(share)} ${seoDeltaPill(Number(c.sessions), Number(c.prior_sessions))}</span>
+                 </div>
+                 <div class="h-1.5 rounded-full bg-white/5 overflow-hidden"><div class="h-full rounded-full bg-blue-400" style="width:${(share * 100).toFixed(1)}%"></div></div>
+             </div>`;
+         }).join('') : '<p class="text-sm text-gray-500">No sessions in this range.</p>';
+         seoShowMore(host, [...host.children], 'ga4-channels', 'channels');
+     }
+     if (tbody) {
+         const rows = d.sources || [];
+         tbody.innerHTML = rows.map(r => `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[220px]" title="${escapeAttr(r.channel)}">${escapeAttr(r.source)} / ${escapeAttr(r.medium)}</td>
+             <td class="py-2 text-right font-bold text-white tabular-nums">${seoNum(r.sessions)}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoPct(seoRatio(r.engaged_sessions, r.sessions))}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoNum(r.key_events)}</td>
+         </tr>`).join('');
+         seoShowMore(tbody.closest('table'), [...tbody.rows], 'ga4-sources', 'sources');
+     }
+ }
+
+ function renderSeoGa4Ai(d) {
+     const host = document.getElementById('seo-ga4-ai');
+     if (!host) return;
+     const rows = d.ai || [];
+     const cur = rows.reduce((a, r) => a + Number(r.sessions), 0);
+     const prior = Number(d.ai_prior_sessions) || 0;
+     if (!rows.length) {
+         host.innerHTML = `<p class="text-sm text-gray-500">No visits from AI assistants in this range${prior ? ` (${seoNum(prior)} the period before)` : ''}.</p>`;
+         return;
+     }
+     const byAssistant = {};
+     rows.forEach(r => { const k = seoAiLabel(r.source); byAssistant[k] = (byAssistant[k] || 0) + Number(r.sessions); });
+     host.innerHTML = `
+         <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3">
+             <span class="text-2xl font-bold text-white tabular-nums">${seoNum(cur)}</span>
+             <span class="text-xs text-gray-400">sessions (${seoNum(prior)} the period before)</span>
+         </div>
+         <div class="flex flex-wrap gap-2 mb-3">${Object.entries(byAssistant).sort((a, b) => b[1] - a[1]).map(([name, n]) =>
+             `<span class="text-[11px] px-2 py-1 rounded-full bg-white/5 text-gray-300">${escapeAttr(name)} <span class="font-bold text-white tabular-nums">${seoNum(n)}</span></span>`).join('')}</div>
+         <table class="w-full text-sm"><thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+             <th class="text-left pb-2">Landed on</th><th class="text-left pb-2">From</th><th class="text-right pb-2">Sessions</th><th class="text-right pb-2">Key events</th>
+         </tr></thead><tbody id="seo-ga4-ai-tbody">${rows.map(r => `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[200px]" title="${escapeAttr(r.landing_page)}">${escapeAttr(r.landing_page)}</td>
+             <td class="py-2 pr-2 text-gray-400">${escapeAttr(seoAiLabel(r.source))}</td>
+             <td class="py-2 text-right font-bold text-white tabular-nums">${seoNum(r.sessions)}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoNum(r.key_events)}</td>
+         </tr>`).join('')}</tbody></table>`;
+     const tbody = document.getElementById('seo-ga4-ai-tbody');
+     seoShowMore(tbody.closest('table'), [...tbody.rows], 'ga4-ai', 'pages');
+ }
+
+ function renderSeoGa4Pages(d) {
+     const pagesBody = document.getElementById('seo-ga4-pages-tbody');
+     if (pagesBody) {
+         const rows = d.pages || [];
+         pagesBody.innerHTML = rows.length ? rows.map(r => `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[280px]" title="${escapeAttr(r.page_path)}">${escapeAttr(r.page_path)}</td>
+             <td class="py-2 text-right font-bold text-white tabular-nums">${seoNum(r.page_views)} ${seoDeltaPill(Number(r.page_views), Number(r.prior_page_views))}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoFmtDuration(seoRatio(r.engagement_sec, r.page_views) || 0)}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoNum(r.entrances)}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoPct(seoRatio(r.exits, r.page_views))}</td>
+         </tr>`).join('') : '<tr><td colspan="5" class="py-4 text-center text-gray-500">No page views in this range.</td></tr>';
+         seoShowMore(pagesBody.closest('table'), rows.length ? [...pagesBody.rows] : [], 'ga4-pages', 'pages');
+     }
+     const landBody = document.getElementById('seo-ga4-landing-tbody');
+     if (landBody) {
+         const rows = d.landing || [];
+         landBody.innerHTML = rows.length ? rows.map(r => `<tr class="hover:bg-white/5 transition">
+             <td class="py-2 pr-2 text-gray-300 truncate max-w-[200px]" title="${escapeAttr(r.page_path)}">${escapeAttr(r.page_path)}</td>
+             <td class="py-2 text-right font-bold text-white tabular-nums">${seoNum(r.entrances)}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoPct(seoRatio(r.engaged_sessions, r.entrances))}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoFmtDuration(seoRatio(r.duration_sec, r.entrances) || 0)}</td>
+             <td class="py-2 text-right text-gray-400 tabular-nums">${seoNum(r.key_events)}</td>
+         </tr>`).join('') : '<tr><td colspan="5" class="py-4 text-center text-gray-500">No sessions in this range.</td></tr>';
+         seoShowMore(landBody.closest('table'), rows.length ? [...landBody.rows] : [], 'ga4-landing', 'pages');
+     }
+     const postsBody = document.getElementById('seo-ga4-posts-tbody');
+     const bp = document.getElementById('seo-ga4-blog-path');
+     if (bp) bp.textContent = d.blog_path ? `(under ${d.blog_path}/)` : '';
+     if (postsBody) {
+         const rows = d.top_posts || [];
+         postsBody.innerHTML = !d.blog_path
+             ? '<tr><td colspan="3" class="py-4 text-center text-gray-500">No blog address set. Set it in the changelog\'s Auto-log articles settings.</td></tr>'
+             : rows.length ? rows.map(r => `<tr class="hover:bg-white/5 transition">
+                 <td class="py-2 pr-2 text-gray-300 truncate max-w-[240px]" title="${escapeAttr(r.page_path)}">${escapeAttr(r.page_path.slice(d.blog_path.length) || r.page_path)}</td>
+                 <td class="py-2 text-right font-bold text-white tabular-nums">${seoNum(r.page_views)}</td>
+                 <td class="py-2 text-right text-gray-400 tabular-nums">${seoFmtDuration(seoRatio(r.engagement_sec, r.page_views) || 0)}</td>
+             </tr>`).join('') : '<tr><td colspan="3" class="py-4 text-center text-gray-500">No post views in this range.</td></tr>';
+         seoShowMore(postsBody.closest('table'), rows.length && d.blog_path ? [...postsBody.rows] : [], 'ga4-posts', 'posts');
+     }
+ }
+
+ // For one page: where its views came from (a visit starting here, or another page) and where
+ // visitors went next (another page, or out of the site).
+ function seoGa4FlowFor(d, path) {
+     const page = (d.pages || []).find(p => p.page_path === path) || (d.landing || []).find(p => p.page_path === path) || {};
+     const views = Number(page.page_views) || 0;
+     const flows = d.flows || [];
+     const cameFrom = flows.filter(f => f.to_path === path).map(f => ({ label: f.from_path, n: Number(f.views), page: true }));
+     const entrances = Number(page.entrances) || 0;
+     if (entrances) cameFrom.push({ label: 'Started the visit here', n: entrances, page: false });
+     const wentTo = flows.filter(f => f.from_path === path).map(f => ({ label: f.to_path, n: Number(f.views), page: true }));
+     const exits = Number(page.exits) || 0;
+     if (exits) wentTo.push({ label: 'Left the site', n: exits, page: false });
+     const byN = (a, b) => b.n - a.n;
+     return { views, cameFrom: cameFrom.sort(byN).slice(0, 8), wentTo: wentTo.sort(byN).slice(0, 8) };
+ }
+
+ function renderSeoGa4Flow(d) {
+     const select = document.getElementById('seo-ga4-flow-page');
+     const host = document.getElementById('seo-ga4-flow');
+     if (!select || !host) return;
+     const pages = (d.pages || []).map(p => p.page_path);
+     if (!pages.length) { select.innerHTML = ''; host.innerHTML = '<p class="text-sm text-gray-500">No page views in this range.</p>'; return; }
+     if (!pages.includes(seoGa4FlowPage)) seoGa4FlowPage = pages[0];
+     select.innerHTML = pages.map(p => `<option value="${escapeAttr(p)}"${p === seoGa4FlowPage ? ' selected' : ''}>${escapeAttr(p)}</option>`).join('');
+     const f = seoGa4FlowFor(d, seoGa4FlowPage);
+     const col = (title, items, total) => `<div>
+         <p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">${title}</p>
+         ${items.length ? items.map(it => {
+             const share = total ? it.n / total : 0;
+             const click = it.page && pages.includes(it.label) ? ` role="button" tabindex="0" onclick="setSeoGa4FlowPage(this.dataset.path)" onkeydown="if(event.key==='Enter')setSeoGa4FlowPage(this.dataset.path)" data-path="${escapeAttr(it.label)}"` : '';
+             return `<div class="mb-2 ${click ? 'cursor-pointer hover:bg-white/5 rounded-lg' : ''} px-1 py-0.5"${click}>
+                 <div class="flex justify-between gap-3 text-xs"><span class="${it.page ? 'text-gray-300' : 'text-gray-400 italic'} truncate" title="${escapeAttr(it.label)}">${escapeAttr(it.label)}</span><span class="tabular-nums text-gray-400 shrink-0">${seoNum(it.n)} · ${seoPct(share)}</span></div>
+                 <div class="h-1 mt-1 rounded-full bg-white/5 overflow-hidden"><div class="h-full rounded-full ${it.page ? 'bg-blue-400' : 'bg-gray-500'}" style="width:${Math.min(100, share * 100).toFixed(1)}%"></div></div>
+             </div>`;
+         }).join('') : '<p class="text-xs text-gray-500">Nothing recorded.</p>'}
+     </div>`;
+     host.innerHTML = `${col('Came from', f.cameFrom, f.views)}
+         <div class="self-center text-center px-4 py-3 rounded-xl border border-white/10 min-w-[140px]">
+             <p class="text-xs text-gray-300 break-all">${escapeAttr(seoGa4FlowPage)}</p>
+             <p class="text-lg font-bold text-white tabular-nums mt-1">${seoNum(f.views)}</p><p class="text-[10px] text-gray-500">views</p>
+         </div>
+         ${col('Went to', f.wentTo, f.views)}`;
+ }
+
+ window.setSeoGa4FlowPage = function(path) {
+     seoGa4FlowPage = path;
+     if (seoGa4Data) renderSeoGa4Flow(seoGa4Data);
+ };
+
+ function renderSeoGa4Events(d) {
+     const tbody = document.getElementById('seo-ga4-events-tbody');
+     const note = document.getElementById('seo-ga4-key-note');
+     if (!tbody) return;
+     const rows = d.events || [];
+     const anyKey = rows.some(r => Number(r.key_events) > 0 || Number(r.prior_key_events) > 0);
+     if (note) {
+         note.classList.toggle('hidden', anyKey || !rows.length);
+         note.textContent = 'No key events in GA4 for this range. Form submissions only count here once GA4 records them as an event (for example form_submit or generate_lead) and it is marked as a key event in GA4 → Admin → Events.';
+     }
+     tbody.innerHTML = rows.length ? rows.map(r => `<tr class="hover:bg-white/5 transition">
+         <td class="py-2 pr-2 ${Number(r.key_events) > 0 ? 'text-white font-bold' : 'text-gray-300'}">${escapeAttr(r.event_name)}</td>
+         <td class="py-2 text-right tabular-nums ${Number(r.key_events) > 0 ? 'text-emerald-400 font-bold' : 'text-gray-500'}">${Number(r.key_events) > 0 ? seoNum(r.key_events) : '—'}</td>
+         <td class="py-2 text-right text-gray-400 tabular-nums">${seoNum(r.event_count)}</td>
+         <td class="py-2 text-right text-gray-500 tabular-nums">${seoNum(r.prior_event_count)}</td>
+     </tr>`).join('') : '<tr><td colspan="4" class="py-4 text-center text-gray-500">No events in this range.</td></tr>';
+     seoShowMore(tbody.closest('table'), rows.length ? [...tbody.rows] : [], 'ga4-events', 'events');
+ }
+
  window.renderAdminSeo = async function() {
      const notice = document.getElementById('seo-select-client-notice');
      const content = document.getElementById('seo-client-content');
@@ -6664,8 +6975,8 @@ async function buildChatSeoBriefing(clientName) {
      // for the rest of the session, breaking every later client who DOES have data.
      const noDataNotice = document.getElementById('seo-no-data-notice');
      const dataBody = document.getElementById('seo-data-body');
-     if (!clientObj.gsc_property && !clientObj.seranking_site_id) {
-         if (noDataNotice) { noDataNotice.classList.remove('hidden'); noDataNotice.innerText = `No Search Console property or SE Ranking project set for ${clientName} yet — add one under Edit.`; }
+     if (!clientObj.gsc_property && !clientObj.seranking_site_id && !clientObj.ga4_property_id) {
+         if (noDataNotice) { noDataNotice.classList.remove('hidden'); noDataNotice.innerText = `No Search Console property, GA4 property or SE Ranking project set for ${clientName} yet — add one under Edit.`; }
          if (dataBody) dataBody.classList.add('hidden');
          return;
      }
@@ -6743,6 +7054,12 @@ async function buildChatSeoBriefing(clientName) {
              .select('seranking_audit_id, audit_time, score, pages_crawled, errors, warnings, notices, issues')
              .eq('client_name', clientName).order('audit_time', { ascending: false }).limit(2);
          renderSeoSiteAudit(auditRes);
+
+         // Site Analytics last: GA4 covers every visit, not only search. Missing until ga4_analytics.sql runs.
+         const ga4Res = clientObj.ga4_property_id
+             ? await supabaseClient.rpc('seo_ga4_report', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
+             : null;
+         renderSeoGa4(ga4Res, clientObj, s, e);
      } catch (err) {
          console.error('renderAdminSeo failed:', err);
      }
@@ -9831,6 +10148,7 @@ window.openEditClientModal = function() {
     // "Connected" against a different client is worse than no answer at all.
     document.getElementById('seo-connection-result').innerHTML = '';
     document.getElementById('seranking-connection-result').innerHTML = '';
+    document.getElementById('ga4-connection-result').innerHTML = '';
 
     document.getElementById('edit-client-retainer').value     = c.monthly_retainer || '';
     if (c.contract_type) document.getElementById('edit-client-contract').value = c.contract_type;
@@ -9847,6 +10165,41 @@ window.openEditClientModal = function() {
 // It deliberately tests the string currently IN the box, not the one already saved —
 // otherwise a correct old value would pass while the new typo sat there unsaved.
 const SEO_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/seo-sync';
+
+// Tests the GA4 property ID typed in the box (not the saved one), like Test Search Console.
+window.testGa4Connection = async function() {
+    const out = document.getElementById('ga4-connection-result');
+    const btn = document.getElementById('btn-test-ga4-connection');
+    if (!out || !btn) return;
+    const property = document.getElementById('edit-client-ga4-property').value.replace(/\D/g, '');
+    if (!property) { out.innerHTML = '<span class="text-gray-500">Enter the GA4 property ID first.</span>'; return; }
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Checking...';
+    btn.disabled = true;
+    out.innerHTML = '';
+    try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+        const res = await fetch(SEO_FN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+            body: JSON.stringify({ mode: 'check_ga4', property })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) {
+            throw new Error(/unknown mode/.test(data.error || '') ? 'Deploy the latest seo-sync first.' : (data.error || `the sync service returned ${res.status}`));
+        }
+        out.innerHTML = (data.ok
+            ? `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>${escapeAttr(data.message)}</span>`
+            : `<span class="text-amber-400 font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${escapeAttr(data.message)}</span>`)
+            + (data.service_account ? `<br><span class="text-gray-500">Service account: ${escapeAttr(data.service_account)}</span>` : '');
+    } catch (err) {
+        out.innerHTML = `<span class="text-red-400">${escapeAttr(err.message)}</span>`;
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+};
 
 window.testSeoConnection = async function() {
     const out = document.getElementById('seo-connection-result');

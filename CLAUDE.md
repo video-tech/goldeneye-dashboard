@@ -1207,6 +1207,39 @@ report and the tab can never state different numbers for the same week.
   and in `renderCpSeo`.
 - **Tests:** 19 checks on the block, with the tab's 28 re-run for the day-count fix.
 
+### Site Analytics from GA4 (built 2026-09-16)
+
+The last panel on the admin SEO tab, modelled on Wix Analytics. Setup: `supabase/sql/ga4_analytics.sql`,
+then `rename_client.sql`, then deploy `seo-sync`. **No new cron job:** `seo-sync-daily` and
+`seo-sync-backfill` now run GA4 after Search Console for every client with `ga4_property_id`.
+- **Access:** the same service account as Search Console, added as a **Viewer** on the GA4 property, and
+  the **Google Analytics Data API** enabled in the Google Cloud project. **Test GA4** in Edit Client
+  (`mode: "check_ga4"`, admin only) tests the ID in the box and explains both failures.
+- **Pull:** seven `runReport` calls per window (daily totals, sources, pages, landing pages, page
+  flows, events, AI referrals), a rolling 10 days daily and a 16-month month-at-a-time backfill under
+  `seo_sync_state.source = 'ga4'`. A GA4 failure is caught separately and never fails the Search
+  Console run. Parsing is in dependency-free `seo-sync/ga4-parse.ts`.
+- **Tables:** `ga4_daily`, `ga4_sources_daily`, `ga4_pages_daily`, `ga4_page_flows_daily`,
+  `ga4_events_daily`, `ga4_ai_daily`, all `client_row_visible`. Dates are in the property's time zone.
+  Paths are normalized (no query string or trailing slash), and rows sharing a key are merged before
+  upsert. **Averages are never stored**: `session_duration_sec` is average × sessions so days sum.
+  `users` is per day and over-counts across days, so the panel doesn't show it.
+- **Read through one RPC,** `seo_ga4_report(client, start, end, prior_start, prior_end)`, returning
+  one jsonb document (totals, series, channels, sources, pages, landing pages, flows, events, AI, posts).
+- **What's approximate, and labelled as such:**
+  - **Exit rate and navigation flow** come from each page view's `pageReferrer`: an internal referrer
+    is the previous page. Exits = views − moves onward (reloads included). The GA4 API has no exits
+    metric; the back button and new tabs blur this.
+  - **Avg time on page** is engaged time per view, which reads lower than Wix's figure.
+  - **AI assistants:** GA4 sees the referral (ChatGPT, Perplexity, Gemini, Copilot, Claude…) and the
+    landing page, never the question asked.
+- **Post views** use the blog path from the client's auto-log settings (`seo_webhook_configs.blog_path`).
+  No path, no post tile.
+- **Form submissions** only appear once the site sends a GA4 event and it's marked as a key event; the
+  panel says so when there are none.
+- **Connected 2026-09-16:** Midas Media (property 511204105). 3Sixty has no GA4 ID yet.
+- **Tests:** 20 parser checks, 16 PGlite checks, 28 jsdom checks.
+
 ### SEO in the chat agent (built 2026-09-16)
 
 `buildChatSeoBriefing()` in app.js is what the Client Intelligence Agent knows about a client's

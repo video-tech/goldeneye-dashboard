@@ -960,6 +960,118 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Site Analytics: GA4, pulled daily by seo-sync into the ga4_* tables and read
+                                     through seo_ga4_report (supabase/sql/ga4_analytics.sql). Every visit, not only
+                                     Google search, so it sits apart from the search panels above. -->
+                                <div id="seo-ga4-panel" class="glass p-6 hidden">
+                                    <div class="flex flex-wrap justify-between items-baseline gap-2 mb-5">
+                                        <div>
+                                            <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Site Analytics <span class="text-gray-600 font-normal normal-case">(Google Analytics, every visit from every source)</span></h3>
+                                        </div>
+                                        <span id="seo-ga4-when" class="text-[10px] text-gray-500"></span>
+                                    </div>
+                                    <div id="seo-ga4-empty" class="hidden text-sm text-gray-500"></div>
+                                    <div id="seo-ga4-body" class="hidden space-y-8">
+                                        <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Site sessions</p><div id="seo-ga4-sessions" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Page views</p><div id="seo-ga4-views" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg session</p><div id="seo-ga4-duration" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Pages / session</p><div id="seo-ga4-pps" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" title="Sessions that lasted over 10 seconds, viewed 2+ pages, or triggered a key event">Engaged</p><div id="seo-ga4-engaged" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" title="Events marked as key events in GA4: form submissions, bookings, calls">Key events</p><div id="seo-ga4-key" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                            <div id="seo-ga4-posts-tile"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Post views</p><div id="seo-ga4-posts" class="text-xl font-bold text-white tabular-nums"></div></div>
+                                        </div>
+
+                                        <div>
+                                            <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Sessions over time</h4>
+                                                <div class="flex gap-4 text-[10px] text-gray-400">
+                                                    <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-0.5 bg-blue-400"></span>This period</span>
+                                                    <span class="flex items-center gap-1.5"><span class="inline-block w-4 border-t-2 border-dashed border-gray-500"></span>Period before</span>
+                                                </div>
+                                            </div>
+                                            <div class="relative w-full h-[260px]"><canvas id="seoGa4Chart" aria-label="Sessions per day, this period and the period before"></canvas></div>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                            <div>
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Top traffic sources</h4>
+                                                <div id="seo-ga4-channels" class="space-y-2.5"></div>
+                                                <div id="seo-ga4-sources-wrap" class="mt-4 overflow-x-auto">
+                                                    <table class="w-full text-sm">
+                                                        <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                            <th class="text-left pb-2">Source / medium</th><th class="text-right pb-2">Sessions</th><th class="text-right pb-2">Engaged</th><th class="text-right pb-2">Key events</th>
+                                                        </tr></thead>
+                                                        <tbody id="seo-ga4-sources-tbody"></tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Visits from AI assistants</h4>
+                                                <p class="text-[10px] text-gray-600 mb-3">People who clicked through from ChatGPT, Perplexity, Gemini, Copilot or Claude, and the page they landed on. GA4 never sees the question they asked.</p>
+                                                <div id="seo-ga4-ai"></div>
+                                            </div>
+                                        </div>
+
+                                        <div class="overflow-x-auto">
+                                            <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Top pages by views</h4>
+                                            <table class="w-full text-sm">
+                                                <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                    <th class="text-left pb-2">Page</th>
+                                                    <th class="text-right pb-2">Views</th>
+                                                    <th class="text-right pb-2" title="Engaged time per view: time the page was open in front of the visitor">Avg time on page</th>
+                                                    <th class="text-right pb-2" title="Sessions that started on this page">Entrances</th>
+                                                    <th class="text-right pb-2" title="Share of views after which the visitor left the site. Approximate: worked out from where each next page view came from">Exit rate</th>
+                                                </tr></thead>
+                                                <tbody id="seo-ga4-pages-tbody"></tbody>
+                                            </table>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                            <div class="overflow-x-auto">
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Most visited pages by session <span class="normal-case font-normal text-gray-600">(where visits start)</span></h4>
+                                                <table class="w-full text-sm">
+                                                    <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                        <th class="text-left pb-2">Page</th><th class="text-right pb-2">Sessions</th><th class="text-right pb-2">Engaged</th><th class="text-right pb-2">Avg session</th><th class="text-right pb-2">Key events</th>
+                                                    </tr></thead>
+                                                    <tbody id="seo-ga4-landing-tbody"></tbody>
+                                                </table>
+                                            </div>
+                                            <div class="overflow-x-auto">
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Top posts <span id="seo-ga4-blog-path" class="normal-case font-normal text-gray-600"></span></h4>
+                                                <table class="w-full text-sm">
+                                                    <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                        <th class="text-left pb-2">Post</th><th class="text-right pb-2">Views</th><th class="text-right pb-2">Avg time on page</th>
+                                                    </tr></thead>
+                                                    <tbody id="seo-ga4-posts-tbody"></tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Navigation flow</h4>
+                                                <label class="flex items-center gap-2 text-[10px] uppercase tracking-widest text-gray-500">Page
+                                                    <select id="seo-ga4-flow-page" class="glass-input !py-1 !text-xs !w-auto max-w-[260px] normal-case tracking-normal" onchange="setSeoGa4FlowPage(this.value)"></select>
+                                                </label>
+                                            </div>
+                                            <div id="seo-ga4-flow" class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 items-start"></div>
+                                            <p class="text-[10px] text-gray-600 mt-2">Built from where each page view came from, so it's approximate: the back button, reloads and new tabs can blur it.</p>
+                                        </div>
+
+                                        <div class="overflow-x-auto">
+                                            <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Form submissions &amp; key events</h4>
+                                            <div id="seo-ga4-key-note" class="hidden text-xs text-amber-400 mb-3"></div>
+                                            <table class="w-full text-sm">
+                                                <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
+                                                    <th class="text-left pb-2">Event</th><th class="text-right pb-2">Key events</th><th class="text-right pb-2">Times fired</th><th class="text-right pb-2">Period before</th>
+                                                </tr></thead>
+                                                <tbody id="seo-ga4-events-tbody"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2449,8 +2561,12 @@
                             <button type="button" id="btn-test-seranking-connection" onclick="testSeRankingConnection()" class="glass-pill px-4 py-2 text-xs font-bold ml-2">
                                 <i class="fa-solid fa-magnifying-glass-chart mr-1"></i> Test SE Ranking
                             </button>
+                            <button type="button" id="btn-test-ga4-connection" onclick="testGa4Connection()" class="glass-pill px-4 py-2 text-xs font-bold ml-2">
+                                <i class="fa-solid fa-chart-line mr-1"></i> Test GA4
+                            </button>
                             <div id="seo-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
                             <div id="seranking-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
+                            <div id="ga4-connection-result" class="text-[11px] mt-2 leading-relaxed"></div>
                         </div>
 
                         <div>
