@@ -4,6 +4,12 @@
     {
       "date": "2026-09-16",
       "area": "Security",
+      "title": "Morning audit locked to admins and its schedule",
+      "what": "The morning audit service now only answers a signed-in admin or its own 10am schedule. Before, anyone who read the page's source could pull every client's name, spend, leads and cost per lead from it, or force a new audit run that could text you both. The Run Morning Audit button, the chat's all-clients mode and the daily schedule all work as before."
+    },
+    {
+      "date": "2026-09-16",
+      "area": "Security",
       "title": "AI chat and reports locked to admins",
       "what": "The AI behind the Client Intelligence Agent and Generate Report now only answers a signed-in admin. Before, anyone who read the page's source could use it to run requests on our OpenAI account, from any website. Chat replies are also shown as safe text now, so a task title containing code can't run in your browser, and the report preview in Generate Report can no longer run scripts. The chat and reports work exactly as before, on the same model.",
       "action": "Deploy ai-chat (after this update is live)"

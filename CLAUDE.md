@@ -727,6 +727,20 @@ folder sets it up and lists the queries for checking on it.
   vendor and one key.
 - **pg_net is asynchronous**: `cron.job_run_details` goes green when the request is
   *queued*, not when it succeeded. `net._http_response` is where the real result is.
+- **Locked down 2026-09-16.** It used to check no caller, so the public anon key could get every
+  client's name, spend, leads, CPL and verdict (`mode: "context"`), or force a gpt-5.6-sol run
+  that can text the admins. Now, before any data is read:
+  - **A signed-in admin** can do everything (`_shared/admin-auth.ts`, shared with `ai-chat`). The
+    dashboard sends the session token from `callAuditFunction`.
+  - **pg_cron** sends `x-cron-secret`, looked up from Vault (`make_onboarding_hook_secret`) each
+    time the job runs, and compared with the `MAKE_WEBHOOK_SECRET` edge secret. It unlocks only the
+    normal idempotent run, never `force` or `context`. The job was migrated with
+    `supabase/sql/morning_audit_cron_secret.sql`; `schedule.sql` includes the header for a fresh setup.
+  - **Anyone else** gets 403 with the reason logged as `morning-audit REFUSED: …`.
+  - **Rotating the Make secret** rotates this automatically: both sides read the same stores.
+  - **Verified live:** the chat in All mode 200 (admin), the cron command fired by hand 200 with
+    "already exists for today" (secret accepted, no model call).
+  - **Tests:** 20 checks on the shared check and the gate's placement, 9 on the cron SQL.
 
 **The engine lives in exactly one place** — `morning-audit/engine.js`. `app.js` holds no
 copy: `prepareAIBrainContext()` is now an async fetch to `{"mode": "context"}`, which
@@ -1611,13 +1625,9 @@ GitHub Pages copy but not from the GHL domain.
 - Morning audit thresholds in `AUDIT_CONFIG` are reasoned defaults, not tuned against
   real history — worth a backtest over a few months of `daily_reports`
 - `clients.target_cpl` is read by the audit but the column does not exist yet
-- **`morning-audit` checks no caller (found 2026-09-16).** Anyone with the public anon key can call
-  `mode: "context"` and get every client's name, spend, leads, CPL and verdict, or `force: true`
-  to run a gpt-5.6-sol audit and possibly text the admins a critical alert. Its CORS allowlist
-  doesn't stop curl. The fix needs the cron job to prove itself too (it calls with the anon key):
-  have `schedule.sql` send the Vault secret as a header and the function accept an admin JWT or
-  that secret. app.js already sends the session token (`callAuditFunction`), so only the cron
-  change and the function remain
+- **`client-summary` may have the same open-caller problem `morning-audit` had** — pg_cron calls it
+  with the anon key, so check whether it verifies anything before a stranger can make it spend
+  model calls. Fix it the same way (`_shared/admin-auth.ts` + `x-cron-secret`) if not
 - `preview/app.js` and `preview/body.html` are a stale snapshot that predates the signal
   engine and still carries the dead OpenAI key box. The deploy serves the repo root, so
   they affect nothing — but they will mislead anyone who greps
