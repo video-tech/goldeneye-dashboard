@@ -18,6 +18,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { allowOrigin, validateMessages } from "./validate.ts";
+import { adminCheck } from "../_shared/admin-auth.ts";
 
 // Unchanged from the version it replaces, deliberately: this fix is about access, and a model
 // change would alter every report and chat answer at the same time. Worth revisiting separately.
@@ -33,34 +34,8 @@ function corsHeaders(req: Request): Record<string, string> {
     };
 }
 
-// Same rule as make-relay and seranking-sync's check mode, but it says WHY a caller was refused.
-// The reason goes back to the (signed-in) caller and into the function log; it never includes the
-// token. A bare "refused" cost a debugging round the first time someone hit it.
-async function adminCheck(db: any, req: Request): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-    if (!jwt) return { ok: false, reason: "No sign-in was sent. Reload Golden Eye and try again." };
-
-    // The public anon key is a JWT too, with role "anon" and no user. That's what an app.js from
-    // before this change sends, so it almost always means the page needs a reload.
-    try {
-        const claims = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-        if (claims?.role === "anon") {
-            return { ok: false, reason: "This page is running an older version of Golden Eye. Reload the page and try again." };
-        }
-    } catch { /* not a readable JWT: getUser below reports it */ }
-
-    const { data, error } = await db.auth.getUser(jwt);
-    const email = data?.user?.email;
-    if (error || !email) return { ok: false, reason: "Your sign-in has expired or wasn't recognised. Sign out, sign back in, and try again." };
-
-    // Exact match, as in make-relay. Not ilike: "_" in an email is a LIKE wildcard, so a pattern
-    // match could land on someone else's profile.
-    const { data: profile, error: pErr } = await db.from("user_profiles").select("role").eq("email", email).maybeSingle();
-    if (pErr) return { ok: false, reason: `Couldn't read your profile: ${pErr.message}` };
-    if (!profile) return { ok: false, reason: `Signed in as ${email}, but there's no user profile for that email.` };
-    if (profile.role !== "admin") return { ok: false, reason: `Signed in as ${email}, whose role is "${profile.role}", not admin.` };
-    return { ok: true };
-}
+// The signed-in admin check, with a reason when refused, lives in _shared/admin-auth.ts so
+// morning-audit uses the identical rule.
 
 // Errors keep the shape both callers already read: `data.error.message`.
 const fail = (message: string, status: number, headers: Record<string, string>) =>

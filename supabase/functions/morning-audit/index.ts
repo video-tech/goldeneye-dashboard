@@ -12,6 +12,7 @@
 
 import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { adminCheck, cronCheck } from "../_shared/admin-auth.ts";
 import {
     AUDIT_CONFIG,
     buildAuditContext,
@@ -229,8 +230,9 @@ async function sendCriticalAlert(db: any, signals: any[]) {
 // request unless it comes back approved.
 //
 // This is not an access control — curl ignores CORS entirely, and the anon key is
-// public — but there is no reason to let an arbitrary site's JavaScript spend our model
-// budget on a visitor's behalf, so the allowed origins are named rather than starred.
+// public. The access control is the caller check at the top of the handler
+// (_shared/admin-auth.ts); CORS only stops an arbitrary site's JavaScript from reading
+// the response in a visitor's browser.
 const ALLOWED_ORIGINS = [
     "https://goldeneye.midasmediafirm.com",
     "https://video-tech.github.io",
@@ -265,6 +267,27 @@ Deno.serve(async (req: Request) => {
             Deno.env.get("SUPABASE_URL")!,
             Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
         );
+
+        // Who's asking, decided before any client data is read. Until 2026-09-16 this checked
+        // nothing: the public anon key was enough to get every client's spend, leads and verdict
+        // (`mode: "context"`), or to force a gpt-5.6-sol run that can text the admins.
+        //   - A signed-in admin can do everything: the dashboard button (force) and the chat (context).
+        //   - pg_cron proves itself with x-cron-secret (MAKE_WEBHOOK_SECRET, the same value as the
+        //     Vault secret the job reads), and only gets the normal idempotent daily run.
+        //   - Anyone else is refused, with the reason in the log.
+        const fromCron = cronCheck(req, Deno.env.get("MAKE_WEBHOOK_SECRET"));
+        if (fromCron) {
+            if (force || contextOnly) {
+                console.warn("morning-audit REFUSED: cron secret used for", force ? "force" : "context");
+                return Response.json({ error: "The schedule can only run the daily audit." }, { status: 403, headers: cors });
+            }
+        } else {
+            const who = await adminCheck(db, req);
+            if (!who.ok) {
+                console.warn("morning-audit REFUSED:", who.reason);
+                return Response.json({ error: who.reason }, { status: 403, headers: cors });
+            }
+        }
 
         const signals = await loadSignals(db);
         const context = buildAuditContext(signals);

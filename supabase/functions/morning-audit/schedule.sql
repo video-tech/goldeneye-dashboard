@@ -12,13 +12,15 @@
 -- No Make scenario is involved: pg_cron holds the schedule and pg_net makes the call,
 -- the same pair already behind checkin-reminder-am/pm.
 --
--- The Authorization header carries the **anon** key, not service_role, and that is
--- deliberate. The caller only has to satisfy the edge function's JWT check; the
--- function does its own privileged reads with the service_role key already in its
--- environment. So there is nothing sensitive to protect here — the anon key is public
--- in the dashboard page anyway — and no Vault secret to create, rotate, or get wrong.
--- Putting service_role in a cron definition would store full database access in a
--- table any SQL user can read, to buy nothing.
+-- The Authorization header carries the **anon** key, not service_role: it only gets the
+-- request past the gateway. Putting service_role in a cron definition would store full
+-- database access in a table any SQL user can read.
+--
+-- The anon key is NOT what lets this job run the audit — it's public, and until
+-- 2026-09-16 that was exactly the hole. The function now requires a signed-in admin or
+-- `x-cron-secret`, which this job reads from Vault at run time (so cron.job stores the
+-- lookup, never the value). An existing job was migrated with
+-- supabase/sql/morning_audit_cron_secret.sql.
 
 select cron.schedule(
     'morning-audit',
@@ -37,7 +39,8 @@ select cron.schedule(
         url     := 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/morning-audit',
         headers := jsonb_build_object(
             'Content-Type',  'application/json',
-            'Authorization', 'Bearer <CURRENT ANON KEY>'
+            'Authorization', 'Bearer <CURRENT ANON KEY>',
+            'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'make_onboarding_hook_secret')
         ),
         body    := '{}'::jsonb,
         -- pg_net gives up after 5s by default, far shorter than these functions run
@@ -62,7 +65,8 @@ select cron.schedule(
 --         url     := 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/morning-audit',
 --         headers := jsonb_build_object(
 --             'Content-Type',  'application/json',
---             'Authorization', 'Bearer <same anon key as above>'
+--             'Authorization', 'Bearer <same anon key as above>',
+--             'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'make_onboarding_hook_secret')
 --         ),
 --         body    := '{}'::jsonb,
 --         -- pg_net gives up after 5s by default, far shorter than these functions run
