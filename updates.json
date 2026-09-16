@@ -6,7 +6,7 @@
       "area": "SEO",
       "title": "Printable SEO case studies",
       "what": "A new Case Study button at the top of the SEO tab builds a one-page before-and-after: visits, leads, rankings, site sessions and revenue from before SEO started, now, and (once there's a full year of history) a year ago — with the work completed along the way. Print it or save it as a PDF straight from the preview.",
-      "note": "Anything that predates what measures it — leads before tracking began, rankings before a keyword was added, GA4 before it was connected — shows as not measured, never a false zero. Capture a one-time baseline snapshot on a client's SEO tab (coming to the UI next) to protect the numbers you tell them at signing from Search Console quietly revising history later.",
+      "note": "Anything that predates what measures it — leads before tracking began, rankings before a keyword was added, GA4 before it was connected — shows as not measured, never a false zero. A new Capture Baseline button saves exactly what's on screen as a permanent snapshot, so the number you tell a client at signing can't drift if Search Console later revises that period.",
       "action": "Run supabase/sql/seo_case_study.sql"
     },
     {

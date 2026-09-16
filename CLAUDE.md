@@ -1265,6 +1265,12 @@ Generate Report preview's existing pattern.
   so the number told to a client that day survives Search Console quietly restating history later.
   The derived baseline is always computed too, so a client with no manual snapshot still gets a
   full case study; the manual one is shown alongside it, never instead of it.
+  - **Capture Baseline**, next to the Case Study button, saves exactly what's on screen for the
+    client and date range currently selected — no separate window picker, since the admin has
+    already picked the range they're looking at. `renderAdminSeo` recomputes the candidate on
+    every render (`seoBaselineCandidate`), so the button can never save a stale client's numbers.
+    Revenue is fetched fresh at save time from `weekly_checkins` rather than carried in the
+    candidate, since it's a separate table and the button is clicked rarely.
 - **The noise floor** (50 visits / 5 leads) decides whether a hero "2.4×" multiplier is honest —
   below it, or with no baseline at all, the card reads "Early data" instead of a number built on
   almost nothing.
@@ -1275,8 +1281,8 @@ Generate Report preview's existing pattern.
   already loaded it. Titles and notes are `escapeAttr`-escaped like everywhere else client-typed
   text reaches the browser.
 - **Tests:** 25 PGlite checks on the SQL (an established client, a brand-new one, and a mid-life
-  one whose history doesn't reach the wanted baseline or a year back), 26 jsdom checks on the
-  builder and the modal wiring.
+  one whose history doesn't reach the wanted baseline or a year back), 28 jsdom checks on the
+  builder and the modal wiring, 10 more on the capture flow.
 
 ### Map Pack (built 2026-09-16)
 

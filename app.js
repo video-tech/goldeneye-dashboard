@@ -7137,6 +7137,8 @@ async function buildChatSeoBriefing(clientName) {
          .note { font-size: 11px; color: #94a3b8; margin: 4px 0 0; }
          .roi-line { font-size: 13px; margin: 10px 0 0; padding: 10px 14px; background: #f0fdf4; border-radius: 10px; color: #166534; }
          .roi-line.muted { background: #f8fafc; color: #64748b; }
+         .manual-box { font-size: 12px; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; margin-bottom: 20px; }
+         .manual-box strong { color: #1e293b; }
          ul.timeline { list-style: none; margin: 0; padding: 0; }
          ul.timeline li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
          .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
@@ -7154,6 +7156,8 @@ async function buildChatSeoBriefing(clientName) {
              ${seoCaseStudyHero('Organic leads', b.leads_available !== false ? b.leads : null, n.leads, 5)}
              ${anyRank ? seoCaseStudyHero('Keywords on page 1', b.rank_available ? b.keywords_page1 : null, n.keywords_page1, 0) : ''}
          </div>
+
+         ${report.manual_baseline ? `<div class="manual-box"><strong>Captured baseline</strong> on ${escapeAttr(seoCaseStudyFmtDate(report.manual_baseline.captured_at?.slice(0, 10)))}, ${escapeAttr(seoCaseStudyFmtRange(report.manual_baseline.window_start, report.manual_baseline.window_end))}: ${seoNum(report.manual_baseline.clicks)} visits, ${seoNum(report.manual_baseline.organic_leads)} leads${report.manual_baseline.notes ? ` — ${escapeAttr(report.manual_baseline.notes)}` : ''}. Kept fixed so it can't drift if Search Console later revises this period.</div>` : ''}
 
          <h2>Full comparison</h2>
          <table>
@@ -7181,6 +7185,80 @@ async function buildChatSeoBriefing(clientName) {
          Search Console figures may still be settling for the most recent day or two. Figures shown as "—" mean the metric wasn't tracked yet for that period, not that it measured zero.</footer>
      </body></html>`;
  }
+
+ // What "Capture Baseline" would save, refreshed on every renderAdminSeo — see the end of that
+ // function for how it's built.
+ let seoBaselineCandidate = null;
+
+ // Captures the numbers on screen right now — for the client and date range currently selected —
+ // as a permanent snapshot. This is what protects the figure told to a client at signing from
+ // Search Console quietly restating history later (see CLAUDE.md, SEO measurement): the derived
+ // baseline in a case study can shift months from now, a captured one never does.
+ window.openCaptureSeoBaseline = function() {
+     const c = seoBaselineCandidate;
+     const modal = document.getElementById('seo-baseline-modal');
+     if (!c || !modal) { alert('Give the SEO tab a moment to finish loading, then try again.'); return; }
+     document.getElementById('seo-baseline-summary').innerHTML = `
+         <p><strong>${escapeAttr(c.client)}</strong> · ${escapeAttr(c.start)} – ${escapeAttr(c.end)}</p>
+         <ul>
+             <li>Visits from Google: ${seoNum(c.clicks)}</li>
+             <li>Times shown: ${seoNum(c.impressions)}</li>
+             <li>Average position: ${c.position != null ? Number(c.position).toFixed(1) : '—'}</li>
+             <li>Organic leads: ${seoNum(c.leads)}</li>
+             ${c.ga4_sessions != null ? `<li>Website sessions: ${seoNum(c.ga4_sessions)}</li>` : ''}
+             <li>Keywords on page 1: ${seoNum(c.keywords_page1)}</li>
+         </ul>`;
+     document.getElementById('seo-baseline-notes').value = '';
+     document.getElementById('seo-baseline-error').classList.add('hidden');
+     modal.style.display = 'flex';
+ };
+
+ window.closeCaptureSeoBaseline = function() {
+     document.getElementById('seo-baseline-modal').style.display = 'none';
+ };
+
+ window.saveSeoBaseline = async function(event) {
+     event.preventDefault();
+     const c = seoBaselineCandidate;
+     const btn = document.getElementById('seo-baseline-save');
+     const errBox = document.getElementById('seo-baseline-error');
+     if (!c) return;
+     const original = btn.innerHTML;
+     btn.disabled = true;
+     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Saving...';
+     errBox.classList.add('hidden');
+     try {
+         // Revenue is fetched fresh at save time rather than carried in the candidate, since it's
+         // a separate query (weekly_checkins) and this button is clicked rarely enough that the
+         // extra round trip costs nothing.
+         const { data: weeks, error: wErr } = await supabaseClient
+             .from('weekly_checkins').select('week_start, closes_by_source')
+             .eq('client_name', c.client).gte('week_start', c.start).lte('week_start', c.end);
+         if (wErr) console.warn('weekly_checkins lookup for baseline capture failed:', wErr);
+         const googleRevenue = (weeks || []).reduce((sum, w) => sum + (Number(w.closes_by_source?.google?.revenue) || 0), 0);
+
+         const { data: { user } } = await supabaseClient.auth.getUser();
+         const { error } = await supabaseClient.from('seo_baselines').insert([{
+             client_name: c.client, window_start: c.start, window_end: c.end,
+             clicks: c.clicks, impressions: c.impressions, position: c.position,
+             organic_leads: c.leads, ga4_sessions: c.ga4_sessions, keywords_page1: c.keywords_page1,
+             google_revenue: googleRevenue || null,
+             notes: document.getElementById('seo-baseline-notes').value.trim() || null,
+             captured_by: user?.email || null
+         }]);
+         if (error) throw error;
+         window.closeCaptureSeoBaseline();
+     } catch (err) {
+         const missing = /relation .* does not exist|schema cache/i.test(err.message || '');
+         errBox.textContent = missing
+             ? 'Baselines need their table. Run supabase/sql/seo_case_study.sql.'
+             : `Couldn't save: ${err.message}`;
+         errBox.classList.remove('hidden');
+     } finally {
+         btn.disabled = false;
+         btn.innerHTML = original;
+     }
+ };
 
  window.openSeoCaseStudy = async function() {
      const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
@@ -7476,6 +7554,20 @@ async function buildChatSeoBriefing(clientName) {
              ? await supabaseClient.rpc('seo_gbp_report', { p_client: clientName, p_start: iso(s), p_end: iso(e), p_prior_start: iso(priorStart), p_prior_end: iso(priorEnd) })
              : null;
          renderSeoGbp(gbpRes, clientObj, s, e);
+
+         // What "Capture Baseline" would save right now, for this client and the range currently
+         // shown. Recomputed on every render rather than only when the button is clicked, so a
+         // stale candidate from a different client or range can never be saved by mistake.
+         seoBaselineCandidate = {
+             client: clientName, start: iso(s), end: iso(e),
+             clicks: cur.clicks, impressions: cur.impressions, position: cur.position,
+             leads: curLeads,
+             ga4_sessions: ga4Res?.data ? Number(ga4Res.data.current?.sessions) || 0 : null,
+             // Same organic 1-10 rule as the case study's own count, over active keywords whose
+             // LATEST check in this range is what's on screen — this is a snapshot of what the
+             // admin is looking at right now, not a re-derivation of the day-by-day best.
+             keywords_page1: (keywordsRes.data || []).filter(k => k.rank != null && k.rank >= 1 && k.rank <= 10).length
+         };
      } catch (err) {
          console.error('renderAdminSeo failed:', err);
      }
