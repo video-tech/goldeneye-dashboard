@@ -805,6 +805,19 @@ history — there's no record of what was open on some past date, only what's op
 custom date range on the Tasks tab therefore relabels that bucket "due in that period" (a real,
 `due`-column fact) rather than fake a historical view the data can't support.
 
+**Locked down 2026-09-16**, the same way as `morning-audit`. It used to check no caller, so the
+public anon key could send `force: true` and rewrite every client's portal summary on our OpenAI
+account. Now pg_cron's `x-cron-secret` (migrated with `supabase/sql/client_summary_cron_secret.sql`)
+unlocks only the normal idempotent run, a signed-in admin may force, and anyone else gets 403 logged
+as `client-summary REFUSED: …`. Verified live: the job fired by hand returned 200 with all 9 clients
+"skipped". No browser calls it, so there's no app.js side.
+
+**Every edge function that runs on a schedule or spends model calls now checks its caller**
+(`_shared/admin-auth.ts`): `ai-chat` (admin), `morning-audit` and `client-summary` (admin or cron
+secret). `make-relay` and `seranking-sync`/`seo-sync` check mode already required an admin. The webhooks
+(`ghl-lead-webhook`, `seo-changelog-webhook`) have their own secrets or tokens. A new function
+that reads client data, spends money or sends messages needs the same check before it ships.
+
 Scheduled at 16:05 UTC, five minutes after the morning audit, Mon–Fri — see
 `client-summary/schedule.sql`. No real dependency on that timing; it just isn't tied to the 08:00
 ads pull the way the audit is, since it reads tasks, not `daily_reports`.
@@ -1625,9 +1638,6 @@ GitHub Pages copy but not from the GHL domain.
 - Morning audit thresholds in `AUDIT_CONFIG` are reasoned defaults, not tuned against
   real history — worth a backtest over a few months of `daily_reports`
 - `clients.target_cpl` is read by the audit but the column does not exist yet
-- **`client-summary` may have the same open-caller problem `morning-audit` had** — pg_cron calls it
-  with the anon key, so check whether it verifies anything before a stranger can make it spend
-  model calls. Fix it the same way (`_shared/admin-auth.ts` + `x-cron-secret`) if not
 - `preview/app.js` and `preview/body.html` are a stale snapshot that predates the signal
   engine and still carries the dead OpenAI key box. The deploy serves the repo root, so
   they affect nothing — but they will mislead anyone who greps

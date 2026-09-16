@@ -4,6 +4,12 @@
     {
       "date": "2026-09-16",
       "area": "Security",
+      "title": "Client work summaries locked to their schedule",
+      "what": "The service that writes each client's daily work summary now only runs for its 16:05 schedule or a signed-in admin. Before, anyone who read the page's source could force it to rewrite every client's portal summary, using our OpenAI account. The daily summaries work as before."
+    },
+    {
+      "date": "2026-09-16",
+      "area": "Security",
       "title": "Morning audit locked to admins and its schedule",
       "what": "The morning audit service now only answers a signed-in admin or its own 10am schedule. Before, anyone who read the page's source could pull every client's name, spend, leads and cost per lead from it, or force a new audit run that could text you both. The Run Morning Audit button, the chat's all-clients mode and the daily schedule all work as before."
     },
