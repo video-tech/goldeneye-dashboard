@@ -4,6 +4,14 @@
     {
       "date": "2026-09-16",
       "area": "SEO",
+      "title": "Printable SEO case studies",
+      "what": "A new Case Study button at the top of the SEO tab builds a one-page before-and-after: visits, leads, rankings, site sessions and revenue from before SEO started, now, and (once there's a full year of history) a year ago — with the work completed along the way. Print it or save it as a PDF straight from the preview.",
+      "note": "Anything that predates what measures it — leads before tracking began, rankings before a keyword was added, GA4 before it was connected — shows as not measured, never a false zero. Capture a one-time baseline snapshot on a client's SEO tab (coming to the UI next) to protect the numbers you tell them at signing from Search Console quietly revising history later.",
+      "action": "Run supabase/sql/seo_case_study.sql"
+    },
+    {
+      "date": "2026-09-16",
+      "area": "SEO",
       "title": "A dedicated Map Pack section",
       "what": "The admin SEO tab now has its own Map Pack panel: how many tracked searches are holding a spot in Google's local 3-pack, how many at #1, the average pack position, and a chart of that count day by day so you can see the pack forming or slipping over the week rather than a single snapshot. Each keyword lists its pack position, its organic position alongside it, and a per-city breakdown for keywords tracked from more than one town.",
       "note": "For clients with Business Profile connected, it also shows Maps profile views for the same range, tying pack rank to real visibility.",

@@ -1240,6 +1240,44 @@ then `rename_client.sql`, then deploy `seo-sync`. **No new cron job:** `seo-sync
 - **Connected 2026-09-16:** Midas Media (property 511204105). 3Sixty has no GA4 ID yet.
 - **Tests:** 20 parser checks, 16 PGlite checks, 28 jsdom checks.
 
+### Case studies (built 2026-09-16)
+
+A printable "before SEO / now / a year ago" one-pager, from the new **Case Study** button at the
+top of the admin SEO tab (`openSeoCaseStudy`, `buildSeoCaseStudyHtml` in app.js). Opens in a
+sandboxed iframe modal (`sandbox="allow-modals"`, no scripts ever written into it) with a Print /
+Save as PDF button — no PDF library, no email, just the browser's own print-to-PDF, matching the
+Generate Report preview's existing pattern.
+- **Run `supabase/sql/seo_case_study.sql`.** No deploy — SQL plus app.js only.
+- **Three 90-day windows**, each computed in SQL by `seo_case_study_report(client)`, never in the
+  browser or by a model — same discipline as the morning audit and weekly report:
+  - **Before SEO** — 90 days ending the day before `clients.seo_start_date`, or before the earliest
+    changelog entry if no start date is set. Neither present means "not enough history yet",
+    never a guessed window.
+  - **Now** — the latest 90 finalized days.
+  - **A year ago** — the same 90 days one year before Now, shown only when Search Console's 16-month
+    retention actually reaches that far back.
+- **Every metric carries its own availability flag**, not a zero, when it predates the thing that
+  measures it: leads before 2026-09-11, rank/map-pack before this client's first tracked check
+  (`seo_rank_checks` never backfills — see SEO measurement), GA4 before any `ga4_daily` row, revenue
+  before a check-in reported `closes_by_source`. A window can be numerically computed but still
+  flagged unavailable — the flag is what the page trusts, not whether the number happens to exist.
+- **`seo_baselines`** is an optional **manual** snapshot (admin-only write), captured once at signing
+  so the number told to a client that day survives Search Console quietly restating history later.
+  The derived baseline is always computed too, so a client with no manual snapshot still gets a
+  full case study; the manual one is shown alongside it, never instead of it.
+- **The noise floor** (50 visits / 5 leads) decides whether a hero "2.4×" multiplier is honest —
+  below it, or with no baseline at all, the card reads "Early data" instead of a number built on
+  almost nothing.
+- **The ROI line** only appears when `seo_monthly_fee` is set and at least one week in the Now
+  window reported a source breakdown; it's the positive framing only when Google's revenue clears
+  the fee for that period, same rule as the client tab's return-per-dollar section.
+- **The changelog for the currently viewed client is reused**, not re-fetched — `renderAdminSeo`
+  already loaded it. Titles and notes are `escapeAttr`-escaped like everywhere else client-typed
+  text reaches the browser.
+- **Tests:** 25 PGlite checks on the SQL (an established client, a brand-new one, and a mid-life
+  one whose history doesn't reach the wanted baseline or a year back), 26 jsdom checks on the
+  builder and the modal wiring.
+
 ### Map Pack (built 2026-09-16)
 
 A dedicated panel on the admin SEO tab, `supabase/sql/seo_map_pack.sql`, one function only — no new

@@ -7035,6 +7035,188 @@ async function buildChatSeoBriefing(clientName) {
      }
  }
 
+ // ---- Case studies (built 2026-09-16) ----
+ // A printable "before SEO / now / a year ago" story, built from seo_case_study_report (SQL
+ // computes every number and every availability flag; this only lays it out and writes the
+ // English, same "code computes, the model quotes" discipline as the report and chat briefing —
+ // except there's no model here at all, since every fact is already settled by the database.
+ const seoCaseStudyFmtDate = (iso) => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+ const seoCaseStudyFmtRange = (start, end) => (start && end) ? `${seoCaseStudyFmtDate(start)} – ${seoCaseStudyFmtDate(end)}` : 'Not enough history yet';
+
+ // A plain multiplier ("2.4x") is only meaningful above the same noise floor used elsewhere on
+ // this tab (50 visits / 5 leads) — below that, two small counts either way, so the honest
+ // statement is the two numbers themselves, not a percentage built on almost nothing.
+ function seoCaseStudyMultiplier(base, now, floor) {
+     if (base == null || now == null || base < floor) return null;
+     if (base === 0) return null;
+     return now / base;
+ }
+
+ function seoCaseStudyHero(label, base, now, floor, opts) {
+     opts = opts || {};
+     const fmt = opts.fmt || seoNum;
+     const mult = seoCaseStudyMultiplier(base, now, floor);
+     const badge = mult == null
+         ? '<span class="hero-badge muted">Early data</span>'
+         : `<span class="hero-badge">${mult >= 1 ? mult.toFixed(1) + '×' : Math.round(mult * 100) + '%'}</span>`;
+     return `<div class="hero-card">
+         <p class="hero-label">${escapeAttr(label)}</p>
+         <div class="hero-nums"><span class="hero-now">${base == null ? '—' : fmt(now ?? 0)}</span>${badge}</div>
+         <p class="hero-was">was ${base == null ? 'not measured yet' : fmt(base)}</p>
+     </div>`;
+ }
+
+ // One row of the full comparison table. `avail` per column decides "—" (not measured) vs a real 0.
+ function seoCaseStudyRow(label, cols, fmt) {
+     fmt = fmt || seoNum;
+     const cells = cols.map(c => `<td>${(c.avail === false || c.value == null) ? '<span class="muted">—</span>' : fmt(c.value)}</td>`);
+     return `<tr><th>${escapeAttr(label)}</th>${cells.join('')}</tr>`;
+ }
+
+ function buildSeoCaseStudyHtml(clientObj, report, changelog) {
+     const b = report.baseline || {}, n = report.now || {}, y = report.yoy || {};
+     const hasYoy = !!y.available;
+     const periods = [{ w: b, title: 'Before SEO' }, { w: n, title: 'Now' }];
+     if (hasYoy) periods.push({ w: y, title: 'A year ago' });
+
+     const posCols = periods.map(p => ({ value: p.w.position != null ? Number(p.w.position).toFixed(1) : null, avail: p.w.available !== false && p.w.position != null }));
+     const leadCols = periods.map(p => ({ value: p.w.leads, avail: p.w.leads_available !== false }));
+     const ga4Cols = periods.map(p => ({ value: p.w.ga4_sessions, avail: !!p.w.ga4_available }));
+     const kwCols = periods.map(p => ({ value: p.w.keywords_page1, avail: !!p.w.rank_available }));
+     const mapCols = periods.map(p => ({ value: p.w.map_pack_count, avail: !!p.w.rank_available }));
+     const anyGa4 = ga4Cols.some(c => c.avail);
+     const anyRank = kwCols.some(c => c.avail);
+     const revCols = periods.map(p => ({ value: p.w.google_revenue, avail: Number(p.w.revenue_weeks_reported) > 0 }));
+     const jobCols = periods.map(p => ({ value: p.w.jobs_closed, avail: Number(p.w.revenue_weeks_reported) > 0 }));
+     const anyRev = revCols.some(c => c.avail);
+
+     const feeTotal = clientObj.seo_monthly_fee ? Number(clientObj.seo_monthly_fee) * (n.days ? n.days / 30 : 3) : null;
+     const nowRevenue = revCols[1]?.avail ? Number(revCols[1].value || 0) : null;
+     let roiLine = '';
+     if (feeTotal != null && nowRevenue != null) {
+         roiLine = nowRevenue > feeTotal
+             ? `<p class="roi-line">Over this period, revenue from Google (${seoNum(nowRevenue)}, as dollars) came in above what was spent on SEO (about ${seoNum(feeTotal)}).</p>`
+             : `<p class="roi-line muted">SEO builds over time — revenue from Google hasn't yet passed the period's SEO fee. Rankings, visits and leads are already moving; return usually follows.</p>`;
+     }
+
+     const timeline = [...changelog].sort((a, b2) => (a.live_date || '').localeCompare(b2.live_date || ''));
+     const timelineHtml = timeline.length
+         ? timeline.map(c => {
+             const kind = SEO_CHANGELOG_KINDS[c.kind] || SEO_CHANGELOG_KINDS.other;
+             return `<li><span class="dot" style="background:${kind.color}"></span><div>
+                 <p class="tl-date">${seoCaseStudyFmtDate(c.live_date)} · ${escapeAttr(kind.label)}</p>
+                 <p class="tl-title">${escapeAttr(c.title)}</p>
+                 ${c.notes ? `<p class="tl-notes">${escapeAttr(c.notes)}</p>` : ''}
+             </div></li>`;
+         }).join('')
+         : '<p class="muted">No work has been logged yet.</p>';
+
+     const rankNote = report.rank_tracking_started
+         ? `Tracked rank began ${seoCaseStudyFmtDate(report.rank_tracking_started)} — a period entirely before that date can't show a rank comparison.`
+         : 'No keywords are tracked in SE Ranking yet.';
+
+     return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeAttr(clientObj.name)} — SEO Case Study</title><style>
+         * { box-sizing: border-box; }
+         body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #1e293b; margin: 0; padding: 40px 48px; background: #fff; }
+         h1 { font-size: 26px; margin: 0 0 2px; }
+         .sub { color: #64748b; font-size: 13px; margin: 0 0 28px; }
+         .hero-row { display: flex; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+         .hero-card { flex: 1; min-width: 150px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px 18px; }
+         .hero-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; font-weight: 700; margin: 0 0 8px; }
+         .hero-nums { display: flex; align-items: baseline; gap: 10px; }
+         .hero-now { font-size: 28px; font-weight: 800; color: #0f172a; }
+         .hero-badge { font-size: 12px; font-weight: 700; color: #059669; background: #d1fae5; padding: 2px 8px; border-radius: 999px; }
+         .hero-badge.muted { color: #64748b; background: #e2e8f0; }
+         .hero-was { font-size: 12px; color: #94a3b8; margin: 6px 0 0; }
+         h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin: 28px 0 10px; }
+         table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 4px; }
+         th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
+         th:first-child, td:first-child { text-align: left; font-weight: 600; color: #334155; }
+         thead th { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; border-bottom: 2px solid #cbd5e1; }
+         .muted { color: #94a3b8; }
+         .note { font-size: 11px; color: #94a3b8; margin: 4px 0 0; }
+         .roi-line { font-size: 13px; margin: 10px 0 0; padding: 10px 14px; background: #f0fdf4; border-radius: 10px; color: #166534; }
+         .roi-line.muted { background: #f8fafc; color: #64748b; }
+         ul.timeline { list-style: none; margin: 0; padding: 0; }
+         ul.timeline li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+         .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+         .tl-date { font-size: 11px; color: #94a3b8; margin: 0; }
+         .tl-title { font-size: 13px; font-weight: 600; margin: 2px 0 0; color: #1e293b; }
+         .tl-notes { font-size: 12px; color: #64748b; margin: 2px 0 0; }
+         footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; }
+         @media print { body { padding: 20px 28px; } }
+     </style></head><body>
+         <h1>${escapeAttr(clientObj.name)}</h1>
+         <p class="sub">SEO results · ${escapeAttr(seoCaseStudyFmtRange(b.start, b.end))} vs. ${escapeAttr(seoCaseStudyFmtRange(n.start, n.end))}</p>
+
+         <div class="hero-row">
+             ${seoCaseStudyHero('Visits from Google', b.available !== false ? b.clicks : null, n.clicks, 50)}
+             ${seoCaseStudyHero('Organic leads', b.leads_available !== false ? b.leads : null, n.leads, 5)}
+             ${anyRank ? seoCaseStudyHero('Keywords on page 1', b.rank_available ? b.keywords_page1 : null, n.keywords_page1, 0) : ''}
+         </div>
+
+         <h2>Full comparison</h2>
+         <table>
+             <thead><tr><th></th>${periods.map(p => `<th>${escapeAttr(p.title)}<br><span style="font-weight:400">${escapeAttr(seoCaseStudyFmtRange(p.w.start, p.w.end))}</span></th>`).join('')}</tr></thead>
+             <tbody>
+                 ${seoCaseStudyRow('Visits from Google', periods.map(p => ({ value: p.w.clicks, avail: p.w.available !== false })))}
+                 ${seoCaseStudyRow('Times shown in search', periods.map(p => ({ value: p.w.impressions, avail: p.w.available !== false })))}
+                 ${seoCaseStudyRow('Average position', posCols, v => v)}
+                 ${seoCaseStudyRow('Organic leads', leadCols)}
+                 ${anyGa4 ? seoCaseStudyRow('Website sessions (all sources)', ga4Cols) : ''}
+                 ${anyRank ? seoCaseStudyRow('Keywords on page 1', kwCols) : ''}
+                 ${anyRank ? seoCaseStudyRow('Keywords in the map pack', mapCols) : ''}
+                 ${anyRev ? seoCaseStudyRow('Jobs closed from Google', jobCols) : ''}
+                 ${anyRev ? seoCaseStudyRow('Revenue from Google', revCols, v => '$' + seoNum(v)) : ''}
+             </tbody>
+         </table>
+         ${anyRank ? `<p class="note">${escapeAttr(rankNote)}</p>` : ''}
+         ${b.leads_available === false ? `<p class="note">Website leads have been tracked since ${escapeAttr(seoCaseStudyFmtDate(report.lead_tracking_start))}; a period before that shows as not measured, never zero.</p>` : ''}
+         ${roiLine}
+
+         <h2>Work completed</h2>
+         <ul class="timeline">${timelineHtml}</ul>
+
+         <footer>Generated ${escapeAttr(new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }))} by Golden Eye.
+         Search Console figures may still be settling for the most recent day or two. Figures shown as "—" mean the metric wasn't tracked yet for that period, not that it measured zero.</footer>
+     </body></html>`;
+ }
+
+ window.openSeoCaseStudy = async function() {
+     const clientObj = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+     const errBox = document.getElementById('seo-case-study-error');
+     const modal = document.getElementById('seo-case-study-modal');
+     const frame = document.getElementById('seo-case-study-frame');
+     if (!clientObj || !modal || !frame) return;
+     if (errBox) errBox.classList.add('hidden');
+     document.getElementById('seo-case-study-title').textContent = `${clientObj.name} — SEO Results`;
+     frame.srcdoc = '<body style="font-family:sans-serif;color:#64748b;padding:40px;">Loading…</body>';
+     modal.style.display = 'flex';
+     try {
+         const { data, error } = await supabaseClient.rpc('seo_case_study_report', { p_client: clientObj.name });
+         if (error) throw error;
+         // The changelog for this exact client is already loaded by renderAdminSeo, in display
+         // (newest-first) order; reused rather than re-fetched.
+         const changelog = (seoChangelogClient === clientObj.name) ? seoChangelogEntries : [];
+         frame.srcdoc = buildSeoCaseStudyHtml(clientObj, data, changelog);
+     } catch (err) {
+         const missing = /function|does not exist|schema cache/i.test(err.message || '');
+         if (errBox) {
+             errBox.classList.remove('hidden');
+             errBox.textContent = missing
+                 ? 'Case studies need their function. Run supabase/sql/seo_case_study.sql.'
+                 : `Couldn't build the case study: ${err.message}`;
+         }
+         frame.srcdoc = '<body></body>';
+     }
+ };
+
+ window.printSeoCaseStudy = function() {
+     const frame = document.getElementById('seo-case-study-frame');
+     try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+     catch (err) { console.error('print failed:', err); }
+ };
+
  // ---- Google Business Profile (via SE Ranking Local Marketing, built 2026-09-16) ----
  let seoGbpChart = null;
 

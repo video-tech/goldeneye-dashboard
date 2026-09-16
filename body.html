@@ -750,6 +750,9 @@
                             <div id="seo-no-data-notice" class="glass p-8 text-center text-gray-500 hidden"></div>
 
                             <div id="seo-data-body" class="space-y-6 hidden">
+                                <div class="flex justify-end">
+                                    <button type="button" onclick="openSeoCaseStudy()" class="text-xs font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-4 py-2 rounded-lg transition"><i class="fa-solid fa-file-lines mr-1.5"></i>Case Study</button>
+                                </div>
                                 <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
                                     <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Clicks</p><h4 class="text-xl font-bold text-blue-400" id="seo-kpi-clicks">0</h4></div>
                                     <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Impressions</p><h4 class="text-xl font-bold text-purple-400" id="seo-kpi-imp">0</h4></div>
@@ -1731,7 +1734,24 @@
                     </div>
                 </div>
 
-                <div id="stage-transition-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
+                <div id="seo-case-study-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); padding:2rem 1rem; align-items:center; justify-content:center;">
+    <div style="max-width: 900px; width: 100%; height: 92vh; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.5rem; padding: 1.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6); display: flex; flex-direction: column;">
+        <div class="flex justify-between items-center mb-3 shrink-0">
+            <div>
+                <p class="text-xs text-blue-400 uppercase tracking-widest font-bold mb-1">Case Study</p>
+                <h2 id="seo-case-study-title" class="text-xl font-bold text-white">SEO Results</h2>
+            </div>
+            <div class="flex gap-2 items-center">
+                <button type="button" onclick="printSeoCaseStudy()" class="text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition"><i class="fa-solid fa-print mr-1.5"></i>Print / Save as PDF</button>
+                <button onclick="document.getElementById('seo-case-study-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl px-2">✕</button>
+            </div>
+        </div>
+        <p id="seo-case-study-error" class="hidden text-sm text-red-400 mb-3"></p>
+        <iframe id="seo-case-study-frame" class="w-full flex-1 rounded-lg bg-white" frameborder="0" sandbox="allow-modals"></iframe>
+    </div>
+</div>
+
+<div id="stage-transition-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
                     <div style="max-width: 500px; width: 100%; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.5rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
                         <div class="flex justify-between items-start mb-6">
                             <div>
