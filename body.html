@@ -96,6 +96,13 @@
         .ge-title { text-transform: lowercase; }
         .ge-label { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--t3); }
         .ge-num { font-variant-numeric: tabular-nums; }
+        /* Phase 2: every page header is a mono breadcrumb over an Archivo lowercase
+           title with a literal trailing period, replacing the old <h1>+<p> pair. */
+        .ge-page-title { font-size: 27px; line-height: 1.2; text-wrap: balance; }
+        .dash-roster-row:hover { background: var(--inset); }
+        .ge-search-row:hover { background: var(--inset); }
+        .kanban-card:hover { border-color: var(--t3); }
+        .ge-table-row:hover { background: var(--inset); }
 
         /* Link colors defined for both themes — --gold in light mode is a real ~4.9:1
            on white; the dark theme's pale --gold would be near-invisible on a light
@@ -339,37 +346,45 @@
 
         <div id="admin-dashboard-container" class="hidden flex h-screen w-full relative z-10">
             
-            <nav class="glass w-64 m-4 mr-0 flex flex-col hidden md:flex sticky top-4 h-[calc(100vh-2rem)] shrink-0 border-r border-white/5">
-                <div class="p-6 border-b border-white/10 flex items-center gap-3">
-                    <img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-8" alt="Logo">
-                    <h2 class="font-bold text-xl text-white tracking-tight">Golden Eye</h2>
-                </div>
-                <div class="p-4 flex-1 space-y-1 mt-2 overflow-y-auto">
-                    <p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2">Main</p>
-                    <button onclick="navTo('goldeneye')" id="nav-goldeneye" class="w-full nav-item active"><i class="fa-solid fa-chart-line w-5 text-center"></i> Dashboard</button>
-                    <button onclick="navTo('tasks')" id="nav-tasks" class="w-full nav-item"><i class="fa-solid fa-check-square w-5 text-center"></i> Tasks</button>
-                    <button onclick="navTo('clients')" id="nav-clients" class="w-full nav-item"><i class="fa-solid fa-users w-5 text-center"></i> Clients</button>
-                    <button onclick="navTo('sales')" id="nav-sales" class="w-full nav-item hidden"><i class="fa-solid fa-sack-dollar w-5 text-center text-green-400"></i> Sales</button>
-                    <button onclick="navTo('creatives')" id="nav-creatives" class="w-full nav-item"><i class="fa-solid fa-palette w-5 text-center text-purple-400"></i> Creatives</button>
-                    
-                    <div id="admin-only-nav" class="hidden pt-6">
-                        <p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2">Admin</p>
-                        <button onclick="navTo('templates')" id="nav-templates" class="w-full nav-item"><i class="fa-solid fa-layer-group w-5 text-center"></i> Templates</button>
-                        <button onclick="navTo('settings')" id="nav-settings" class="w-full nav-item"><i class="fa-solid fa-gear w-5 text-center"></i> Settings</button>
+            <nav class="w-64 m-4 mr-0 hidden md:flex flex-col sticky top-4 h-[calc(100vh-2rem)] shrink-0" style="background:var(--panel); border:1px solid var(--line); border-radius:3px;">
+                <div style="padding:20px 20px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px;">
+                    <img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" style="height:26px;" alt="Midas Media">
+                    <div>
+                        <div class="ge-title" style="font-size:20px;">golden eye.</div>
+                        <div class="ge-label" style="margin-top:3px;">Midas Media</div>
                     </div>
                 </div>
-                <div class="p-6 border-t border-white/10 bg-white/5">
-                    <div class="flex items-center gap-3 mb-4">
-                        <div class="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-lg shadow-blue-500/50" id="sidebar-avatar">U</div>
-                        <div class="overflow-hidden">
-                            <p class="text-sm font-bold text-white truncate" id="sidebar-name">User Name</p>
-                            <p class="text-[10px] text-gray-400 uppercase tracking-widest" id="sidebar-role">Role</p>
+
+                <div style="padding:16px 12px; flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:22px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                        <div class="ge-label" style="padding:0 10px 10px;">Operations</div>
+                        <button onclick="navTo('goldeneye')" id="nav-goldeneye" class="w-full nav-item active"><i class="fa-solid fa-chart-line" style="width:15px; text-align:center;"></i> Overview</button>
+                        <button onclick="navTo('tasks')" id="nav-tasks" class="w-full nav-item"><i class="fa-solid fa-check-square" style="width:15px; text-align:center;"></i> Tasks<span class="ge-label" style="margin-left:auto;" id="nav-badge-tasks"></span></button>
+                        <button onclick="navTo('clients')" id="nav-clients" class="w-full nav-item"><i class="fa-solid fa-users" style="width:15px; text-align:center;"></i> Accounts<span class="ge-label" style="margin-left:auto;" id="nav-badge-clients"></span></button>
+                        <button onclick="navTo('sales')" id="nav-sales" class="w-full nav-item hidden"><i class="fa-solid fa-sack-dollar" style="width:15px; text-align:center;"></i> Sales</button>
+                        <button onclick="navTo('creatives')" id="nav-creatives" class="w-full nav-item"><i class="fa-solid fa-image" style="width:15px; text-align:center;"></i> Ad approvals<span class="ge-label" style="margin-left:auto;" id="nav-badge-creatives"></span></button>
+
+                        <div id="admin-only-nav" class="hidden">
+                            <div class="ge-label" style="padding:16px 10px 10px;">Admin</div>
+                            <button onclick="navTo('templates')" id="nav-templates" class="w-full nav-item"><i class="fa-solid fa-layer-group" style="width:15px; text-align:center;"></i> Templates</button>
+                            <button onclick="navTo('settings')" id="nav-settings" class="w-full nav-item"><i class="fa-solid fa-gear" style="width:15px; text-align:center;"></i> Settings</button>
                         </div>
                     </div>
-                    <div class="flex gap-2">
-                        <button onclick="toggleTheme()" class="glass-icon-btn flex-1" title="Toggle Theme"><i class="theme-icon fa-solid fa-moon"></i></button>
-                        <button onclick="signOut()" class="glass-icon-btn flex-1 text-red-400 hover:text-red-300 hover:bg-red-500/10 border-red-500/20"><i class="fa-solid fa-sign-out"></i></button>
+
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                        <div class="ge-label" style="padding:0 10px 10px;">Preview</div>
+                        <button onclick="previewAsClient()" class="w-full nav-item"><i class="fa-solid fa-eye" style="width:15px; text-align:center;"></i> Client portal</button>
                     </div>
+                </div>
+
+                <div style="padding:18px 20px; border-top:1px solid var(--line); display:flex; align-items:center; gap:11px;">
+                    <div class="ge-title" style="width:32px; height:32px; border-radius:3px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--gold);" id="sidebar-avatar">U</div>
+                    <div style="min-width:0; flex:1;">
+                        <div style="font-size:12.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" id="sidebar-name">User Name</div>
+                        <div class="ge-label" style="margin-top:2px;" id="sidebar-role">Role</div>
+                    </div>
+                    <button onclick="toggleTheme()" title="Toggle theme" style="width:28px; height:28px; border-radius:2px; background:transparent; border:1px solid var(--line); color:var(--t2); cursor:pointer;"><i class="theme-icon fa-solid fa-moon" style="font-size:11px;"></i></button>
+                    <button onclick="signOut()" title="Sign out" style="width:28px; height:28px; border-radius:2px; background:transparent; border:1px solid var(--line); color:var(--t2); cursor:pointer;"><i class="fa-solid fa-sign-out" style="font-size:11px;"></i></button>
                 </div>
             </nav>
 
@@ -390,327 +405,394 @@
                     </div>
                 </header>
 
-                <div id="page-goldeneye" class="p-4 md:p-8 block">
-                    <header class="mb-6 flex justify-between items-end">
-                        <div>
-                            <h1 class="text-3xl font-bold tracking-tight text-white">Midas Dashboard</h1>
-                            <p class="text-gray-400 mt-1">Real-time agency performance metrics.</p>
+                <!-- Shared header, one per app rather than duplicated per page (matches the
+                     target design). switchAppPage() sets #ge-crumb/#ge-page-title; the search
+                     box is real — see performGlobalSearch() in app.js. Visible at every width
+                     (the target design wasn't split mobile/desktop) — the search box shrinks
+                     and wraps to its own row on narrow screens rather than disappearing, since
+                     it's now the only place a page title shows at all. -->
+                <header class="flex flex-wrap items-center gap-4 md:gap-6" style="padding:16px 20px; border-bottom:1px solid var(--line); background:var(--bg);">
+                    <div style="flex:1 1 200px; min-width:0;">
+                        <div class="ge-label" id="ge-crumb">Agency</div>
+                        <h1 class="ge-title ge-page-title" id="ge-page-title" style="margin:5px 0 0;">overview.</h1>
+                    </div>
+                    <div style="position:relative; flex:0 1 auto;">
+                        <div style="display:flex; align-items:center; gap:9px; background:var(--panel); border:1px solid var(--line); border-radius:3px; padding:8px 12px; width:min(240px,60vw);">
+                            <i class="fa-solid fa-magnifying-glass" style="font-size:11px; color:var(--t3);"></i>
+                            <input type="text" id="ge-search-input" placeholder="Search clients, tasks…" autocomplete="off"
+                                   style="background:transparent; border:none; outline:none; color:var(--t1); font-family:inherit; font-size:12.5px; width:100%;"
+                                   oninput="performGlobalSearch(this.value)" onkeydown="if(event.key==='Escape'){this.value='';closeGlobalSearch();}">
                         </div>
-                    </header>
+                        <div id="ge-search-results" class="hidden" style="position:absolute; top:calc(100% + 6px); right:0; width:max(280px,100%); max-width:calc(100vw - 40px); max-height:400px; overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:3px; z-index:200; box-shadow:0 8px 24px rgba(0,0,0,0.3);"></div>
+                    </div>
+                </header>
+
+                <div id="page-goldeneye" class="p-4 md:p-8 block">
+
+                    <!-- Hero band: MRR and Network Health used to be two separate panels;
+                         one bordered section with a hairline between them reads as a single
+                         "state of the agency" figure instead of two things to reconcile. -->
+                    <div class="glass mb-6" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr));">
+                        <div class="p-6 flex flex-col" style="border-right:1px solid var(--line);">
+                            <div class="flex justify-between items-start mb-1">
+                                <span class="ge-label">Monthly Recurring Revenue</span>
+                                <a href="https://goldeneye.midasmediafirm.com/investor-dashboard-page" target="_blank" class="ge-label" style="color:var(--gold);">View all &rarr;</a>
+                            </div>
+                            <h2 class="ge-display ge-num" style="font-size:52px; line-height:1.1; color:var(--t1);" id="dash-mrr-total">$0</h2>
+                            <!-- No stored history of a client's retainer changing over time, so
+                                 there's no honest month-over-month delta or sparkline to show —
+                                 real client count instead of a fabricated trend. -->
+                            <p class="text-sm mt-1" style="color:var(--t2);" id="dash-mrr-sub">0 active clients</p>
+                            <div class="flex-1 relative w-full mt-3" style="min-height:110px;">
+                                <canvas id="dashMrrChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="p-6 flex flex-col">
+                            <div class="flex justify-between items-start mb-1">
+                                <span class="ge-label">Network Health</span>
+                                <button onclick="navTo('clients'); setTimeout(() => switchClientView('health'), 50);" class="ge-label" style="color:var(--gold); cursor:pointer;">
+                                    View breakdown &rarr;
+                                </button>
+                            </div>
+                            <h2 class="ge-display ge-num" style="font-size:52px; line-height:1.1; color:var(--t1);" id="dash-avg-health-val">--</h2>
+                            <p class="text-sm mt-1" style="color:var(--t2);" id="dash-avg-health-lbl">Calculating</p>
+                            <!-- Replaces the half-doughnut gauge: three labelled bands (the exact
+                                 thresholds the roster's own health bars already use), which says
+                                 where the roster actually sits rather than a single blended number. -->
+                            <div class="flex flex-col gap-2.5 mt-4" id="dash-health-bands"></div>
+                        </div>
+                    </div>
+
                     <!-- One feed instead of three panels. Client Tasks, Alerts & Approvals and
                          HQ Tasks each showed a slice of the same table, so the same work could
                          appear twice and the highest-priority item wasn't necessarily on screen.
                          Everything outstanding now sorts together, labelled by who owns it. -->
                     <div class="glass p-5 md:p-6 mb-6 flex flex-col max-h-[440px]">
                         <div class="flex justify-between items-center mb-4 shrink-0">
-                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                                <i class="fa-solid fa-bell"></i> Notifications
-                                <span id="dash-feed-count" class="text-[10px] font-bold bg-white/10 text-gray-300 px-2 py-0.5 rounded-full normal-case tracking-normal"></span>
+                            <h3 class="flex items-center gap-2">
+                                <span class="ge-label" style="font-size:11px;">01.</span>
+                                <span class="ge-title" style="font-size:15px;">needs attention.</span>
+                                <span id="dash-feed-count" class="ge-label" style="background:var(--inset); padding:1px 7px; border-radius:2px;"></span>
                             </h3>
-                            <button onclick="navTo('tasks')" class="text-xs text-blue-400 hover:text-blue-300 hover:underline shrink-0">View All</button>
+                            <button onclick="navTo('tasks')" class="ge-label" style="color:var(--gold); cursor:pointer;">View all &rarr;</button>
                         </div>
                         <div id="dash-feed" class="space-y-2 flex-1 overflow-y-auto pr-1"></div>
                     </div>
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                        <div class="glass p-6 lg:col-span-2 flex flex-col min-h-[350px]">
-                            <div class="flex justify-between items-start mb-4 relative z-10">
-                                <div>
-                                    <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-1">Monthly Recurring Revenue</h3>
-                                    <h2 class="text-4xl font-extrabold text-white" id="dash-mrr-total">$0</h2>
-                                </div>
-                                <a href="https://goldeneye.midasmediafirm.com/investor-dashboard-page" target="_blank" class="flex items-center gap-2 text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-full hover:bg-blue-500/30 transition cursor-pointer">
-                                    <div class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div> View All
-                                </a>
-                            </div>
-                            <div class="flex-1 relative w-full mt-2">
-                                <canvas id="dashMrrChart"></canvas>
-                            </div>
-                        </div>
 
-                        <div class="glass p-6 lg:col-span-1 flex flex-col relative text-center">
-                            <div class="flex justify-between items-start mb-2 z-10 relative">
-                                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest text-left">Network Health</h3>
-                                <button onclick="navTo('clients'); setTimeout(() => switchClientView('health'), 50);" class="text-xs font-bold text-blue-400 hover:underline cursor-pointer">
-                                    View Breakdown
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="glass p-6 flex flex-col min-h-[300px] lg:col-span-2">
+                            <div class="flex justify-between items-center mb-6">
+                                <h3 class="flex items-center gap-2">
+                                    <span class="ge-label" style="font-size:11px;">02.</span>
+                                    <span class="ge-title" style="font-size:15px;">active roster.</span>
+                                </h3>
+                                <span class="ge-label" style="background:var(--inset); padding:2px 9px; border-radius:2px;" id="dash-client-count">0 Clients</span>
+                            </div>
+                            <!-- Div-grid rows, not a <table> — matches the target design's
+                                 fixed side columns (Stage/Health/MRR) with the account name
+                                 taking whatever's left, rather than a table's equal-ish columns. -->
+                            <div style="border:1px solid var(--line); border-radius:3px; overflow:hidden;">
+                                <div style="display:grid; grid-template-columns:minmax(0,1fr) 108px 96px 104px; gap:16px; padding:10px 16px;" class="ge-label">
+                                    <span>Account</span><span>Stage</span><span style="text-align:right;">Health</span><span style="text-align:right;">MRR</span>
+                                </div>
+                                <div id="dash-client-list"></div>
+                            </div>
+                            <div class="mt-4 pt-4" style="border-top:1px solid var(--line);">
+                                <button id="btn-add-client-roster" onclick="openAddClientModal()" class="hidden w-full sm:w-auto btn-primary btn text-xs transition">
+                                    <i class="fa-solid fa-plus mr-2"></i> New Client
                                 </button>
                             </div>
-                            <!-- The gauge draws a half doughnut, so a square canvas left its whole
-                                 bottom half blank — that was the empty space. A 2:1 box fits the
-                                 arc that's actually rendered, and the reading sits in the well. -->
-                            <div class="relative w-full max-w-[240px] mx-auto mt-2" style="aspect-ratio: 2 / 1;">
-                                <canvas id="dashAvgHealthGauge"></canvas>
-                                <div class="absolute inset-x-0 bottom-0 flex flex-col items-center">
-                                    <h2 class="text-4xl font-extrabold text-white leading-none" id="dash-avg-health-val">--</h2>
-                                    <p class="text-[10px] text-gray-400 mt-1 uppercase tracking-widest" id="dash-avg-health-lbl">Calculating</p>
-                                </div>
-                            </div>
                         </div>
-                    </div>
 
-                    <div class="glass p-6 flex flex-col min-h-[300px]">
-                        <div class="flex justify-between items-center mb-6">
-                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Active Roster</h3>
-                            <span class="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold" id="dash-client-count">0 Clients</span>
-                        </div>
-                        <div class="flex-1 overflow-x-auto">
-                            <table class="w-full text-left text-sm">
-                                <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
-                                    <tr><th class="pb-3 font-semibold">Client Name</th><th class="pb-3 font-semibold text-center">Health</th><th class="pb-3 font-semibold text-right">MRR</th></tr>
-                                </thead>
-                                <tbody id="dash-client-list" class="divide-y divide-white/5"></tbody>
-                            </table>
-                        </div>
-                        <div class="mt-4 pt-4 border-t border-white/10">
-                            <button id="btn-add-client-roster" onclick="openAddClientModal()" class="hidden w-full sm:w-auto btn-primary btn text-xs transition">
-                                <i class="fa-solid fa-plus mr-2"></i> New Client
-                            </button>
-                        </div>
-                    </div>
-                    <div class="glass p-6 mt-6 border-l-4 border-yellow-400 relative overflow-hidden flex flex-col">
-                        <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10 pointer-events-none"></div>
-                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10 relative">
-                            <div class="flex items-center gap-3">
-                                <div class="w-10 h-10 rounded-xl bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-xl shrink-0"><i class="fa-solid fa-brain"></i></div>
-                                <div>
-                                    <h2 class="text-xl font-bold text-white">Midas Intelligence</h2>
-                                    <p class="text-xs text-gray-400">Cross-account anomaly detection and scale opportunities.</p>
-                                </div>
+                        <!-- Narrow, beside the roster rather than a full-width strip below it;
+                             gold-wash marks it as the one card drawing on judgment rather than
+                             a raw table. The flagged-client list is real: loadDashIntelligence()
+                             (app.js) parses the morning-audit function's mode:"context" markdown
+                             — the same numbers the audit itself computed — into name+note rows.
+                             That mode already exists and is free (no model call), so this needed
+                             no edge-function change. The full written audit still opens below
+                             when you actually run one; this list is the always-on summary. -->
+                        <div class="glass p-6 flex flex-col lg:col-span-1" style="background:var(--goldWash); border-color:var(--goldLine);">
+                            <div class="ge-label" style="color:var(--gold);">Midas intelligence</div>
+                            <h3 class="ge-title" style="font-size:19px; margin:9px 0 0;">this morning's audit.</h3>
+                            <div id="dash-intelligence-list" class="flex flex-col gap-3.5 my-4">
+                                <p style="font-size:12px; color:var(--t2);">Loading&hellip;</p>
                             </div>
-                            <div class="flex flex-col sm:flex-row gap-3 w-full md:w-auto shrink-0">
-    <button onclick="navTo('audits')" class="w-full sm:w-auto bg-black/20 hover:bg-white/10 text-white border border-white/10 btn text-sm shadow-lg transition whitespace-nowrap">
-        <i class="fa-solid fa-clock-rotate-left mr-2"></i> Audit History
-    </button>
-    <button id="btn-run-global-ai" onclick="runGlobalAIAudit()" class="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-400 text-yellow-900 btn text-sm shadow-lg transition whitespace-nowrap">
-        <i class="fa-solid fa-bolt mr-2"></i> Run Morning Audit
-    </button>
-</div>
-                        </div>
-                        <div id="global-ai-output" class="hidden mt-6 pt-6 border-t border-white/10 z-10 relative text-sm text-gray-300 leading-relaxed">
+                            <div class="flex gap-2 mt-auto">
+                                <button id="btn-run-global-ai" onclick="runGlobalAIAudit()" class="btn-primary btn text-sm flex-1">
+                                    Run audit
+                                </button>
+                                <button onclick="navTo('audits')" class="btn-secondary btn text-sm">
+                                    History
+                                </button>
                             </div>
+                            <div id="global-ai-output" class="hidden mt-4 pt-4 text-sm overflow-y-auto" style="border-top:1px solid var(--goldLine); color:var(--t2); max-height:340px;">
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <div id="page-tasks" class="p-4 md:p-8 space-y-6 hidden">
-                    <header class="mb-2"><h1 class="text-3xl font-bold tracking-tight">Task Dashboard</h1><p class="text-gray-400">Manage operations and internal workflows.</p></header>
-                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-                        <div class="glass p-4 text-center"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total</p><h2 class="text-3xl font-extrabold text-white" id="stat-total">0</h2></div>
-                        <div class="glass p-4 text-center border-b-4 border-red-500/50"><p class="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-1">Overdue</p><h2 class="text-3xl font-extrabold text-red-400" id="stat-overdue">0</h2></div>
-                        <div class="glass p-4 text-center border-b-4 border-yellow-500/50"><p class="text-[10px] font-bold text-yellow-400 uppercase tracking-widest mb-1">Due Today</p><h2 class="text-3xl font-extrabold text-yellow-400" id="stat-today">0</h2></div>
-                        <div class="glass p-4 text-center border-b-4 border-blue-500/50"><p class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">In Progress</p><h2 class="text-3xl font-extrabold text-blue-400" id="stat-progress">0</h2></div>
-                        <div class="glass p-4 text-center border-b-4 border-green-500/50"><p class="text-[10px] font-bold text-green-400 uppercase tracking-widest mb-1">Completed</p><h2 class="text-3xl font-extrabold text-green-400" id="stat-completed">0</h2></div>
+                    <!-- Divided strip, not five separate cards. "Open" and "Done this week" are
+                         real computation changes (see renderTaskSummary in app.js), not just a
+                         relabel — matches what the target design's wording actually claims. -->
+                    <div class="glass" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+                        <div style="padding:18px 20px; border-left:1px solid var(--line);">
+                            <div class="ge-label">Open</div>
+                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--t1);" id="stat-total">0</span><span class="text-xs" style="color:var(--t3);">all accounts</span></div>
+                        </div>
+                        <div style="padding:18px 20px; border-left:1px solid var(--line);">
+                            <div class="ge-label">Late</div>
+                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--neg);" id="stat-overdue">0</span><span class="text-xs" style="color:var(--t3);">past due</span></div>
+                        </div>
+                        <div style="padding:18px 20px; border-left:1px solid var(--line);">
+                            <div class="ge-label">Due today</div>
+                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--warn);" id="stat-today">0</span></div>
+                        </div>
+                        <div style="padding:18px 20px; border-left:1px solid var(--line);">
+                            <div class="ge-label">In progress</div>
+                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--t1);" id="stat-progress">0</span></div>
+                        </div>
+                        <div style="padding:18px 20px; border-left:1px solid var(--line);">
+                            <div class="ge-label">Done this week</div>
+                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--pos);" id="stat-completed">0</span></div>
+                        </div>
                     </div>
-                    <div class="glass flex flex-col min-h-[600px]">
-                        <div class="p-4 border-b border-white/10 flex flex-wrap justify-between items-end gap-4 bg-white/5">
-                            <div class="flex flex-wrap items-end gap-5 flex-1 min-w-[280px]">
 
-                                <div class="flex flex-col gap-1.5">
-                                    <span class="text-[10px] font-bold uppercase tracking-widest text-gray-500">Search</span>
-                                    <div class="relative w-56 max-w-full">
-                                        <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                        <input type="text" id="task-search-filter" placeholder="Task or client…" class="glass-input pl-8 py-1.5" onkeyup="renderActiveTaskView()">
-                                    </div>
-                                </div>
-
-                                <!-- Labelled, because two unlabelled pill groups side by side
-                                     gave no clue that one filters and the other changes the view -->
-                                <div class="flex flex-col gap-1.5">
-                                    <span class="text-[10px] font-bold uppercase tracking-widest text-gray-500">Whose</span>
-                                    <div class="flex bg-black/40 p-1 rounded-lg border border-white/5">
-                                        <button onclick="setTaskOwnerFilter('all')" id="btn-owner-all" class="view-btn active">All</button>
-                                        <button onclick="setTaskOwnerFilter('ours')" id="btn-owner-ours" class="view-btn">Ours</button>
-                                        <button onclick="setTaskOwnerFilter('theirs')" id="btn-owner-theirs" class="view-btn">Client</button>
-                                    </div>
-                                </div>
-
-                                <div class="flex flex-col gap-1.5">
-                                    <span class="text-[10px] font-bold uppercase tracking-widest text-gray-500">View</span>
-                                    <div class="flex items-center gap-2">
-                                        <div class="flex bg-black/40 p-1 rounded-lg border border-white/5">
-                                            <button onclick="switchTaskView('kanban')" id="btn-view-kanban" class="view-btn active"><i class="fa-solid fa-table-columns mr-2"></i>Board</button>
-                                            <button onclick="switchTaskView('table')" id="btn-view-table" class="view-btn"><i class="fa-solid fa-list mr-2"></i>List</button>
-                                        </div>
-                                        <button id="btn-columns" onclick="openColumnDrawer()" class="glass-pill hidden !py-1.5 !px-3 !text-xs" title="Choose which columns the list shows"><i class="fa-solid fa-table-columns"></i> Columns</button>
-                                    </div>
-                                </div>
-
+                    <!-- Search still filters the board/list in place — the target design has no
+                         search box here because the header's is a jump-to search, not a filter;
+                         dropping this would lose real filtering, so it stays, folded in plainly
+                         rather than under its own "Search" caption. -->
+                    <div class="flex flex-wrap items-center justify-between gap-4">
+                        <div class="flex flex-wrap items-center gap-3">
+                            <div style="position:relative; width:200px;">
+                                <i class="fa-solid fa-search" style="position:absolute; left:11px; top:50%; transform:translateY(-50%); font-size:11px; color:var(--t3);"></i>
+                                <input type="text" id="task-search-filter" placeholder="Filter&hellip;" class="glass-input" style="padding-left:30px;" onkeyup="renderActiveTaskView()">
                             </div>
-
-                            <button onclick="openTaskDrawer('new')" class="btn-primary btn text-sm whitespace-nowrap"><i class="fa-solid fa-plus mr-2"></i> New Task</button>
-                        </div>
-                        <div id="t-bulk-bar" class="p-4 bg-blue-900/40 border-b border-blue-500/30 flex justify-between items-center hidden"><div class="flex items-center gap-4"><span class="text-sm font-bold text-blue-300"><span id="t-bulk-count">0</span> Selected</span><button onclick="updateSelectedStatus()" class="text-xs font-bold text-white hover:text-blue-300"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button onclick="deleteSelectedTasks()" class="text-xs font-bold text-red-400 hover:text-red-300"><i class="fa-solid fa-trash mr-1"></i> Delete</button></div><button onclick="clearSelection()" class="text-xs text-gray-400 hover:text-white"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
-                        
-                        <div id="view-kanban" class="flex-1 p-4 md:p-6 overflow-x-auto">
-                            <div class="flex gap-6 h-full min-w-max items-start">
-                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-gray-400 mr-2"></span>To Do <span class="text-gray-500 text-xs ml-1" id="count-todo">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="Not Started" id="col-todo"></div></div>
-                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-blue-400 mr-2"></span>In Progress <span class="text-gray-500 text-xs ml-1" id="count-prog">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="In Progress" id="col-prog"></div></div>
-                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-red-400 mr-2"></span>Blocked <span class="text-gray-500 text-xs ml-1" id="count-rev">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="Blocked" id="col-rev"></div></div>
-                                <div class="w-80 flex flex-col bg-white/5 border border-white/5 rounded-xl"><div class="p-4 border-b border-white/5"><h3 class="font-bold text-white text-sm"><span class="w-2 h-2 inline-block rounded-full bg-green-400 mr-2"></span>Done <span class="text-gray-500 text-xs ml-1" id="count-done">0</span></h3></div><div class="p-3 flex-1 kanban-col space-y-3" data-status="Complete" id="col-done"></div></div>
+                            <div style="display:flex; border:1px solid var(--line); border-radius:3px; overflow:hidden;">
+                                <button onclick="setTaskOwnerFilter('all')" id="btn-owner-all" class="view-btn active">All</button>
+                                <button onclick="setTaskOwnerFilter('ours')" id="btn-owner-ours" class="view-btn" style="border-left:1px solid var(--line);">Ours</button>
+                                <button onclick="setTaskOwnerFilter('theirs')" id="btn-owner-theirs" class="view-btn" style="border-left:1px solid var(--line);">Client</button>
                             </div>
+                            <!-- Informational, not a control — the board is always sorted by
+                                 priority score (renderKanban), and a dropdown implying a change
+                                 of sort here would be decoration with nothing behind it. -->
+                            <span class="ge-label"><i class="fa-solid fa-arrow-down-short-wide mr-1"></i>Sorted by priority</span>
                         </div>
-                        <div id="view-table" class="overflow-x-auto flex-1 hidden">
-                            <table class="w-full text-left text-sm"><thead class="bg-white/5 text-xs uppercase tracking-wider text-gray-500 border-b border-white/10" id="t-table-head"></thead><tbody id="t-table-body" class="divide-y divide-white/5"></tbody></table>
+                        <div class="flex items-center gap-3">
+                            <div style="display:flex; border:1px solid var(--line); border-radius:3px; overflow:hidden;">
+                                <button onclick="switchTaskView('kanban')" id="btn-view-kanban" class="view-btn active"><i class="fa-solid fa-table-columns mr-2"></i>Board</button>
+                                <button onclick="switchTaskView('table')" id="btn-view-table" class="view-btn" style="border-left:1px solid var(--line);"><i class="fa-solid fa-list mr-2"></i>List</button>
+                            </div>
+                            <button id="btn-columns" onclick="openColumnDrawer()" class="glass-pill hidden !py-1.5 !px-3 !text-xs" title="Choose which columns the list shows"><i class="fa-solid fa-table-columns"></i> Columns</button>
+                            <button onclick="openTaskDrawer('new')" class="btn-primary btn text-sm whitespace-nowrap"><i class="fa-solid fa-plus mr-2"></i> New task</button>
                         </div>
+                    </div>
+
+                    <div id="t-bulk-bar" class="p-4 flex justify-between items-center hidden" style="background:var(--goldWash); border:1px solid var(--goldLine); border-radius:3px;"><div class="flex items-center gap-4"><span class="text-sm font-bold" style="color:var(--gold);"><span id="t-bulk-count">0</span> Selected</span><button onclick="updateSelectedStatus()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button onclick="deleteSelectedTasks()" class="text-xs font-bold" style="color:var(--neg);"><i class="fa-solid fa-trash mr-1"></i> Delete</button></div><button onclick="clearSelection()" class="text-xs" style="color:var(--t2);"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
+
+                    <div id="view-kanban" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; align-items:start;">
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--t3);"></span><span class="ge-label" style="font-size:10px;">To do</span><span class="ge-num text-xs" style="margin-left:auto; color:var(--t3);" id="count-todo">0</span></div>
+                            <div class="kanban-col space-y-2.5" data-status="Not Started" id="col-todo" style="min-height:180px;"></div>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--goldSolid);"></span><span class="ge-label" style="font-size:10px;">In progress</span><span class="ge-num text-xs" style="margin-left:auto; color:var(--t3);" id="count-prog">0</span></div>
+                            <div class="kanban-col space-y-2.5" data-status="In Progress" id="col-prog" style="min-height:180px;"></div>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--neg);"></span><span class="ge-label" style="font-size:10px;">Blocked</span><span class="ge-num text-xs" style="margin-left:auto; color:var(--t3);" id="count-rev">0</span></div>
+                            <div class="kanban-col space-y-2.5" data-status="Blocked" id="col-rev" style="min-height:180px;"></div>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--pos);"></span><span class="ge-label" style="font-size:10px;">Done</span><span class="ge-num text-xs" style="margin-left:auto; color:var(--t3);" id="count-done">0</span></div>
+                            <div class="kanban-col space-y-2.5" data-status="Complete" id="col-done" style="min-height:180px;"></div>
+                        </div>
+                    </div>
+                    <div id="view-table" class="glass overflow-x-auto hidden">
+                        <table class="w-full text-left text-sm"><thead id="t-table-head"></thead><tbody id="t-table-body" style="border-top:1px solid var(--line);"></tbody></table>
                     </div>
                 </div>
 
                 <div id="page-clients" class="p-4 md:p-8 space-y-6 hidden">
-                    <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 lg:gap-4 mb-2">
-                        <div class="flex items-center gap-3 lg:gap-4">
-                            <div>
-                                <h1 class="text-3xl font-bold tracking-tight">
-                                    <span class="md:hidden">Clients</span>
-                                    <span class="hidden md:inline">Clients &amp; Reports</span>
-                                </h1>
-                                <p class="hidden md:block text-gray-400">Monitor individual ad performance and retention.</p>
+                    <!-- The old page had its own <h1> + a "New Client" button up top; New Client
+                         moved to the roster empty-state, and the title is now the shared header
+                         (updateGeHeader('clients') sets it to the selected client's name). -->
+                    <div class="hidden">
+                        <button id="btn-add-client" onclick="openAddClientModal()" title="Add a new client" class="btn-primary btn text-xs transition whitespace-nowrap">
+                            <i class="fa-solid fa-plus sm:mr-2"></i><span class="hidden sm:inline">New Client</span>
+                        </button>
+                    </div>
+
+                    <!-- Client switcher: one bordered segmented unit, stage chip, and a
+                         one-line summary beside it, matching the target design. Cycling +
+                         picking a client still calls the same cycleClient()/toggleDropdown(). -->
+                    <div class="flex items-center justify-between flex-wrap gap-4">
+                        <div class="flex items-center flex-wrap gap-3">
+                            <div class="flex items-center" style="border:1px solid var(--line); border-radius:3px; overflow:hidden;">
+                                <button onclick="cycleClient(-1)" style="width:32px; height:34px; background:transparent; border:none; color:var(--t2); cursor:pointer;"><i class="fa-solid fa-chevron-left" style="font-size:10px;"></i></button>
+                                <div class="dropdown-container">
+                                    <div onclick="toggleDropdown('c-account-menu')" style="height:34px; padding:0 16px; border-left:1px solid var(--line); border-right:1px solid var(--line); color:var(--t1); font-size:12.5px; cursor:pointer; display:flex; align-items:center; gap:9px; min-width:180px; justify-content:space-between;">
+                                        <span id="c-account-label" class="truncate">All Accounts</span>
+                                        <i class="fa-solid fa-chevron-down" style="font-size:8px; color:var(--t3);"></i>
+                                    </div>
+                                    <div id="c-account-menu" class="custom-dropdown-menu max-h-[300px] overflow-y-auto"></div>
+                                </div>
+                                <button onclick="cycleClient(1)" style="width:32px; height:34px; background:transparent; border:none; color:var(--t2); cursor:pointer;"><i class="fa-solid fa-chevron-right" style="font-size:10px;"></i></button>
                             </div>
-                            <button id="btn-add-client" onclick="openAddClientModal()" title="Add a new client" class="hidden btn-primary btn text-xs transition whitespace-nowrap">
-                                <i class="fa-solid fa-plus sm:mr-2"></i><span class="hidden sm:inline">New Client</span>
-                            </button>
+                            <span id="c-stage-chip" class="hidden ge-label" style="color:var(--gold); border:1px solid var(--goldLine); padding:5px 10px; border-radius:2px; text-transform:none;"></span>
+                            <span id="c-summary-line" class="hidden text-xs" style="color:var(--t2);"></span>
+
+                            <div id="global-health-pill" class="glass-pill hidden cursor-pointer" onclick="switchClientView('health')" title="Relationship health — click for detail">
+                                <i id="global-health-icon" class="fa-solid fa-heart-pulse mr-2" style="color:var(--t3);"></i>
+                                <span id="global-health-score" class="font-bold" style="color:var(--t2);">--</span>
+                            </div>
                         </div>
-                        <div class="flex items-center flex-wrap gap-2 lg:gap-3">
-                            <span id="c-stage-chip" class="hidden text-[11px] font-bold uppercase tracking-widest text-blue-300 bg-blue-500/15 border border-blue-500/30 px-2.5 py-1 rounded-full whitespace-nowrap"></span>
-
-                            <div id="global-health-pill" class="glass-pill hidden cursor-pointer border border-white/10 hover:bg-white/10 transition" onclick="switchClientView('health')" title="Relationship health — click for detail">
-                                <i id="global-health-icon" class="fa-solid fa-heart-pulse mr-2 text-gray-400"></i>
-                                <span id="global-health-score" class="font-bold text-gray-400">--</span>
-                            </div>
-
-                            <span class="hidden lg:block w-px h-7 bg-white/10 mx-0.5"></span>
-
-                            <button id="btn-preview-client" onclick="previewAsClient()" title="See this client's portal exactly as they do" class="hidden glass-icon-btn">
-                                <i class="fa-solid fa-eye"></i>
+                        <div class="flex items-center flex-wrap gap-2">
+                            <button id="btn-preview-client" onclick="previewAsClient()" title="See this client's portal exactly as they do" class="hidden btn-secondary btn text-xs">
+                                <i class="fa-solid fa-eye mr-2"></i>Preview portal
                             </button>
-                            <button id="btn-edit-client" onclick="openEditClientModal()" title="Edit this client's details" class="hidden glass-icon-btn">
-                                <i class="fa-solid fa-pen-to-square"></i>
+                            <button id="btn-edit-client" onclick="openEditClientModal()" title="Edit this client's details" class="hidden btn-secondary btn text-xs">
+                                <i class="fa-solid fa-pen-to-square mr-2"></i>Edit
                             </button>
-
-                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" title="Move this client to another stage" class="hidden bg-yellow-500 hover:bg-yellow-400 text-slate-900 btn text-sm shadow-lg transition whitespace-nowrap">
-                                <i class="fa-solid fa-arrow-right-arrow-left sm:mr-2"></i><span class="hidden sm:inline">Move Stage</span>
+                            <button id="btn-stage-transition" onclick="openStageTransitionModal()" title="Move this client to another stage" class="hidden btn-primary btn text-sm whitespace-nowrap">
+                                <i class="fa-solid fa-arrow-right-arrow-left sm:mr-2"></i><span class="hidden sm:inline">Move stage</span>
                             </button>
-
                             <div class="dropdown-container">
                                 <button id="btn-client-more" onclick="toggleDropdown('c-more-menu')" title="More actions" class="hidden glass-icon-btn">
                                     <i class="fa-solid fa-ellipsis"></i>
                                 </button>
                                 <div id="c-more-menu" class="custom-dropdown-menu !w-[232px] p-2">
                                     <div class="dropdown-item" id="btn-invite-client" onclick="openInviteModal()">
-                                        <i class="fa-solid fa-user-plus w-4 text-purple-400"></i> Invite to portal
+                                        <i class="fa-solid fa-user-plus w-4" style="color:var(--gold);"></i> Invite to portal
                                     </div>
                                     <div class="dropdown-item" id="btn-toggle-pause" onclick="toggleClientPause()">
-                                        <i id="btn-toggle-pause-icon" class="fa-solid fa-circle-pause w-4 text-amber-400"></i> <span id="btn-toggle-pause-label">Pause Client</span>
+                                        <i id="btn-toggle-pause-icon" class="fa-solid fa-circle-pause w-4" style="color:var(--warn);"></i> <span id="btn-toggle-pause-label">Pause Client</span>
                                     </div>
-                                    <div class="h-px bg-white/10 my-1.5 mx-1"></div>
-                                    <div class="dropdown-item !text-red-300" id="btn-toggle-archive" onclick="toggleClientArchive()">
+                                    <div style="height:1px; background:var(--line); margin:6px 4px;"></div>
+                                    <div class="dropdown-item" id="btn-toggle-archive" onclick="toggleClientArchive()" style="color:var(--neg);">
                                         <i id="btn-toggle-archive-icon" class="fa-solid fa-box-archive w-4"></i> <span id="btn-toggle-archive-label">Archive</span>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </header>
+                    </div>
 
                     <!-- Pinned to the top of the scroll area. Cycling clients from halfway
                          down a long report meant scrolling back up to reach the arrows, then
-                         back down to read the result. Only the two selectors travel: the
-                         action buttons stay put, so the bar is never more than two rows. -->
+                         back down to read the result. Only the date selector travels here now;
+                         the account switcher moved up into the row above. -->
                     <div class="sticky-toolbar -mx-4 md:-mx-8 px-4 md:px-8 py-3">
-                        <div class="flex items-center flex-wrap gap-3">
-                                <div class="flex items-center gap-1">
-                                    <button onclick="cycleClient(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
-                                    <div class="dropdown-container">
-                                        <div class="glass-pill !w-[180px] justify-between" onclick="toggleDropdown('c-account-menu')">
-                                            <span id="c-account-label" class="truncate flex-1 text-center pr-2">All Accounts</span>
-                                            <i class="fa-solid fa-chevron-down text-[10px] shrink-0"></i>
-                                        </div>
-                                        <div id="c-account-menu" class="custom-dropdown-menu max-h-[300px] overflow-y-auto"></div>
-                                    </div>
-                                    <button onclick="cycleClient(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
-                                </div>
-                                <div class="flex items-center gap-1">
-                                    <button onclick="cycleDate(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
-                                    <div class="dropdown-container flex gap-2">
-                                        <div class="glass-pill" onclick="toggleDropdown('c-date-menu')"><i class="fa-regular fa-calendar-range mr-2 text-yellow-400" id="c-date-icon"></i><span id="c-date-label">Last 7 Days</span><i class="fa-solid fa-chevron-down text-[10px] ml-3"></i></div>
-                                        <div id="c-date-menu" class="custom-dropdown-menu">
-                                            <div class="dropdown-item" onclick="cSelectDate('today', 'Today')">Today</div>
-                                            <div class="dropdown-item" onclick="cSelectDate('yesterday', 'Yesterday')">Yesterday</div>
-                                            <div class="dropdown-item" onclick="cSelectDate('last7', 'Last 7 Days')">Last 7 Days</div>
-                                            <div class="dropdown-item" onclick="cSelectDate('last30', 'Last 30 Days')">Last 30 Days</div>
-                                            <div class="dropdown-item" onclick="cSelectDate('max', 'Maximum Time')">Maximum Time</div>
-                                            <div class="p-3" onclick="event.stopPropagation()">
-                                                <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-3 px-1">Custom Range</p>
-                                                <div class="flex flex-col gap-2">
-                                                    <input type="date" id="c-custom-start" class="glass-input !py-1.5 !px-3">
-                                                    <input type="date" id="c-custom-end" class="glass-input !py-1.5 !px-3">
-                                                    <button onclick="applyDateRange()" class="w-full bg-white text-black font-bold py-2 rounded-xl text-xs mt-2">Apply</button>
-                                                </div>
-                                            </div>
+                        <div class="flex items-center gap-1">
+                            <button onclick="cycleDate(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                            <div class="dropdown-container flex gap-2">
+                                <div class="glass-pill" onclick="toggleDropdown('c-date-menu')"><i class="fa-regular fa-calendar-range mr-2" id="c-date-icon" style="color:var(--gold);"></i><span id="c-date-label">Last 7 Days</span><i class="fa-solid fa-chevron-down text-[10px] ml-3"></i></div>
+                                <div id="c-date-menu" class="custom-dropdown-menu">
+                                    <div class="dropdown-item" onclick="cSelectDate('today', 'Today')">Today</div>
+                                    <div class="dropdown-item" onclick="cSelectDate('yesterday', 'Yesterday')">Yesterday</div>
+                                    <div class="dropdown-item" onclick="cSelectDate('last7', 'Last 7 Days')">Last 7 Days</div>
+                                    <div class="dropdown-item" onclick="cSelectDate('last30', 'Last 30 Days')">Last 30 Days</div>
+                                    <div class="dropdown-item" onclick="cSelectDate('max', 'Maximum Time')">Maximum Time</div>
+                                    <div class="p-3" onclick="event.stopPropagation()">
+                                        <p class="ge-label" style="margin-bottom:10px;">Custom Range</p>
+                                        <div class="flex flex-col gap-2">
+                                            <input type="date" id="c-custom-start" class="glass-input !py-1.5 !px-3">
+                                            <input type="date" id="c-custom-end" class="glass-input !py-1.5 !px-3">
+                                            <button onclick="applyDateRange()" class="btn-primary btn text-xs w-full mt-2">Apply</button>
                                         </div>
                                     </div>
-                                    <button onclick="cycleDate(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
                                 </div>
+                            </div>
+                            <button onclick="cycleDate(1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-right text-xs"></i></button>
                         </div>
                     </div>
 
-                    <div class="flex items-center gap-6 border-b border-white/10 mb-6 px-2 overflow-x-auto">
-                        <button id="tab-btn-ads" onclick="switchClientView('ads')" class="whitespace-nowrap pb-3 text-sm font-bold text-yellow-400 border-b-2 border-yellow-400"><i class="fa-brands fa-facebook mr-2"></i>Ads Performance</button>
-                        <button id="tab-btn-health" onclick="switchClientView('health')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-heart-pulse mr-2"></i>Relationship Health</button>
-                        <button id="tab-btn-seo" onclick="switchClientView('seo')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-brands fa-google mr-2"></i>SEO & Organic</button>
-                        <button id="tab-btn-chat" onclick="switchClientView('chat')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-robot mr-2"></i>AI Agent</button>
-                        <button id="tab-btn-reports" onclick="switchClientView('reports')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-folder-open mr-2"></i>Reports</button>
-<button id="tab-btn-payments" onclick="switchClientView('payments')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300"><i class="fa-solid fa-credit-card mr-2"></i>Payments</button>
-
+                    <div class="flex flex-wrap items-center gap-7" style="border-bottom:1px solid var(--line); padding:0 2px;">
+                        <button id="tab-btn-ads" onclick="switchClientView('ads')" class="whitespace-nowrap" style="background:transparent; border:none; border-bottom:1.5px solid var(--goldSolid); padding:0 0 13px; font-family:inherit; font-size:13px; font-weight:500; color:var(--t1); cursor:pointer; margin-bottom:-1px;">Ads</button>
+                        <button id="tab-btn-health" onclick="switchClientView('health')" class="whitespace-nowrap ge-tab" style="background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; font-weight:400; color:var(--t2); cursor:pointer; margin-bottom:-1px;">Relationship</button>
+                        <button id="tab-btn-seo" onclick="switchClientView('seo')" class="whitespace-nowrap ge-tab" style="background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; font-weight:400; color:var(--t2); cursor:pointer; margin-bottom:-1px;">Organic &amp; SEO</button>
+                        <button id="tab-btn-chat" onclick="switchClientView('chat')" class="whitespace-nowrap ge-tab" style="background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; font-weight:400; color:var(--t2); cursor:pointer; margin-bottom:-1px;">Agent</button>
+                        <button id="tab-btn-reports" onclick="switchClientView('reports')" class="whitespace-nowrap ge-tab" style="background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; font-weight:400; color:var(--t2); cursor:pointer; margin-bottom:-1px;">Reports</button>
+                        <button id="tab-btn-payments" onclick="switchClientView('payments')" class="whitespace-nowrap ge-tab" style="background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; font-weight:400; color:var(--t2); cursor:pointer; margin-bottom:-1px;">Payments</button>
                     </div>
 
                     <div id="c-view-ads" class="space-y-6 block">
-                        
-                        <div id="client-specific-tasks-box" class="glass p-6 border-l-4 border-blue-500 hidden flex flex-col min-h-[160px]">
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-check-square mr-2 text-blue-400"></i> Active Tasks for <span id="c-task-client-name" class="text-white">Client</span></h3>
-                                <button onclick="openTaskDrawer('new', true)" class="text-xs bg-blue-600 hover:bg-blue-500 text-white btn btn-sm transition">+ Task</button>
+
+                        <!-- "open work." in the target design — same [title][owner][status]
+                             shape, with due date kept as a small second line rather than
+                             dropped, since that's real information the mockup's own sample
+                             data didn't need to show. -->
+                        <div id="client-specific-tasks-box" class="glass hidden" style="padding:18px 24px 6px;">
+                            <div class="flex justify-between items-center mb-2">
+                                <h3 class="ge-title" style="font-size:18px;">open work.</h3>
+                                <button onclick="openTaskDrawer('new', true)" class="btn-secondary btn text-xs" style="height:30px; padding:0 13px; border-radius:2px;">Add task</button>
                             </div>
-                            <div id="c-task-list" class="space-y-2 flex-1 overflow-y-auto max-h-[200px] pr-2">
-                                </div>
+                            <div id="c-task-list" style="max-height:260px; overflow-y:auto;">
+                            </div>
                         </div>
 
-
-                        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Spend</p><h4 class="text-xl font-bold" id="kpi-spend">$0</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Leads</p><h4 class="text-xl font-bold text-green-400" id="kpi-leads">0</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">CPL</p><h4 class="text-xl font-bold text-blue-400" id="kpi-cpl">$0.00</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">CPC</p><h4 class="text-xl font-bold" id="kpi-cpc">$0.00</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">CPM</p><h4 class="text-xl font-bold" id="kpi-cpm">$0.00</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">CTR</p><h4 class="text-xl font-bold" id="kpi-ctr">0%</h4></div>
-                            <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Freq.</p><h4 class="text-xl font-bold text-purple-400" id="kpi-freq">0.0</h4></div>
+                        <!-- Divided strip, matching the target design's KPI row exactly
+                             (Spend/Leads/CPL/CPC/CPM/CTR/Frequency). Deltas are real: see
+                             updateClientKpiDeltas() in app.js, comparing against the
+                             immediately preceding period of equal length. -->
+                        <div class="glass" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));">
+                            <div style="padding:20px 22px; border-left:1px solid var(--line);"><div class="ge-label">Spend</div><div class="ge-display ge-num" style="font-size:27px; font-weight:300; margin-top:8px; color:var(--t1);" id="kpi-spend">$0</div><div class="text-xs" style="margin-top:6px; color:var(--t2);" id="kpi-spend-delta"></div></div>
+                            <div style="padding:20px 22px; border-left:1px solid var(--line);"><div class="ge-label">Leads</div><div class="ge-display ge-num" style="font-size:27px; font-weight:300; margin-top:8px; color:var(--t1);" id="kpi-leads">0</div><div class="text-xs" style="margin-top:6px; color:var(--t2);" id="kpi-leads-delta"></div></div>
+                            <div style="padding:20px 22px; border-left:1px solid var(--line);"><div class="ge-label">CPL</div><div class="ge-display ge-num" style="font-size:27px; font-weight:300; margin-top:8px; color:var(--t1);" id="kpi-cpl">$0.00</div><div class="text-xs" style="margin-top:6px; color:var(--t2);" id="kpi-cpl-delta"></div></div>
+                            <div style="padding:20px 22px; border-left:1px solid var(--line);"><div class="ge-label">CPC</div><div class="ge-display ge-num" style="font-size:27px; font-weight:300; margin-top:8px; color:var(--t1);" id="kpi-cpc">$0.00</div><div class="text-xs" style="margin-top:6px; color:var(--t2);" id="kpi-cpc-delta"></div></div>
+                            <div style="padding:20px 22px; border-left:1px solid var(--line);"><div class="ge-label">CPM</div><div class="ge-display ge-num" style="font-size:27px; font-weight:300; margin-top:8px; color:var(--t1);" id="kpi-cpm">$0.00</div><div class="text-xs" style="margin-top:6px; color:var(--t2);" id="kpi-cpm-delta"></div></div>
+                            <div style="padding:20px 22px; border-left:1px solid var(--line);"><div class="ge-label">CTR</div><div class="ge-display ge-num" style="font-size:27px; font-weight:300; margin-top:8px; color:var(--t1);" id="kpi-ctr">0%</div><div class="text-xs" style="margin-top:6px; color:var(--t2);" id="kpi-ctr-delta"></div></div>
+                            <div style="padding:20px 22px; border-left:1px solid var(--line);"><div class="ge-label">Frequency</div><div class="ge-display ge-num" style="font-size:27px; font-weight:300; margin-top:8px; color:var(--t1);" id="kpi-freq">0.0</div><div class="text-xs" style="margin-top:6px; color:var(--t2);" id="kpi-freq-delta"></div></div>
                         </div>
 
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div class="glass p-6 lg:col-span-2 min-h-[400px]"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-6 text-center">Volume Over Time</h3><div class="relative w-full h-[350px]"><canvas id="trendChart"></canvas></div></div>
-                            <div class="glass p-6 min-h-[400px]"><h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-6 text-center">Daily CPL ($)</h3><div class="relative w-full h-[300px]"><canvas id="accountChart"></canvas></div></div>
+                            <div class="glass p-6 lg:col-span-2 flex flex-col" style="min-height:340px;">
+                                <div class="flex items-baseline justify-between">
+                                    <h3 class="ge-title" style="font-size:18px;">leads &amp; spend.</h3>
+                                    <div class="flex gap-4 text-xs" style="color:var(--t2);">
+                                        <span class="flex items-center gap-1.5"><span style="width:8px; height:2px; background:var(--gold); display:block;"></span>Leads</span>
+                                        <span class="flex items-center gap-1.5"><span style="width:8px; height:2px; background:var(--pos); display:block;"></span>Spend</span>
+                                    </div>
+                                </div>
+                                <div class="flex-1 relative w-full mt-3"><canvas id="trendChart"></canvas></div>
+                            </div>
+                            <div class="glass p-6 flex flex-col" style="min-height:340px;">
+                                <h3 class="ge-title" style="font-size:18px;">cost per lead.</h3>
+                                <p class="text-xs" style="margin-top:5px; color:var(--t2);" id="cpl-target-line">No target set</p>
+                                <div class="flex items-baseline gap-3 mt-2">
+                                    <span class="ge-display ge-num" style="font-size:32px; font-weight:300;" id="cpl-hero-val">$0.00</span>
+                                    <span class="text-xs" style="font-weight:500;" id="cpl-hero-delta"></span>
+                                </div>
+                                <div class="flex-1 relative w-full mt-2" style="min-height:110px;"><canvas id="accountChart"></canvas></div>
+                                <p class="text-xs" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--line); color:var(--t2); line-height:1.55;" id="cpl-driver-line"></p>
+                            </div>
                         </div>
 
-                        <div id="ai-box-container" class="glass p-6 border-l-4 border-yellow-400 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hidden">
+                        <div id="ai-box-container" class="glass p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hidden" style="background:var(--goldWash); border-color:var(--goldLine);">
                             <div class="flex-1">
                                 <div class="flex items-center gap-2 mb-3">
-                                    <i class="fa-solid fa-sparkles text-yellow-400"></i>
-                                    <h3 class="font-bold text-lg">AI Senior Buyer Analysis <span id="ai-client-lbl" class="text-gray-400 text-sm font-normal ml-2"></span></h3>
+                                    <i class="fa-solid fa-sparkles" style="color:var(--gold);"></i>
+                                    <h3 class="font-bold text-lg" style="color:var(--t1);">AI Senior Buyer Analysis <span id="ai-client-lbl" class="text-sm font-normal ml-2" style="color:var(--t2);"></span></h3>
                                 </div>
-                                <div id="ai-summary-content" class="text-sm leading-relaxed opacity-80">Ready to analyze data for this client.</div>
+                                <div id="ai-summary-content" class="text-sm leading-relaxed" style="color:var(--t2);">Ready to analyze data for this client.</div>
                             </div>
-                            <button id="run-ai-btn" onclick="triggerAI()" class="bg-yellow-400 text-yellow-900 font-bold px-6 py-2 rounded-full hover:bg-yellow-300 shadow-lg shrink-0 transition"><i class="fa-solid fa-bolt"></i> Run Analysis</button>
+                            <button id="run-ai-btn" onclick="triggerAI()" class="btn-primary btn text-sm shrink-0"><i class="fa-solid fa-bolt mr-2"></i>Run Analysis</button>
                         </div>
 
                         <div id="all-clients-ads-list" class="glass p-6 mt-6 hidden">
-                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Client Performance Breakdown</h3>
+                            <h3 class="ge-title" style="font-size:16px; margin-bottom:14px;">client performance breakdown.</h3>
                             <div class="overflow-x-auto">
                                 <table class="w-full text-left text-sm">
-                                    <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
+                                    <thead>
                                         <tr>
-                                            <th class="pb-3 font-semibold">Client Name</th>
-                                            <th class="pb-3 font-semibold text-right">Spend</th>
-                                            <th class="pb-3 font-semibold text-right">Leads</th>
-                                            <th class="pb-3 font-semibold text-right">CPL</th>
+                                            <th class="pb-3">Client Name</th>
+                                            <th class="pb-3 text-right">Spend</th>
+                                            <th class="pb-3 text-right">Leads</th>
+                                            <th class="pb-3 text-right">CPL</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="all-clients-ads-tbody" class="divide-y divide-white/5">
+                                    <tbody id="all-clients-ads-tbody" style="border-top:1px solid var(--line);">
                                     </tbody>
                                 </table>
                             </div>

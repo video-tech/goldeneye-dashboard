@@ -3348,6 +3348,109 @@ window.submitClientRequest = async function() {
                 await runAutoChecks();
                 await autoAdvanceCompletedOnboarding();
             }
+
+            if (typeof updateNavBadges === 'function') updateNavBadges();
+        }
+
+        // Sidebar counts, next to Tasks / Accounts / Ad approvals — real numbers off the
+        // same data everything else on screen already reads, refreshed wherever
+        // fetchAllGlobalData() already runs (every mutation already calls it).
+        function updateNavBadges() {
+            const tasksBadge = document.getElementById('nav-badge-tasks');
+            if (tasksBadge) tasksBadge.innerText = String(globalTasksData.filter(t => t.status !== 'Complete').length || '');
+
+            const clientsBadge = document.getElementById('nav-badge-clients');
+            if (clientsBadge) clientsBadge.innerText = String(globalClientsData.filter(c => isActiveClient(c)).length || '');
+
+            const creativesBadge = document.getElementById('nav-badge-creatives');
+            if (creativesBadge) {
+                const pending = (globalCreativesData || []).filter(r => r.status !== 'approved' && r.status !== 'changes_requested').length;
+                creativesBadge.innerText = pending ? String(pending) : '';
+            }
+        }
+
+        // The shared header's crumb + title (see body.html — one header now, not one per
+        // page). Called from switchAppPage() and from cSelectAccount(), since the Accounts
+        // page's title is the selected client's name, not a fixed string.
+        const GE_PAGE_META = {
+            goldeneye: { crumb: 'Agency', title: 'overview.' },
+            tasks: { crumb: 'Agency', title: 'task queue.' },
+            clients: { crumb: 'Accounts', title: null }, // resolved below from cSelectedAccount
+            creatives: { crumb: 'Accounts', title: 'ad approvals.' },
+            sales: { crumb: 'Agency', title: 'sales command.' },
+            templates: { crumb: 'Agency', title: 'templates.' },
+            settings: { crumb: 'Agency', title: 'settings.' },
+            audits: { crumb: 'Agency', title: 'morning audits.' }
+        };
+        function updateGeHeader(page) {
+            const crumbEl = document.getElementById('ge-crumb');
+            const titleEl = document.getElementById('ge-page-title');
+            if (!crumbEl || !titleEl) return;
+            const meta = GE_PAGE_META[page];
+            if (!meta) return;
+            crumbEl.innerText = meta.crumb;
+            titleEl.innerText = meta.title
+                || (typeof cSelectedAccount !== 'undefined' && cSelectedAccount !== 'ALL' ? cSelectedAccount.toLowerCase() + '.' : 'accounts.');
+        }
+
+        // Real search, not decorative — filters what's already loaded client-side (open
+        // tasks and clients), same data every other admin view reads. Plain substring
+        // match, not the fuzzy normalize().includes() used for Meta account reconciliation
+        // elsewhere — that fuzziness exists to survive Meta renaming ad accounts, which
+        // has nothing to do with someone typing a client's name into a search box.
+        let geSearchOutsideHandlerAttached = false;
+        function performGlobalSearch(query) {
+            const box = document.getElementById('ge-search-results');
+            if (!box) return;
+            const q = query.trim().toLowerCase();
+            if (!q) { closeGlobalSearch(); return; }
+
+            const clientMatches = (globalClientsData || [])
+                .filter(c => (c.name || '').toLowerCase().includes(q))
+                .slice(0, 5);
+            const taskMatches = (globalTasksData || [])
+                .filter(t => t.status !== 'Complete' && (t.title || '').toLowerCase().includes(q))
+                .slice(0, 5);
+
+            if (!clientMatches.length && !taskMatches.length) {
+                box.innerHTML = `<div class="ge-label" style="padding:14px 16px;">No matches</div>`;
+                box.classList.remove('hidden');
+            } else {
+                let html = '';
+                if (clientMatches.length) {
+                    html += `<div class="ge-label" style="padding:10px 16px 6px;">Accounts</div>`;
+                    html += clientMatches.map(c => `
+                        <div class="ge-search-row" onmousedown="goToClient('${escapeAttr(c.name)}'); closeGlobalSearch();" style="padding:9px 16px; cursor:pointer; font-size:13px; color:var(--t1);">
+                            ${escapeAttr(stripSlashEscapes(c.name))}
+                        </div>`).join('');
+                }
+                if (taskMatches.length) {
+                    html += `<div class="ge-label" style="padding:10px 16px 6px;${clientMatches.length ? ' border-top:1px solid var(--line);' : ''}">Tasks</div>`;
+                    html += taskMatches.map(t => `
+                        <div class="ge-search-row" onmousedown="navTo('tasks'); setTimeout(() => openTaskDrawer(${t.id}), 100); closeGlobalSearch();" style="padding:9px 16px; cursor:pointer;">
+                            <div style="font-size:13px; color:var(--t1);">${escapeAttr(stripSlashEscapes(t.title || ''))}</div>
+                            <div class="ge-label" style="margin-top:2px;">${escapeAttr(stripSlashEscapes(t.client || ''))}</div>
+                        </div>`).join('');
+                }
+                box.innerHTML = html;
+                box.classList.remove('hidden');
+            }
+
+            // Bound once, not per keystroke. mousedown on the rows above fires before this
+            // click, so picking a result still registers even though it also closes the box.
+            if (!geSearchOutsideHandlerAttached) {
+                geSearchOutsideHandlerAttached = true;
+                document.addEventListener('click', (e) => {
+                    const input = document.getElementById('ge-search-input');
+                    const results = document.getElementById('ge-search-results');
+                    if (!input || !results) return;
+                    if (e.target !== input && !results.contains(e.target)) closeGlobalSearch();
+                });
+            }
+        }
+        function closeGlobalSearch() {
+            const box = document.getElementById('ge-search-results');
+            if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
         }
 
         function populateCreativeClientDropdown() {
@@ -3362,9 +3465,11 @@ window.submitClientRequest = async function() {
         function switchAppPage(page) {
             // Save the page choice to the browser's local memory
             localStorage.setItem('midas_current_page', page);
-            
+
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             const navEl = document.getElementById(`nav-${page}`); if(navEl) navEl.classList.add('active');
+            if (typeof updateGeHeader === 'function') updateGeHeader(page);
+            if (typeof closeGlobalSearch === 'function') closeGlobalSearch();
     
     document.getElementById('page-goldeneye').classList.add('hidden'); 
     document.getElementById('page-tasks').classList.add('hidden'); 
@@ -3412,15 +3517,23 @@ window.submitClientRequest = async function() {
         //
         // Contract renewal flags used to live here too and have been dropped: they fired
         // off contract_end_date, which isn't maintained, so they were noise.
-        function dashFeedLabel(t) {
-            if (normalize(t.client) === normalize('Midas Media'))
-                return { text: 'HQ', cls: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/25' };
-            if (t.type === 'Client Request')
-                return { text: 'Request', cls: 'text-blue-400 bg-blue-500/10 border-blue-500/25' };
-            // The assignee is what makes a task the client's own — see the task board
-            if (String(t.assignee || '').trim().toLowerCase() === 'client')
-                return { text: 'Client', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25' };
-            return { text: 'For client', cls: 'text-gray-400 bg-white/5 border-white/10' };
+        //
+        // Status-based, not ownership-based — matches the target design (Late / Today /
+        // Queued / Onboarding), which is a real change from the row's old HQ/Request/
+        // Client/For-client categories. "Onboarding" reads `__onboardingStep`, the same
+        // flag clientOnboardingPseudoTasks() stamps on a client's outstanding onboarding
+        // steps mirrored onto the board (see that function) — not a guess, an existing field.
+        // `due` is the actual display text here (real day name / "N days late" / "Today"),
+        // not a separate badge, so this returns everything the row needs in one place.
+        function dashFeedCategory(t, today) {
+            if (t.due && t.due < today) {
+                const days = Math.max(1, Math.round((new Date(today) - new Date(t.due)) / 86400000));
+                return { tag: 'Late', tagColor: '--neg', due: `${days} day${days === 1 ? '' : 's'} late`, dueColor: '--neg' };
+            }
+            if (t.due === today) return { tag: 'Today', tagColor: '--warn', due: 'Today', dueColor: '--warn' };
+            const dayText = t.due ? new Date(t.due + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' }) : '';
+            if (t.__onboardingStep) return { tag: 'Onboarding', tagColor: '--gold', due: dayText, dueColor: '--t2' };
+            return { tag: 'Queued', tagColor: '--t3', due: dayText, dueColor: '--t2' };
         }
 
         // Ten is about a phone screen's worth. The rest are one tap away rather than a
@@ -3453,52 +3566,44 @@ window.submitClientRequest = async function() {
             if (countEl) countEl.innerText = open.length ? String(open.length) : '';
 
             if (!open.length) {
-                list.innerHTML = '<p class="text-center text-xs text-gray-500 italic mt-8">All clear &mdash; nothing outstanding.</p>';
+                list.innerHTML = '<p class="text-center text-xs italic mt-8" style="color:var(--t3);">All clear &mdash; nothing outstanding.</p>';
                 return;
             }
 
             const shown = dashFeedExpanded ? open : open.slice(0, DASH_FEED_CAP);
             const hidden = open.length - shown.length;
 
+            // [tag][title][who][due], matching the target design exactly: tag carries a
+            // 2px left rule in its category color, due is real text (day name / "N days
+            // late" / "Today"), not an icon badge. Title grows (flex:1 1 300px) rather
+            // than sitting in a fixed column, so it doesn't ellipsise at narrow widths
+            // while "who" keeps its own space. The per-row priority score still drives
+            // sort order above — it's just not printed here, same as before.
             list.innerHTML = shown.map(t => {
-                const label = dashFeedLabel(t);
-                const pC = t.score > 75 ? '#ef4444' : (t.score > 50 ? '#f59e0b' : '#3b82f6');
+                const cat = dashFeedCategory(t, today);
+                // Client name alone for client-owned work; client + staff name otherwise,
+                // matching "SimpliBlinds · Joey" / "PANDEN" in the target design.
+                const staff = (t.assignee || '').trim();
+                const who = staff && staff.toLowerCase() !== 'client' ? `${t.client} · ${staff}` : (t.client || '');
 
-                let due = '';
-                if (t.due && t.due < today) {
-                    due = '<span class="text-[10px] font-bold text-red-400 whitespace-nowrap"><i class="fa-solid fa-circle-exclamation mr-1"></i>Overdue</span>';
-                } else if (t.due === today) {
-                    due = '<span class="text-[10px] font-bold text-yellow-400 whitespace-nowrap"><i class="fa-solid fa-bell mr-1"></i>Today</span>';
-                }
-
-                // HQ items name the person; client work names the client
-                const who = label.text === 'HQ' ? (t.assignee || 'HQ Team') : t.client;
-
-                return `<div class="bg-black/20 p-3 rounded-xl border border-white/5 cursor-pointer hover:bg-white/5 transition"
+                return `<div style="background:var(--inset); border-radius:2px; cursor:pointer;" class="p-3 transition"
                              onclick="navTo('tasks'); setTimeout(() => openTaskDrawer(${t.id}), 100)">
-                            <div class="flex justify-between items-center gap-2 mb-1.5">
-                                <div class="flex items-center gap-2 min-w-0">
-                                    <span class="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border shrink-0 ${label.cls}">${label.text}</span>
-                                    <span class="text-[10px] text-gray-400 truncate">${escapeAttr(stripSlashEscapes(who || ''))}</span>
-                                </div>
-                                <div class="flex items-center gap-2 shrink-0">
-                                    ${due}
-                                    <div class="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded text-[9px] font-bold">
-                                        <div class="w-1.5 h-1.5 rounded-full" style="background:${pC};"></div>${t.score ?? 0}
-                                    </div>
-                                </div>
+                            <div class="flex items-center gap-3">
+                                <span class="ge-label shrink-0" style="min-width:70px; border-left:2px solid var(${cat.tagColor}); padding-left:7px; color:var(${cat.tagColor});">${cat.tag}</span>
+                                <p class="truncate" style="flex:1 1 300px; font-size:13.5px; font-weight:500; color:var(--t1);">${escapeAttr(stripSlashEscapes(t.title || ''))}</p>
+                                <span class="text-xs truncate shrink-0" style="max-width:160px; color:var(--t2);">${escapeAttr(stripSlashEscapes(who))}</span>
+                                <span class="text-xs shrink-0 ge-num" style="margin-left:auto; color:var(${cat.dueColor});">${cat.due}</span>
                             </div>
-                            <p class="text-xs font-bold text-white leading-tight">${escapeAttr(stripSlashEscapes(t.title || ''))}</p>
                         </div>`;
             }).join('');
 
             if (hidden > 0) {
-                list.innerHTML += `<button onclick="toggleDashFeed()" class="w-full text-center text-xs text-blue-400 hover:text-blue-300 hover:underline py-2 transition">
-                                       ${hidden} more <i class="fa-solid fa-chevron-down ml-1 text-[10px]"></i>
+                list.innerHTML += `<button onclick="toggleDashFeed()" class="w-full text-center py-2 transition ge-label" style="color:var(--gold);">
+                                       ${hidden} more <i class="fa-solid fa-chevron-down ml-1"></i>
                                    </button>`;
             } else if (dashFeedExpanded && open.length > DASH_FEED_CAP) {
-                list.innerHTML += `<button onclick="toggleDashFeed()" class="w-full text-center text-xs text-gray-400 hover:text-white hover:underline py-2 transition">
-                                       Show less <i class="fa-solid fa-chevron-up ml-1 text-[10px]"></i>
+                list.innerHTML += `<button onclick="toggleDashFeed()" class="w-full text-center py-2 transition ge-label" style="color:var(--t2);">
+                                       Show less <i class="fa-solid fa-chevron-up ml-1"></i>
                                    </button>`;
             }
         }
@@ -3512,51 +3617,147 @@ window.submitClientRequest = async function() {
 
             const isLight = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isLight ? '#64748b' : 'rgba(255,255,255,0.6)';
 
+            // Read the live theme tokens rather than hard-coding a color, so the chart and
+            // the health bands agree with whichever theme is on screen and flip with it —
+            // same reasoning as the redesign spec's own "charts" note.
+            const wrapCs = getComputedStyle(document.getElementById('theme-wrapper'));
+            const tok = (name, fallback) => (wrapCs.getPropertyValue(name) || '').trim() || fallback;
+            const goldSolid = tok('--goldSolid', '#d9b463');
+            const posColor  = tok('--pos', '#8fae90');
+            const warnColor = tok('--warn', '#d9a84e');
+            const negColor  = tok('--neg', '#cb8b76');
+            const t3Color   = tok('--t3', '#968c7a');
+
             const activeClients = globalClientsData.filter(c => isActiveClient(c) && normalize(c.name) !== normalize('Midas Media'));
             const currentTotalMRR = activeClients.reduce((sum, c) => sum + parseFloat(c.monthly_retainer || 0), 0);
             document.getElementById('dash-mrr-total').innerText = '$' + currentTotalMRR.toLocaleString();
-            
+            // No stored history of a client's retainer changing over time, so there's no
+            // honest month-over-month delta to show here — a real count instead of a
+            // fabricated trend line.
+            const mrrSub = document.getElementById('dash-mrr-sub');
+            if (mrrSub) mrrSub.innerText = `${activeClients.length} active client${activeClients.length === 1 ? '' : 's'}`;
+
             const mrrLabels = activeClients.map(c => c.name); const mrrData = activeClients.map(c => c.monthly_retainer);
             if (dashMrrChartInstance) dashMrrChartInstance.destroy();
-            dashMrrChartInstance = new Chart(document.getElementById('dashMrrChart').getContext('2d'), { type: 'bar', data: { labels: mrrLabels, datasets: [{ label: 'Retainer ($)', data: mrrData, backgroundColor: 'rgba(59, 130, 246, 0.8)', borderRadius: 4, hoverBackgroundColor: '#60a5fa' }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } } });
+            dashMrrChartInstance = new Chart(document.getElementById('dashMrrChart').getContext('2d'), { type: 'bar', data: { labels: mrrLabels, datasets: [{ label: 'Retainer ($)', data: mrrData, backgroundColor: goldSolid, borderRadius: 2, hoverBackgroundColor: goldSolid }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } } });
 
             renderDashFeed();
 
-            let totalScore = 0; let scoredClients = 0;
-            activeClients.forEach(c => { if(c.current_score > 0) { totalScore += c.current_score; scoredClients++; } });
+            // Network health: three real bands replace the half-doughnut average — same
+            // thresholds the roster's own health bars use below (>=70 healthy, 40-69
+            // watch, <40 at risk). Clients with no score yet (0) are excluded from both
+            // the average and the bands, same as the gauge excluded them before.
+            let totalScore = 0, scoredClients = 0, healthyN = 0, watchN = 0, riskN = 0;
+            activeClients.forEach(c => {
+                const s = c.current_score;
+                if (s > 0) {
+                    totalScore += s; scoredClients++;
+                    if (s >= 70) healthyN++; else if (s >= 40) watchN++; else riskN++;
+                }
+            });
             const avgScore = scoredClients > 0 ? Math.round(totalScore / scoredClients) : 0;
-            document.getElementById('dash-avg-health-val').innerText = avgScore || '--'; document.getElementById('dash-avg-health-lbl').innerText = avgScore > 0 ? 'Network Average' : 'No Data';
-            
-            let ac='#4ade80'; if(avgScore<70)ac='#facc15'; if(avgScore<40)ac='#ef4444'; if(avgScore===0)ac='#64748b';
-            if (dashAvgHealthInstance) dashAvgHealthInstance.destroy();
-            dashAvgHealthInstance = new Chart(document.getElementById('dashAvgHealthGauge').getContext('2d'), { type: 'doughnut', data: { datasets: [{ data: [avgScore, 100 - avgScore], backgroundColor: [ac, isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)'], borderWidth: 0 }] }, options: { maintainAspectRatio: false, cutout: '85%', rotation: 270, circumference: 180, plugins: { legend: { display: false }, tooltip: {enabled: false} } } });
+            document.getElementById('dash-avg-health-val').innerText = avgScore || '--';
+            const avgWord = avgScore >= 70 ? 'healthy' : avgScore >= 40 ? 'watch' : avgScore > 0 ? 'at risk' : null;
+            document.getElementById('dash-avg-health-lbl').innerText = avgWord ? `of 100 · ${avgWord}` : 'No scored clients yet';
+
+            const bandsEl = document.getElementById('dash-health-bands');
+            if (bandsEl) {
+                const acct = (n) => `${n} account${n === 1 ? '' : 's'}`;
+                const bands = [
+                    { label: 'Healthy (70+)', n: healthyN, color: posColor },
+                    { label: 'Watch (40–69)', n: watchN, color: warnColor },
+                    { label: 'At risk (<40)', n: riskN, color: negColor },
+                ];
+                bandsEl.innerHTML = scoredClients === 0
+                    ? `<p class="text-xs" style="color:var(--t3);">No scored clients yet.</p>`
+                    : bands.map(b => `
+                        <div>
+                            <div class="flex justify-between text-xs mb-1" style="color:var(--t2);">
+                                <span>${b.label}</span><span class="ge-num" style="color:${b.color};">${acct(b.n)}</span>
+                            </div>
+                            <div style="height:3px; background:var(--inset); border-radius:2px; overflow:hidden;">
+                                <div style="height:100%; width:${(b.n / scoredClients * 100)}%; background:${b.color};"></div>
+                            </div>
+                        </div>`).join('');
+            }
 
             const rosterAdd = document.getElementById('btn-add-client-roster');
             if (rosterAdd) rosterAdd.classList.toggle('hidden', currentUserRole !== 'admin');
 
             document.getElementById('dash-client-count').innerText = `${activeClients.length} Active`; let clientListHtml = '';
+            // Div-grid rows matching the target design's fixed side columns, not a <table> —
+            // same grid-template-columns as the header row markup in body.html.
             activeClients.sort((a,b) => b.monthly_retainer - a.monthly_retainer).forEach(c => {
-                const score = c.current_score; 
-                let sc='#4ade80'; if(score<70)sc='#facc15'; if(score<40)sc='#ef4444'; if(score===0)sc='#64748b';
-                
-                let payBadge = '';
-                if (c.payment_status === 'paid') {
-                    payBadge = `<span class="text-[10px] bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-0.5 rounded-md ml-2">Paid</span>`;
-                } else if (c.payment_status === 'overdue') {
-                    payBadge = `<span class="text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded-md ml-2">Overdue</span>`;
-                } else {
-                    payBadge = `<span class="text-[10px] bg-gray-500/20 text-gray-400 border border-gray-500/30 px-2 py-0.5 rounded-md ml-2">Unpaid</span>`;
-                }
+                const score = c.current_score;
+                let sc = posColor; if (score < 70) sc = warnColor; if (score < 40) sc = negColor; if (score === 0) sc = t3Color;
+
+                let payLabel = 'Unpaid', payColor = t3Color;
+                if (c.payment_status === 'paid') { payLabel = 'Paid'; payColor = posColor; }
+                else if (c.payment_status === 'overdue') { payLabel = 'Overdue'; payColor = negColor; }
 
                 const retainer = parseFloat(c.monthly_retainer || 0).toLocaleString();
-                
-                clientListHtml += `<tr class="hover:bg-white/5 transition cursor-pointer" onclick="goToClient('${escapeHTML(c.name)}')">
-                    <td class="py-3 font-bold text-blue-400">${c.name} ${payBadge}</td>
-                    <td class="py-3 text-center"><div class="score-bar-bg" title="Health Score: ${score}"><div class="score-bar-fill" style="width: ${score}%; background: ${sc};"></div></div></td>
-                    <td class="py-3 text-right font-bold text-white">$${retainer}</td>
-                </tr>`;
+
+                clientListHtml += `<div class="dash-roster-row" style="display:grid; grid-template-columns:minmax(0,1fr) 108px 96px 104px; gap:16px; align-items:center; padding:14px 16px; border-top:1px solid var(--line); cursor:pointer;" onclick="goToClient('${escapeHTML(c.name)}')">
+                    <div style="min-width:0; display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:13.5px; font-weight:450; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--t1);">${escapeAttr(stripSlashEscapes(c.name))}</span>
+                        <span class="ge-label" style="padding:2px 6px; border-radius:2px; white-space:nowrap; color:${payColor}; background:var(--inset);">${payLabel}</span>
+                    </div>
+                    <span class="text-sm" style="color:var(--t2);">${escapeAttr(c.current_stage || '—')}</span>
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:9px;">
+                        <div class="score-bar-bg" style="width:34px; height:3px;" title="Health Score: ${score}"><div class="score-bar-fill" style="width: ${score}%; background: ${sc};"></div></div>
+                        <span class="ge-num text-xs" style="color:var(--t2); width:18px; text-align:right;">${score || '—'}</span>
+                    </div>
+                    <span class="ge-title ge-num" style="font-size:16px; text-align:right; color:var(--t1);">$${retainer}</span>
+                </div>`;
             });
             document.getElementById('dash-client-list').innerHTML = clientListHtml;
+
+            loadDashIntelligence();
+        }
+
+        // Parses the morning-audit function's mode:"context" markdown (buildAuditContext()
+        // in supabase/functions/morning-audit/engine.js — see CLAUDE.md) into the
+        // flagged-client rows Midas Intelligence shows. This is the same computed signal
+        // data the audit itself used, not narration — the function's only other output is
+        // the full saved HTML card, and mode:"context" is already free (no model call), so
+        // this needed no edge-function change. Best-effort: a line that doesn't match the
+        // expected "name | field | ... | notes" shape is simply skipped, never shown wrong.
+        function parseAuditSignalsForIntelligenceCard(md) {
+            if (!md) return [];
+            const SECTION_COLOR = { CRITICAL: '--neg', WATCH: '--warn', 'SCALE CANDIDATES': '--pos', IMPROVING: '--pos' };
+            let section = null;
+            const out = [];
+            md.split('\n').forEach(line => {
+                const h = line.match(/^## ([A-Z ]+?) —/);
+                if (h) { section = SECTION_COLOR[h[1].trim()] ? h[1].trim() : null; return; }
+                if (!section || !line.includes(' | ')) return;
+                const fields = line.split(' | ');
+                const name = (fields[0] || '').trim();
+                const note = (fields[fields.length - 1] || '').trim();
+                if (name && note) out.push({ client: name, note, dot: SECTION_COLOR[section] });
+            });
+            return out;
+        }
+
+        async function loadDashIntelligence() {
+            const list = document.getElementById('dash-intelligence-list');
+            if (!list || typeof window.prepareAIBrainContext !== 'function') return;
+            try {
+                const md = await window.prepareAIBrainContext();
+                const signals = parseAuditSignalsForIntelligenceCard(md).slice(0, 6);
+                list.innerHTML = signals.length
+                    ? signals.map(s => `
+                        <div class="flex items-start gap-3">
+                            <span style="width:5px; height:5px; border-radius:50%; margin-top:7px; flex-shrink:0; background:var(${s.dot});"></span>
+                            <div style="min-width:0;">
+                                <div style="font-size:12.5px; font-weight:500; color:var(--t1);">${escapeAttr(stripSlashEscapes(s.client))}</div>
+                                <div style="font-size:12px; color:var(--t2); line-height:1.5; margin-top:3px;">${escapeAttr(s.note)}</div>
+                            </div>
+                        </div>`).join('')
+                    : `<p style="font-size:12px; color:var(--t2);">Nothing flagged right now.</p>`;
+            } catch (e) {
+                list.innerHTML = `<p style="font-size:12px; color:var(--t2);">Couldn't load — run the audit below.</p>`;
+            }
         }
 
         // --- TASK MODULE ---
@@ -3569,10 +3770,29 @@ window.submitClientRequest = async function() {
         }
         function renderActiveTaskView() { if (currentTaskView === 'kanban') renderKanban(); else renderTable(); }
 
+        // Open / Late / Due today / In progress / Done this week — the target design's
+        // wording, not just a relabel: "Open" is now open tasks (was every task ever
+        // created, including finished ones), and "Done this week" is real — completed AND
+        // updated in the trailing 7 days — rather than the all-time completed count the
+        // old "Completed" tile showed. Both are genuine computation changes, not paint.
         function renderTaskSummary() {
-            const today = new Date().toISOString().split('T')[0]; let o=0, dt=0, ip=0, c=0;
-            globalTasksData.forEach(t => { if(t.status==='In Progress') ip++; if(t.status==='Complete') c++; if(t.status!=='Complete' && t.due){ if(t.due<today) o++; if(t.due===today) dt++; } });
-            document.getElementById('stat-total').innerText = globalTasksData.length; document.getElementById('stat-overdue').innerText = o; document.getElementById('stat-today').innerText = dt; document.getElementById('stat-progress').innerText = ip; document.getElementById('stat-completed').innerText = c;
+            const today = new Date().toISOString().split('T')[0];
+            const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+            let open=0, o=0, dt=0, ip=0, doneWeek=0;
+            globalTasksData.forEach(t => {
+                if (t.status !== 'Complete') {
+                    open++;
+                    if (t.status === 'In Progress') ip++;
+                    if (t.due) { if (t.due < today) o++; if (t.due === today) dt++; }
+                } else if (t.updated_at && t.updated_at.slice(0, 10) >= weekAgo) {
+                    doneWeek++;
+                }
+            });
+            document.getElementById('stat-total').innerText = open;
+            document.getElementById('stat-overdue').innerText = o;
+            document.getElementById('stat-today').innerText = dt;
+            document.getElementById('stat-progress').innerText = ip;
+            document.getElementById('stat-completed').innerText = doneWeek;
         }
 
         // A task assigned to "Client" is theirs to do, not ours. They already appeared on
@@ -3656,11 +3876,46 @@ window.submitClientRequest = async function() {
             const counts = { 'Not Started': 0, 'In Progress': 0, 'Blocked': 0, 'Complete': 0 };
             Object.values(cols).forEach(el => { if(el) el.innerHTML = ''; }); f.sort((a,b) => b.score - a.score);
 
+            // Cards match the target design: mono client label (gold + " · client" suffix
+            // when it's the client's own task — folds ownership into the label itself
+            // rather than a separate badge, exactly like the mockup's "PANDEN · client"),
+            // due text instead of an icon badge, a 20px initials tile, and a thin score
+            // bar instead of a filled chip. The old amber left-border marker is gone —
+            // the label color carries that now. Hidden-from-client and onboarding-step
+            // cues are kept (an eye-slash icon, a dashed card border) since dropping them
+            // loses real signal the mockup's own simpler sample data didn't need to show.
+            const today = new Date().toISOString().split('T')[0];
             f.forEach(t => {
                 const s = t.status || 'Not Started'; if(!cols[s]) return; counts[s]++;
-                let dI='', dCol='text-gray-500'; if(s!=='Complete'&&t.due){ const td=new Date().toISOString().split('T')[0]; if(t.due<td){ dI='<i class="fa-solid fa-circle-exclamation mr-1"></i>'; dCol='text-red-400'; } else if(t.due===td){ dI='<i class="fa-solid fa-bell mr-1"></i>'; dCol='text-yellow-400'; } }
-                const cColor = t.score>75?'#ef4444':(t.score>50?'#f59e0b':'#3b82f6'); const init = t.assignee?t.assignee.substring(0,2).toUpperCase():'?';
-                cols[s].innerHTML += `<div class="glass kanban-card p-4 transition border border-white/10 hover:border-blue-500/50 ${taskIsClients(t) ? 'border-l-4 border-l-amber-400' : ''} ${t.__onboardingStep ? 'border-dashed opacity-90' : ''}" data-id="${t.id}" onclick="${t.__onboardingStep ? "goToClient('" + escapeHTML(t.client) + "')" : "openTaskDrawer(" + t.id + ")"}"><div class="flex justify-between items-start gap-2 mb-2">${clientTaskBadge(t)}<span onclick="goToClient('${escapeHTML(t.client)}'); event.stopPropagation();" class="cursor-pointer hover:text-blue-300 hover:underline text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-black/20 px-2 py-0.5 rounded truncate max-w-[120px] block" title="Open Dashboard">${t.client || 'Unknown'}</span><span class="${dCol} text-[10px] font-bold whitespace-nowrap">${dI} ${t.due||'-'}</span></div><h4 class="font-bold text-white text-sm mb-4 leading-snug">${t.title || 'Untitled Task'}</h4><div class="flex justify-between items-center mt-auto"><div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">${init}</div><div class="flex items-center gap-2 bg-black/20 px-2 py-1 rounded-lg"><div class="w-2 h-2 rounded-full" style="background:${cColor};"></div><span class="font-bold text-white text-[10px]">${t.score}</span></div></div></div>`;
+
+                let due = t.due || '', dueColor = '--t2';
+                if (s !== 'Complete' && t.due) {
+                    if (t.due < today) { const days = Math.max(1, Math.round((new Date(today) - new Date(t.due)) / 86400000)); due = `${days}d late`; dueColor = '--neg'; }
+                    else if (t.due === today) { due = 'Today'; dueColor = '--warn'; }
+                    else due = new Date(t.due + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+                }
+
+                const owned = taskIsClients(t);
+                const clientLabel = escapeAttr(stripSlashEscapes(t.client || 'Unknown')) + (owned ? ' · client' : '');
+                const scoreColor = t.score > 75 ? 'var(--neg)' : (t.score > 50 ? 'var(--warn)' : 'var(--t3)');
+                const init = t.assignee ? t.assignee.substring(0,2).toUpperCase() : '?';
+                const hiddenIcon = t.client_visible === false ? '<i class="fa-solid fa-eye-slash" style="color:var(--t3); margin-right:4px;" title="Hidden from the client"></i>' : '';
+
+                cols[s].innerHTML += `<div class="kanban-card transition" data-id="${t.id}" style="border:1px solid var(--line); border-radius:3px; background:var(--panel); padding:16px; display:flex; flex-direction:column; gap:11px;${t.__onboardingStep ? ' border-style:dashed; opacity:0.9;' : ''}"
+                             onclick="${t.__onboardingStep ? "goToClient('" + escapeHTML(t.client) + "')" : "openTaskDrawer(" + t.id + ")"}">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="ge-label truncate" style="color:var(${owned ? '--gold' : '--t3'});">${clientLabel}</span>
+                                <span class="text-xs shrink-0 ge-num" style="color:var(${dueColor});">${hiddenIcon}${due}</span>
+                            </div>
+                            <div style="font-size:13.5px; font-weight:450; line-height:1.4; color:var(--t1);">${escapeAttr(stripSlashEscapes(t.title || 'Untitled Task'))}</div>
+                            <div class="flex items-center justify-between gap-2" style="padding-top:3px;">
+                                <div style="width:20px; height:20px; border-radius:2px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:9px; color:var(--t2);">${init}</div>
+                                <div class="flex items-center gap-2">
+                                    <div style="width:26px; height:2px; border-radius:2px; background:var(--inset); overflow:hidden;"><div style="height:100%; width:${t.score}%; background:${scoreColor};"></div></div>
+                                    <span class="ge-num text-xs" style="color:var(--t2);">${t.score}</span>
+                                </div>
+                            </div>
+                        </div>`;
             });
             document.getElementById('count-todo').innerText = counts['Not Started']; document.getElementById('count-prog').innerText = counts['In Progress']; document.getElementById('count-rev').innerText = counts['Blocked']; document.getElementById('count-done').innerText = counts['Complete'];
             
@@ -3674,8 +3929,8 @@ window.submitClientRequest = async function() {
         }
 
         function renderTable() {
-            const thead = document.getElementById('t-table-head'); const getI = c => currentTaskSort===c?(taskSortDir==='asc'?'<i class="fa-solid fa-sort-up ml-1 text-blue-500"></i>':'<i class="fa-solid fa-sort-down ml-1 text-blue-500"></i>'):'<i class="fa-solid fa-sort ml-1 opacity-30"></i>'; let pLbl = taskPrioMode==='dueDate'?"Sort: Due":taskPrioMode==='et'?"Sort: Effort":taskPrioMode==='urgency'?"Sort: Urg.":"Priority Score";
-            let h = `<tr><th class="p-4 w-10"><input type="checkbox" class="row-checkbox" onchange="toggleAllTasks(this)"></th><th class="p-4 sortable" onclick="setTaskSort('title')">Task ${getI('title')}</th><th class="p-4 sortable" onclick="setTaskSort('client')">Client ${getI('client')}</th><th class="p-4 relative"><div class="cursor-pointer sortable flex items-center" onclick="setTaskSort('score')">${pLbl} ${getI('score')}<i class="fa-solid fa-caret-down ml-2 opacity-50 hover:text-white" onclick="event.stopPropagation(); document.getElementById('prio-dropdown').classList.toggle('show')"></i></div><div id="prio-dropdown" class="sort-dropdown"><div class="sort-item" onclick="setTaskPrio('total')">Total Priority</div><div class="sort-item" onclick="setTaskPrio('dueDate')">Urgency</div><div class="sort-item" onclick="setTaskPrio('et')">Effort</div></div></th><th class="p-4 sortable" onclick="setTaskSort('due')">Due ${getI('due')}</th><th class="p-4 sortable" onclick="setTaskSort('status')">Status ${getI('status')}</th>`;
+            const thead = document.getElementById('t-table-head'); const getI = c => currentTaskSort===c?(taskSortDir==='asc'?'<i class="fa-solid fa-sort-up ml-1" style="color:var(--gold);"></i>':'<i class="fa-solid fa-sort-down ml-1" style="color:var(--gold);"></i>'):'<i class="fa-solid fa-sort ml-1 opacity-30"></i>'; let pLbl = taskPrioMode==='dueDate'?"Sort: Due":taskPrioMode==='et'?"Sort: Effort":taskPrioMode==='urgency'?"Sort: Urg.":"Priority Score";
+            let h = `<tr><th class="p-4 w-10"><input type="checkbox" class="row-checkbox" onchange="toggleAllTasks(this)"></th><th class="p-4 sortable" onclick="setTaskSort('title')">Task ${getI('title')}</th><th class="p-4 sortable" onclick="setTaskSort('client')">Client ${getI('client')}</th><th class="p-4 relative"><div class="cursor-pointer sortable flex items-center" onclick="setTaskSort('score')">${pLbl} ${getI('score')}<i class="fa-solid fa-caret-down ml-2 opacity-50" onclick="event.stopPropagation(); document.getElementById('prio-dropdown').classList.toggle('show')"></i></div><div id="prio-dropdown" class="sort-dropdown"><div class="sort-item" onclick="setTaskPrio('total')">Total Priority</div><div class="sort-item" onclick="setTaskPrio('dueDate')">Urgency</div><div class="sort-item" onclick="setTaskPrio('et')">Effort</div></div></th><th class="p-4 sortable" onclick="setTaskSort('due')">Due ${getI('due')}</th><th class="p-4 sortable" onclick="setTaskSort('status')">Status ${getI('status')}</th>`;
             activeCols.forEach(c => { const d=masterCols.find(x=>x.id===c); if(d) h+=`<th class="p-4 sortable" onclick="setTaskSort('${d.id}')">${d.label} ${getI(d.id)}</th>`; }); thead.innerHTML = h + `</tr>`;
 
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
@@ -3683,20 +3938,20 @@ window.submitClientRequest = async function() {
             f = f.filter(matchesTaskOwner);
             f.sort((a,b) => { let vA=a[currentTaskSort]||'', vB=b[currentTaskSort]||''; if(currentTaskSort==='score'){ if(taskPrioMode==='total'){vA=a.score;vB=b.score;} if(taskPrioMode==='dueDate'){vA=a.u;vB=b.u;} if(taskPrioMode==='et'){vA=a.e;vB=b.e;} } if(vA<vB) return taskSortDir==='asc'?-1:1; if(vA>vB) return taskSortDir==='asc'?1:-1; return 0; });
 
-            const td = new Date().toISOString().split('T')[0]; let bH = ''; if(f.length===0) bH = `<tr><td colspan="10" class="p-8 text-center text-gray-500">No tasks.</td></tr>`;
+            const td = new Date().toISOString().split('T')[0]; let bH = ''; if(f.length===0) bH = `<tr><td colspan="10" class="p-8 text-center" style="color:var(--t3);">No tasks.</td></tr>`;
             f.forEach(t => {
-                let sC = "text-gray-400 border-gray-500"; if(t.status==='In Progress') sC="text-blue-400 border-blue-500 bg-blue-500/10"; if(t.status==='Complete') sC="text-green-400 border-green-500 bg-green-500/10"; if(t.status==='Blocked') sC="text-red-400 border-red-500 bg-red-500/10";
-                let dI='', dC='text-gray-400'; if(t.status!=='Complete'&&t.due){ if(t.due<td){dI='<i class="fa-solid fa-circle-exclamation text-red-500 mr-1"></i>'; dC='text-red-400 font-bold';} else if(t.due===td){dI='<i class="fa-solid fa-bell text-yellow-500 mr-1"></i>'; dC='text-yellow-400 font-bold';} }
-                let pC = t.score>75?'#ef4444':(t.score>50?'#f59e0b':'#3b82f6'); const chk = selectedTaskIds.has(t.id)?'checked':'';
-                
-                bH += `<tr class="hover:bg-white/5 transition border-b border-white/5 ${chk?'bg-blue-900/20':''}">
+                let sColor = 'var(--t2)'; if(t.status==='In Progress') sColor='var(--warn)'; if(t.status==='Complete') sColor='var(--pos)'; if(t.status==='Blocked') sColor='var(--neg)';
+                let dI='', dColor='var(--t2)'; if(t.status!=='Complete'&&t.due){ if(t.due<td){dI='<i class="fa-solid fa-circle-exclamation mr-1" style="color:var(--neg);"></i>'; dColor='var(--neg)';} else if(t.due===td){dI='<i class="fa-solid fa-bell mr-1" style="color:var(--warn);"></i>'; dColor='var(--warn)';} }
+                let pC = t.score>75?'var(--neg)':(t.score>50?'var(--warn)':'var(--t3)'); const chk = selectedTaskIds.has(t.id)?'checked':'';
+
+                bH += `<tr class="ge-table-row transition" style="border-bottom:1px solid var(--line);${chk?' background:var(--goldWash);':''}">
                     <td class="p-4"><input type="checkbox" class="row-checkbox" value="${t.id}" ${chk} onchange="toggleTaskRow(this, ${t.id})"></td>
-                    <td class="p-4 font-bold text-white cursor-pointer hover:text-blue-400 transition" onclick="openTaskDrawer(${t.id})"><span class="flex items-center gap-2 flex-wrap">${t.title || 'Untitled'}${clientTaskBadge(t)}</span></td>
-                    <td class="p-4 text-blue-400 hover:underline cursor-pointer" onclick="goToClient('${escapeHTML(t.client)}')">${t.client || 'Unknown'}</td>
-                    <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-white text-xs">${t.score}</span></td>
-                    <td class="p-4 ${dC} cursor-pointer" onclick="openTaskDrawer(${t.id})">${dI}${t.due||'-'}</td>
-                    <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><span class="px-2 py-1 rounded-full border text-[10px] font-bold ${sC}">${t.status}</span></td>`;
-                activeCols.forEach(c => { let v=t[c]||'-'; if(c==='assignee'&&t.assignee) v=`<div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">${t.assignee.substring(0,2).toUpperCase()}</div>`; if(c==='updated_at') v=new Date(v).toLocaleDateString(); if(c==='notes') v=`<span class="truncate block max-w-[150px] opacity-70 text-xs">${v}</span>`; bH+=`<td class="p-4 text-gray-300">${v}</td>`; }); bH += `</tr>`;
+                    <td class="p-4 font-bold cursor-pointer transition" style="color:var(--t1);" onclick="openTaskDrawer(${t.id})"><span class="flex items-center gap-2 flex-wrap">${t.title || 'Untitled'}${clientTaskBadge(t)}</span></td>
+                    <td class="p-4 cursor-pointer" style="color:var(--gold);" onclick="goToClient('${escapeHTML(t.client)}')">${t.client || 'Unknown'}</td>
+                    <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-xs" style="color:var(--t1);">${t.score}</span></td>
+                    <td class="p-4 font-bold cursor-pointer" style="color:${dColor};" onclick="openTaskDrawer(${t.id})">${dI}${t.due||'-'}</td>
+                    <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><span class="ge-label" style="padding:3px 8px; border-radius:2px; border:1px solid var(--line); color:${sColor};">${t.status}</span></td>`;
+                activeCols.forEach(c => { let v=t[c]||'-'; if(c==='assignee'&&t.assignee) v=`<div style="width:24px; height:24px; border-radius:2px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; color:var(--t2);">${t.assignee.substring(0,2).toUpperCase()}</div>`; if(c==='updated_at') v=new Date(v).toLocaleDateString(); if(c==='notes') v=`<span class="truncate block max-w-[150px] opacity-70 text-xs">${v}</span>`; bH+=`<td class="p-4" style="color:var(--t2);">${v}</td>`; }); bH += `</tr>`;
             });
             document.getElementById('t-table-body').innerHTML = bH; updateTaskBulkBar();
         }
@@ -3865,24 +4120,25 @@ window.submitClientRequest = async function() {
             if (menu) menu.classList.add('show');
         };
 
+// One accent for "active" (gold), not a color per section — matches the redesign's tab
+// treatment (border-bottom:1.5px solid var(--goldSolid)) rather than the old per-tab
+// yellow/green/purple/blue/emerald scheme.
 function switchClientView(view) {
             const views = ['ads', 'health', 'seo', 'chat', 'reports', 'payments'];
             views.forEach(v => {
                 const btn = document.getElementById(`tab-btn-${v}`);
                 const el = document.getElementById(`c-view-${v}`);
-                if(btn) btn.className = 'whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
+                if (btn) { btn.style.borderBottomColor = 'transparent'; btn.style.color = 'var(--t2)'; btn.style.fontWeight = '400'; }
                 if(el) el.classList.add('hidden');
             });
 
             const activeBtn = document.getElementById(`tab-btn-${view}`);
             const activeEl = document.getElementById(`c-view-${view}`);
-            if(activeBtn) {
-                let color = view === 'ads' ? 'yellow' : (view === 'health' ? 'green' : (view === 'chat' ? 'purple' : (view === 'reports' ? 'blue' : (view === 'payments' ? 'emerald' : 'gray'))));
-                activeBtn.className = `whitespace-nowrap pb-3 text-sm font-bold text-${color}-400 border-b-2 border-${color}-400 transition hover:text-${color}-300`;
-            }
+            if (activeBtn) { activeBtn.style.borderBottomColor = 'var(--goldSolid)'; activeBtn.style.color = 'var(--t1)'; activeBtn.style.fontWeight = '500'; }
             if(activeEl) activeEl.classList.remove('hidden');
 
-            document.getElementById('c-date-icon').className = view === 'ads' ? 'fa-regular fa-calendar-range mr-2 text-yellow-400' : 'fa-solid fa-clock-rotate-left mr-2 text-green-400';
+            document.getElementById('c-date-icon').className = view === 'ads' ? 'fa-regular fa-calendar-range mr-2' : 'fa-solid fa-clock-rotate-left mr-2';
+            document.getElementById('c-date-icon').style.color = 'var(--gold)';
 
             if (view === 'health') fetchHealthData();
             if (view === 'seo') window.renderAdminSeo();
@@ -3898,11 +4154,13 @@ function switchClientView(view) {
                 localStorage.removeItem('midas_openai_key');
             }
         }
-        function cSelectAccount(val, label) { 
-            cSelectedAccount = val; 
-            const lbl = document.getElementById('c-account-label'); if(lbl) lbl.innerText = label; 
-            const menu = document.getElementById('c-account-menu'); if(menu) menu.classList.remove('show'); 
-            
+        function cSelectAccount(val, label) {
+            cSelectedAccount = val;
+            const lbl = document.getElementById('c-account-label'); if(lbl) lbl.innerText = label;
+            const menu = document.getElementById('c-account-menu'); if(menu) menu.classList.remove('show');
+            // The shared header's title on this page IS the selected client's name.
+            if (typeof updateGeHeader === 'function') updateGeHeader('clients');
+
             window.currentChatHistory = [];
             const msgBox = document.getElementById('chat-messages');
             if(msgBox) {
@@ -4033,6 +4291,23 @@ function filterAdsData() {
                         stageChip.classList.toggle('hidden', !currentStage || cSelectedAccount === 'ALL');
                     }
 
+                    // "Health 81 · $8,500 MRR · Target CPL $45" beside the switcher, matching
+                    // the target design. Target CPL only shows once it's actually set
+                    // (Edit Client) — never a blank "Target CPL $0".
+                    const summaryLine = document.getElementById('c-summary-line');
+                    if (summaryLine) {
+                        if (stageClient && cSelectedAccount !== 'ALL') {
+                            const parts = [];
+                            if (stageClient.current_score > 0) parts.push(`Health ${stageClient.current_score}`);
+                            if (stageClient.monthly_retainer) parts.push(`$${parseFloat(stageClient.monthly_retainer).toLocaleString()} MRR`);
+                            if (stageClient.target_cpl) parts.push(`Target CPL $${parseFloat(stageClient.target_cpl).toFixed(0)}`);
+                            summaryLine.innerText = parts.join(' · ');
+                            summaryLine.classList.toggle('hidden', parts.length === 0);
+                        } else {
+                            summaryLine.classList.add('hidden');
+                        }
+                    }
+
                     if (transitionBtn && currentUserRole === 'admin') {
                         transitionBtn.classList.toggle('hidden', cSelectedAccount === 'ALL');
                     } else if (transitionBtn) {
@@ -4090,7 +4365,7 @@ function filterAdsData() {
                 }
 
                 const { s, e } = dateRangeFor(cDateRange, cCustomStart, cCustomEnd);
-                
+
                 const inRange = globalAdsData.filter(r => {
                     if (!r.date) return false;
                     const rd = new Date(r.date.split('T')[0]+'T12:00:00');
@@ -4100,31 +4375,39 @@ function filterAdsData() {
 
                 let sp=0, l=0, imp=0, rch=0, clk=0;
                 f.forEach(r=>{sp+=parseFloat(r.spend||0); l+=parseInt(r.leads||0); imp+=parseInt(r.impressions||0); rch+=parseInt(r.reach||0); clk+=parseInt(r.unique_link_clicks||0);});
-                currentAdsStats = { s:sp, l:l, cpl:l>0?sp/l:0, cpc:clk>0?sp/clk:0, cpm:imp>0?(sp/imp)*1000:0, ctr:imp>0?(clk/imp)*100:0, f:rch>0?imp/rch:0 };
+                currentAdsStats = { s:sp, l:l, cpl:l>0?sp/l:0, cpc:clk>0?sp/clk:0, cpm:imp>0?(sp/imp)*1000:0, ctr:imp>0?(clk/imp)*100:0, f:rch>0?imp/rch:0, imp:imp, clk:clk };
 
                 document.getElementById('kpi-spend').innerText = '$'+currentAdsStats.s.toLocaleString(undefined,{maximumFractionDigits:0}); document.getElementById('kpi-leads').innerText = currentAdsStats.l.toLocaleString(); document.getElementById('kpi-cpl').innerText = '$'+currentAdsStats.cpl.toFixed(2); document.getElementById('kpi-cpc').innerText = '$'+currentAdsStats.cpc.toFixed(2); document.getElementById('kpi-cpm').innerText = '$'+currentAdsStats.cpm.toFixed(2); document.getElementById('kpi-ctr').innerText = currentAdsStats.ctr.toFixed(2)+'%'; document.getElementById('kpi-freq').innerText = currentAdsStats.f.toFixed(2);
                 if(document.getElementById('h-kpi-leads')) document.getElementById('h-kpi-leads').innerText = currentAdsStats.l.toLocaleString();
 
+                updateClientKpiDeltas(s, e);
+
                 const isL = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isL?'#64748b':'rgba(255,255,255,0.6)';
+                const wrapCsAds = getComputedStyle(document.getElementById('theme-wrapper'));
+                const tokAds = (name, fallback) => (wrapCsAds.getPropertyValue(name) || '').trim() || fallback;
+                const goldC = tokAds('--gold', '#e3c98d'), goldWashC = tokAds('--goldWash', 'rgba(227,201,141,0.07)'), posC = tokAds('--pos', '#8fae90'), gridC = tokAds('--grid', 'rgba(240,230,210,0.07)');
                 const d = {}; f.forEach(r=>{const dt=r.date.split('T')[0]; d[dt]=d[dt]||{s:0,l:0}; d[dt].s+=parseFloat(r.spend||0); d[dt].l+=parseInt(r.leads||0);}); const lbls=Object.keys(d).sort();
-                
-                if(trendChartInstance) trendChartInstance.destroy(); 
+
+                // "leads & spend." — leads gold (the accent), spend in --pos dashed, matching
+                // the target design's own legend colors exactly.
+                if(trendChartInstance) trendChartInstance.destroy();
                 trendChartInstance = new Chart(document.getElementById('trendChart'),{
                     type:'line',
-                    data:{labels:lbls,datasets:[{label:'Spend ($)',data:lbls.map(x=>d[x].s),borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,0.1)',fill:true,tension:0.4,yAxisID:'y'},{label:'Leads',data:lbls.map(x=>d[x].l),borderColor:'#34d399',backgroundColor:'#34d399',tension:0.4,yAxisID:'y1'}]},
+                    data:{labels:lbls,datasets:[{label:'Leads',data:lbls.map(x=>d[x].l),borderColor:goldC,backgroundColor:goldWashC,fill:true,tension:0.3,yAxisID:'y1',borderWidth:2},{label:'Spend ($)',data:lbls.map(x=>d[x].s),borderColor:posC,borderDash:[4,4],tension:0.3,yAxisID:'y',borderWidth:2,pointRadius:0}]},
                     options:{
                         maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
-                        scales:{y:{type:'linear',position:'left'},y1:{type:'linear',position:'right',grid:{display:false}}},
-                        plugins: { zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } } }
+                        scales:{y:{type:'linear',position:'left',grid:{color:gridC}},y1:{type:'linear',position:'right',grid:{display:false}}},
+                        plugins: { legend: { display: false }, zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } } }
                     }
                 });
 
-                if(accountChartInstance) accountChartInstance.destroy(); 
+                if(accountChartInstance) accountChartInstance.destroy();
                 accountChartInstance = new Chart(document.getElementById('accountChart'),{
-                    type:'bar',
-                    data:{labels:lbls,datasets:[{label:'CPL ($)',data:lbls.map(x=>d[x].l>0?(d[x].s/d[x].l).toFixed(2):0),backgroundColor:'rgba(96,165,250,0.7)',borderRadius:4}]},
+                    type:'line',
+                    data:{labels:lbls,datasets:[{label:'CPL ($)',data:lbls.map(x=>d[x].l>0?(d[x].s/d[x].l).toFixed(2):0),borderColor:posC,backgroundColor:goldWashC,fill:true,tension:0.3,borderWidth:2,pointRadius:0}]},
                     options:{
                         maintainAspectRatio:false,
+                        scales:{y:{grid:{color:gridC}},x:{grid:{display:false}}},
                         plugins: { legend: { display: false }, zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } } }
                     }
                 });
@@ -4137,11 +4420,11 @@ function filterAdsData() {
                         let cSpend = 0, cLeads = 0;
                         cAds.forEach(r => { cSpend += parseFloat(r.spend || 0); cLeads += parseInt(r.leads || 0); });
                         const cCpl = cLeads > 0 ? (cSpend / cLeads) : 0;
-                        allHtml += `<tr class="hover:bg-white/5 transition cursor-pointer" onclick="goToClient('${escapeHTML(c.name)}')">
-                            <td class="py-3 font-bold text-blue-400">${c.name}</td>
-                            <td class="py-3 text-right font-bold text-white">$${cSpend.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                            <td class="py-3 text-right font-bold text-green-400">${cLeads.toLocaleString()}</td>
-                            <td class="py-3 text-right font-bold text-gray-300">$${cCpl.toFixed(2)}</td>
+                        allHtml += `<tr class="ge-table-row transition" style="cursor:pointer; border-top:1px solid var(--line);" onclick="goToClient('${escapeHTML(c.name)}')">
+                            <td class="py-3 font-bold" style="color:var(--gold);">${c.name}</td>
+                            <td class="py-3 text-right font-bold ge-num" style="color:var(--t1);">$${cSpend.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                            <td class="py-3 text-right font-bold ge-num" style="color:var(--pos);">${cLeads.toLocaleString()}</td>
+                            <td class="py-3 text-right font-bold ge-num" style="color:var(--t2);">$${cCpl.toFixed(2)}</td>
                         </tr>`;
                     });
                     const tbody = document.getElementById('all-clients-ads-tbody');
@@ -4156,34 +4439,142 @@ function filterAdsData() {
                 console.error("Filter Ads Data Error: ", err);
             }
         }
+// [title][owner][status] rows, matching "open work." in the target design, with due
+// date kept as a small second line under the title rather than dropped — real
+// information the mockup's own minimal sample data didn't need to carry.
 function renderClientTasks() {
             if(cSelectedAccount === "ALL") return;
             const normAccount = normalize(cSelectedAccount);
             const cTasks = globalTasksData.filter(t => normalize(t.client) === normAccount && t.status !== 'Complete');
             cTasks.sort((a,b) => b.score - a.score);
-            
+
             let html = '';
-            if(cTasks.length === 0) html = '<p class="text-xs text-gray-500 italic mt-2">No pending tasks for this client.</p>';
-            
+            if(cTasks.length === 0) html = '<p class="text-xs italic py-4" style="color:var(--t3);">No pending tasks for this client.</p>';
+
+            const statusColor = { 'Not Started': '--t3', 'In Progress': '--warn', 'Blocked': '--neg', 'Complete': '--pos' };
+            const today = new Date().toISOString().split('T')[0];
             cTasks.forEach(t => {
-                let pC = t.score>75?'#ef4444':(t.score>50?'#f59e0b':'#3b82f6');
-                let dI='', dC='text-gray-500'; 
-                if(t.due){ const td=new Date().toISOString().split('T')[0]; if(t.due<td){ dI='<i class="fa-solid fa-circle-exclamation mr-1"></i>'; dC='text-red-400'; } else if(t.due===td){ dI='<i class="fa-solid fa-bell mr-1"></i>'; dC='text-yellow-400'; } }
-                html += `
-                    <div class="bg-black/20 p-3 rounded-lg border border-white/5 flex justify-between items-center cursor-pointer hover:bg-white/5 transition" onclick="openTaskDrawer(${t.id})">
-                        <div>
-                            <p class="text-sm font-bold text-white">${t.title || 'Untitled'}</p>
-                            <p class="text-[10px] mt-1 ${dC}">${dI}${t.due||'No Date'} <span class="text-gray-500 ml-2">Assigned: ${t.assignee}</span></p>
-                        </div>
-                        <div class="flex flex-col items-end">
-                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-black/40 px-2 py-0.5 rounded mb-1">${t.status}</span>
-                            <div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full" style="background:${pC};"></div><span class="font-bold text-white text-xs">${t.score}</span></div>
-                        </div>
-                    </div>`;
+                let due = '', dueColor = '--t3';
+                if (t.due) {
+                    if (t.due < today) { dueColor = '--neg'; due = `${t.due} — late`; }
+                    else if (t.due === today) { dueColor = '--warn'; due = 'Due today'; }
+                    else due = `Due ${t.due}`;
+                }
+                html += `<div style="display:grid; grid-template-columns:minmax(0,1fr) 120px 100px; gap:18px; align-items:center; padding:13px 0; border-top:1px solid var(--line); cursor:pointer;" onclick="openTaskDrawer(${t.id})">
+                    <div style="min-width:0;">
+                        <div style="font-size:13.5px; font-weight:450; color:var(--t1);">${escapeAttr(stripSlashEscapes(t.title || 'Untitled'))}</div>
+                        ${due ? `<div class="text-xs" style="margin-top:2px; color:var(${dueColor});">${due}</div>` : ''}
+                    </div>
+                    <span class="text-sm truncate" style="color:var(--t2);">${escapeAttr(t.assignee || '—')}</span>
+                    <span class="ge-label" style="text-align:right; color:var(${statusColor[t.status] || '--t3'});">${t.status}</span>
+                </div>`;
             });
             const taskListEl = document.getElementById('c-task-list');
             if(taskListEl) taskListEl.innerHTML = html;
         }
+
+// Real prior-period comparison (immediately preceding period of equal length) for the
+// client Ads tab's KPI strip deltas and the CPL panel's target/driver line. Skipped for
+// "max" (all time), where "the period before" has no meaning.
+function updateClientKpiDeltas(s, e) {
+    const spanMs = e - s;
+    let prior = null;
+    if (cDateRange !== 'max' && spanMs > 0) {
+        const priorE = new Date(s.getTime() - 1);
+        const priorS = new Date(priorE.getTime() - spanMs);
+        const priorRows = globalAdsData.filter(r => {
+            if (!r.date) return false;
+            const rd = new Date(r.date.split('T')[0]+'T12:00:00');
+            return rd >= priorS && rd <= priorE;
+        });
+        const pf = cSelectedAccount === "ALL" ? priorRows : reportsForClient(cSelectedAccount, priorRows);
+        let psp=0, pl=0, pimp=0, prch=0, pclk=0;
+        pf.forEach(r=>{psp+=parseFloat(r.spend||0); pl+=parseInt(r.leads||0); pimp+=parseInt(r.impressions||0); prch+=parseInt(r.reach||0); pclk+=parseInt(r.unique_link_clicks||0);});
+        prior = { s:psp, l:pl, cpl:pl>0?psp/pl:0, cpc:pclk>0?psp/pclk:0, cpm:pimp>0?(psp/pimp)*1000:0, ctr:pimp>0?(pclk/pimp)*100:0, f:prch>0?pimp/prch:0, imp:pimp, clk:pclk };
+    }
+
+    const pct = (cur, base) => (!base) ? null : (cur - base) / base;
+    // `invert`: true when a LOWER number is the win (CPL, CPC, CPM).
+    const setDelta = (id, value, invert) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (value === null) { el.innerText = ''; return; }
+        const flat = Math.abs(value) < 0.01;
+        const good = invert ? value < 0 : value > 0;
+        el.style.color = flat ? 'var(--t2)' : (good ? 'var(--pos)' : 'var(--neg)');
+        el.innerText = flat ? 'flat' : `${value >= 0 ? '+' : ''}${(value * 100).toFixed(0)}%`;
+    };
+
+    setDelta('kpi-spend-delta', prior ? pct(currentAdsStats.s, prior.s) : null, false);
+    setDelta('kpi-leads-delta', prior ? pct(currentAdsStats.l, prior.l) : null, false);
+    setDelta('kpi-cpl-delta', prior ? pct(currentAdsStats.cpl, prior.cpl) : null, true);
+    setDelta('kpi-cpc-delta', prior ? pct(currentAdsStats.cpc, prior.cpc) : null, true);
+    setDelta('kpi-cpm-delta', prior ? pct(currentAdsStats.cpm, prior.cpm) : null, true);
+    setDelta('kpi-ctr-delta', prior ? pct(currentAdsStats.ctr, prior.ctr) : null, false);
+    setDelta('kpi-freq-delta', prior ? pct(currentAdsStats.f, prior.f) : null, false);
+
+    // The CPL panel's target comparison: a real target (Edit Client) always wins over a
+    // prior-period comparison, same precedence the morning audit uses for its yardstick.
+    const targetLine = document.getElementById('cpl-target-line');
+    const heroDelta = document.getElementById('cpl-hero-delta');
+    const heroVal = document.getElementById('cpl-hero-val');
+    if (heroVal) heroVal.innerText = currentAdsStats.cpl > 0 ? '$' + currentAdsStats.cpl.toFixed(2) : '$0.00';
+
+    const clientObj = cSelectedAccount !== 'ALL' ? globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount)) : null;
+    const target = clientObj && clientObj.target_cpl ? parseFloat(clientObj.target_cpl) : null;
+    if (targetLine) targetLine.innerText = target ? `Against a $${target.toFixed(0)} target` : 'No target set';
+    if (heroDelta) {
+        if (target && currentAdsStats.cpl > 0) {
+            const d = (currentAdsStats.cpl - target) / target;
+            heroDelta.style.color = d <= 0 ? 'var(--pos)' : 'var(--neg)';
+            heroDelta.innerText = `${Math.abs(d * 100).toFixed(0)}% ${d <= 0 ? 'under' : 'over'}`;
+        } else if (prior && prior.cpl > 0 && currentAdsStats.cpl > 0) {
+            const d = (currentAdsStats.cpl - prior.cpl) / prior.cpl;
+            heroDelta.style.color = d <= 0 ? 'var(--pos)' : 'var(--neg)';
+            heroDelta.innerText = `${Math.abs(d * 100).toFixed(0)}% vs last period`;
+        } else {
+            heroDelta.innerText = '';
+        }
+    }
+
+    const driverLine = document.getElementById('cpl-driver-line');
+    if (driverLine) {
+        // Impression floor before naming a cause, same reasoning as the morning audit's
+        // own CTR-flag threshold — a thin account can't support a driver diagnosis.
+        driverLine.innerText = (prior && currentAdsStats.imp >= 500 && prior.imp >= 500)
+            ? (decomposeCplDriver(currentAdsStats, prior) || '')
+            : '';
+    }
+}
+
+// A lightweight client-side mirror of the morning audit's decomposeCplChange() (see
+// supabase/functions/morning-audit/engine.js) — CPL = CPM/1000 ÷ CTR ÷ CVR, so the three
+// contributions add up exactly to the CPL move and the largest is what to go look at.
+// Kept separate rather than shared: this runs in the browser against currentAdsStats,
+// that runs server-side against daily_reports, and there's no runtime connecting the
+// two worth building for one function.
+function decomposeCplDriver(recent, baseline) {
+    const rCvr = recent.clk > 0 ? recent.l / recent.clk : null;
+    const bCvr = baseline.clk > 0 ? baseline.l / baseline.clk : null;
+    const ln = (now, was) => (now === null || was === null || now <= 0 || was <= 0) ? null : Math.log(now / was);
+    const parts = {
+        cpm: ln(recent.cpm, baseline.cpm),
+        ctr: ln(recent.ctr, baseline.ctr) === null ? null : -ln(recent.ctr, baseline.ctr),
+        cvr: ln(rCvr, bCvr) === null ? null : -ln(rCvr, bCvr)
+    };
+    let best = null;
+    Object.keys(parts).forEach(k => { if (parts[k] === null) return; if (best === null || Math.abs(parts[k]) > Math.abs(parts[best])) best = k; });
+    // Below this, CPL barely moved — naming a driver would diagnose a non-event.
+    if (!best || Math.abs(parts[best]) < 0.05) return null;
+
+    const worse = parts[best] > 0;
+    const MEANING = {
+        cpm: { worse: 'Auction cost rose — check targeting or a budget change.', better: 'Auction cost fell — impressions got cheaper.' },
+        ctr: { worse: 'CTR is down — creative fatigue or a saturated audience.', better: 'More people are clicking — the creative is landing.' },
+        cvr: { worse: 'Clicks stopped becoming leads — landing page or form, not the ads.', better: 'More clicks are becoming leads — the page is converting better.' }
+    };
+    return MEANING[best][worse ? 'worse' : 'better'];
+}
 async function fetchHealthData() {
             const healthPill = document.getElementById('global-health-pill');
             
@@ -9380,7 +9771,7 @@ window.logQuickPayment = async function() {
             const btn = document.getElementById('btn-run-global-ai');
             const outputBox = document.getElementById('global-ai-output');
 
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Analyzing Network...';
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Analyzing…';
             btn.disabled = true;
             outputBox.classList.remove('hidden');
             outputBox.innerHTML = '<p class="text-yellow-400 animate-pulse text-center py-4"><i class="fa-solid fa-satellite-dish mr-2"></i> Crunching high-density matrix...</p>';
@@ -9393,6 +9784,9 @@ window.logQuickPayment = async function() {
                 const data = await callAuditFunction({ force: true });
 
                 outputBox.innerHTML = data.html;
+                // The dot-list above reads mode:"context", which is now stale against the
+                // audit that was just force-run — refresh it so the two agree.
+                if (typeof loadDashIntelligence === 'function') loadDashIntelligence();
 
                 // Keep the Audits tab and checkSavedAudit() in step without a reload.
                 if (data.id) {
@@ -9407,7 +9801,7 @@ window.logQuickPayment = async function() {
             } catch (e) {
                 outputBox.innerHTML = `<div class="bg-red-500/10 p-4 rounded-xl border border-red-500/20 text-red-400 text-center"><i class="fa-solid fa-triangle-exclamation mr-2"></i> ${escapeAttr(e.message)}</div>`;
             } finally {
-                btn.innerHTML = '<i class="fa-solid fa-bolt mr-2"></i> Run Morning Audit';
+                btn.innerHTML = 'Run audit';
                 btn.disabled = false;
             }
         };
