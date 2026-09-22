@@ -10721,6 +10721,7 @@ window.openEditClientModal = function() {
     renderContactRows(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
     document.getElementById('edit-client-business-id').value  = c.business_id || '';
+    document.getElementById('edit-client-target-cpl').value   = c.target_cpl ?? '';
 
     document.getElementById('edit-client-gsc-property').value = c.gsc_property || '';
     document.getElementById('edit-client-ga4-property').value = c.ga4_property_id || '';
@@ -11063,6 +11064,9 @@ window.saveClientEdits = async function(e) {
             website_status: document.getElementById('edit-client-website-status').value || null,
             ad_account_id: adAccountId || null,
             business_id: document.getElementById('edit-client-business-id').value.trim() || null,
+            // Blank means no target, so the audit falls back to their own baseline. Zero or a
+            // negative is not a CPL, and the engine ignores it, so store null rather than 0.
+            target_cpl: (() => { const v = document.getElementById('edit-client-target-cpl').value.trim(); return v === '' || !isFinite(Number(v)) || Number(v) <= 0 ? null : Number(v); })(),
             contract_type: document.getElementById('edit-client-contract').value,
             monthly_retainer: document.getElementById('edit-client-retainer').value || null,
 
