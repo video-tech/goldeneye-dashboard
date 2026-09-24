@@ -642,28 +642,21 @@
 
         function switchCpTab(tabName) {
             window.cpCurrentTab = tabName;
-    ['getstarted', 'knowledge', 'dashboard', 'tasks', 'support', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard', 'profile'].forEach(t => {
+    // Tabs are styled inline (.ge-cp-tab, set in body.new.html) to match the shared gold-
+    // underline pattern used on the Accounts page's switchClientView() — style properties
+    // reset here, never className, so a retired/hidden tab's class (and thus its hidden
+    // state) survives every switch.
+    ['getstarted', 'knowledge', 'dashboard', 'tasks', 'support', 'reports', 'checkin', 'pipeline', 'creatives', 'settings', 'seo', 'leaderboard', 'profile', 'deckcalc'].forEach(t => {
         const el = document.getElementById(`cp-view-${t}`);
         const btn = document.getElementById(`cp-tab-${t}`);
         if(el) el.classList.add('hidden');
-        if(btn) {
-            // Rewriting className wholesale dropped whatever hid the tab, so a retired tab
-            // reappeared on the first switch and Get Started came back for clients long
-            // past onboarding. Carry the hidden state across the reset.
-            const wasHidden = btn.classList.contains('hidden');
-            btn.className = 'whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
-            if (wasHidden) btn.classList.add('hidden');
-        }
+        if(btn) { btn.style.borderBottomColor = 'transparent'; btn.style.color = 'var(--t2)'; btn.style.fontWeight = '400'; }
     });
-    
+
     const activeEl = document.getElementById(`cp-view-${tabName}`);
     if(activeEl) activeEl.classList.remove('hidden');
     const activeBtn = document.getElementById(`cp-tab-${tabName}`);
-    if(activeBtn) {
-        activeBtn.classList.replace('text-gray-500', 'text-yellow-400');
-        activeBtn.classList.replace('border-transparent', 'border-b-2');
-        activeBtn.classList.add('border-yellow-400');
-    }
+    if(activeBtn) { activeBtn.style.borderBottomColor = 'var(--goldSolid)'; activeBtn.style.color = 'var(--t1)'; activeBtn.style.fontWeight = '500'; }
 
     if(tabName === 'getstarted') { renderGetStarted(); startOnboardingPoll(); }
     else stopOnboardingPoll();
@@ -676,6 +669,7 @@
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
     if(tabName === 'seo') renderCpSeo();
+    if(tabName === 'deckcalc') ensureDeckCalcLoaded();
     if(tabName === 'leaderboard') renderAnonymizedLeaderboard();
     if(tabName === 'knowledge') renderKnowledgeBase();
     if(tabName === 'profile') renderCpProfile();
@@ -1433,10 +1427,18 @@ function adPreviewEntries(row) {
     return [...found.entries()];
 }
 
+// Mono label, no pill background — matches the target design's status text on each
+// creative card. Returns {label, color} so callers can use the color for other things
+// (the summary line's "N needs changes" count reads r.status directly, not this).
+function adStatusInfo(status) {
+    if (status === 'approved')          return { label: 'Approved', color: '--pos' };
+    if (status === 'changes_requested') return { label: 'Changes asked', color: '--warn' };
+    return { label: 'Pending', color: '--t3' };
+}
+// Kept for anything still calling the old name.
 function adStatusBadge(status) {
-    if (status === 'approved')          return '<span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border text-emerald-400 bg-emerald-500/10 border-emerald-500/25">Approved</span>';
-    if (status === 'changes_requested') return '<span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border text-amber-400 bg-amber-500/10 border-amber-500/25">Changes asked</span>';
-    return '<span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border text-blue-400 bg-blue-500/10 border-blue-500/25">Awaiting client</span>';
+    const i = adStatusInfo(status);
+    return `<span class="ge-label" style="color:var(${i.color});">${i.label}</span>`;
 }
 
 // Ask Make to fetch this ad's previews. Fire-and-forget with no-cors: the scenario
@@ -1524,6 +1526,12 @@ async function reloadAdApprovals() {
     if (!error) globalCreativesData = data || [];
 }
 
+// Card grid, matching the target design — a table hides the previews, and previews are
+// the content here. The preview well is the same "not fetched yet" placeholder the old
+// table always showed as text (a striped SVG + caption, never a live image): the admin
+// side has never rendered the actual iframe, only counted placements — that stays true,
+// nothing real is being dropped. The client portal's own preview (renderClientCreatives)
+// is untouched and still shows the real iframe.
 window.renderAdminCreatives = function() {
     const body = document.getElementById('admin-creatives-list');
     if (!body) return;
@@ -1531,34 +1539,58 @@ window.renderAdminCreatives = function() {
     const rows = [...globalCreativesData].sort((a, b) =>
         new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
+    const summaryEl = document.getElementById('creatives-summary-line');
+    if (summaryEl) {
+        const needsChanges = rows.filter(r => r.status === 'changes_requested').length;
+        summaryEl.innerText = rows.length
+            ? `${rows.length} ad${rows.length === 1 ? '' : 's'}${needsChanges ? ` · ${needsChanges} needs changes` : ''}`
+            : '';
+    }
+
     if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-xs text-gray-500 italic">Nothing sent for approval yet.</td></tr>';
+        body.innerHTML = '<p class="text-sm italic" style="color:var(--t3); grid-column:1/-1;">Nothing sent for approval yet.</p>';
         return;
     }
 
+    const stripedWell = `<svg width="100%" height="100%" viewBox="0 0 200 186" preserveAspectRatio="none" style="position:absolute; inset:0; opacity:0.5;"><defs><pattern id="ge-stripe" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><rect width="4" height="8" fill="rgba(240,230,210,0.045)"></rect></pattern></defs><rect width="200" height="186" fill="url(#ge-stripe)"></rect></svg>`;
+
     body.innerHTML = rows.map(r => {
         const count = adPreviewEntries(r).length;
-        let previewCell;
+        let wellCaption;
         if (r.preview_error) {
-            previewCell = `<span class="text-xs text-red-400" title="${escapeAttr(r.preview_error)}"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Failed</span>`;
+            wellCaption = `<span style="color:var(--neg); font-size:10px; letter-spacing:0.06em; text-transform:uppercase;" title="${escapeAttr(r.preview_error)}"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Failed</span>`;
         } else if (!count) {
-            previewCell = '<span class="text-xs text-gray-500"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i>Fetching&hellip;</span>';
+            wellCaption = `<span class="ge-label"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i>Fetching&hellip;</span>`;
         } else {
-            previewCell = `<span class="text-xs text-gray-300">${count} placement${count === 1 ? '' : 's'}${adPreviewIsStale(r) ? ' <span class="text-amber-400">(stale)</span>' : ''}</span>`;
+            wellCaption = `<span class="ge-label">Meta preview</span>`;
         }
+        const previewsLine = r.preview_error ? 'Preview failed'
+            : !count ? 'Fetching previews…'
+            : `${count} placement${count === 1 ? '' : 's'}${adPreviewIsStale(r) ? ' · stale' : ''}`;
 
-        return `<tr class="hover:bg-white/5 transition">
-            <td class="p-2 text-xs text-gray-400">${escapeAttr(stripSlashEscapes(r.client_name || ''))}</td>
-            <td class="p-2 text-xs font-bold text-white">${escapeAttr(stripSlashEscapes(r.ad_name || ''))}
-                <span class="block text-[10px] text-gray-600 font-normal">${escapeAttr(r.ad_id || '')}</span></td>
-            <td class="p-2">${previewCell}</td>
-            <td class="p-2">${adStatusBadge(r.status)}</td>
-            <td class="p-2 text-xs text-gray-400 max-w-[220px]">${escapeAttr(stripSlashEscapes(r.feedback || '—'))}</td>
-            <td class="p-2 text-right whitespace-nowrap">
-                <button onclick="refreshAdPreviews('${r.id}')" title="Fetch the previews again" class="glass-icon-btn !w-8 !h-8 inline-flex"><i class="fa-solid fa-rotate text-xs"></i></button>
-                <button onclick="deleteAdApproval('${r.id}')" title="Remove from the list" class="glass-icon-btn !w-8 !h-8 inline-flex text-red-400"><i class="fa-solid fa-trash text-xs"></i></button>
-            </td>
-        </tr>`;
+        const statusInfo = adStatusInfo(r.status);
+
+        return `<div style="border:1px solid var(--line); border-radius:3px; background:var(--panel); overflow:hidden; display:flex; flex-direction:column;">
+            <div style="height:186px; background:var(--inset); border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:center; position:relative;">
+                ${stripedWell}
+                <span style="position:relative;">${wellCaption}</span>
+            </div>
+            <div style="padding:16px 18px; display:flex; flex-direction:column; gap:10px; flex:1;">
+                <div>
+                    <div class="ge-label">${escapeAttr(stripSlashEscapes(r.client_name || ''))}</div>
+                    <div style="font-size:13.5px; font-weight:450; margin-top:5px; color:var(--t1);">${escapeAttr(stripSlashEscapes(r.ad_name || ''))}</div>
+                </div>
+                <div class="text-xs" style="color:var(--t2);">${previewsLine}</div>
+                <div style="margin-top:auto; padding-top:11px; border-top:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                    <span class="ge-label" style="color:var(${statusInfo.color});">${statusInfo.label}</span>
+                    <div class="flex gap-1.5">
+                        <button onclick="refreshAdPreviews('${r.id}')" title="Fetch the previews again" class="glass-icon-btn" style="width:26px; height:26px;"><i class="fa-solid fa-rotate" style="font-size:9px;"></i></button>
+                        <button onclick="deleteAdApproval('${r.id}')" title="Remove from the list" class="glass-icon-btn" style="width:26px; height:26px; color:var(--neg);"><i class="fa-solid fa-trash" style="font-size:9px;"></i></button>
+                    </div>
+                </div>
+                ${r.feedback ? `<div class="text-xs italic" style="color:var(--t2); line-height:1.5; border-left:2px solid var(--goldLine); padding-left:10px;">${escapeAttr(stripSlashEscapes(r.feedback))}</div>` : ''}
+            </div>
+        </div>`;
     }).join('');
 };
 
@@ -2807,6 +2839,11 @@ window.maybeShowWeeklyCheckin = function() {
             cpSeoShowAllKeywords = false;
             updateSeoTabVisibility();
             if(!document.getElementById('cp-view-seo').classList.contains('hidden')) renderCpSeo();
+            // Deck Calculator iframe is per-client (3Sixty only); force a reload if an admin
+            // switches clients while it's showing, rather than leaving the last client's frame up.
+            deckCalcLoaded = false;
+            updateDeckCalcTabVisibility();
+            if(!document.getElementById('cp-view-deckcalc').classList.contains('hidden')) ensureDeckCalcLoaded();
         }
 
         function getLocalYYYYMMDD(dateObj) { return dateObj.getFullYear() + '-' + String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + String(dateObj.getDate()).padStart(2, '0'); }
@@ -8074,6 +8111,26 @@ async function buildChatSeoBriefing(clientName) {
      const off = !!row && !row.gsc_property && !row.seranking_site_id;
      btn.classList.toggle('hidden', off);
      if (off && window.cpCurrentTab === 'seo') switchCpTab('dashboard');
+ }
+
+ // Deck Calculator — 3Sixty Industries only, for now a reference view of the customer-facing
+ // estimator (snippets/3sixty-deck-estimator.html), not editable from here. Gated by client
+ // name rather than a database column since it's a one-off for a single client, not a feature
+ // every client can turn on.
+ function updateDeckCalcTabVisibility() {
+     const btn = document.getElementById('cp-tab-deckcalc');
+     if (!btn) return;
+     const on = normalize(currentActiveClient) === normalize('3Sixty Industries');
+     btn.classList.toggle('hidden', !on);
+     if (!on && window.cpCurrentTab === 'deckcalc') switchCpTab('dashboard');
+ }
+
+ let deckCalcLoaded = false;
+ function ensureDeckCalcLoaded() {
+     const frame = document.getElementById('cp-deckcalc-frame');
+     if (!frame || deckCalcLoaded) return;
+     deckCalcLoaded = true;
+     frame.src = 'https://video-tech.github.io/goldeneye-dashboard/snippets/3sixty-deck-estimator.html?v=' + Date.now();
  }
 
  // Position buckets, with the validated ordinal ramp for each theme

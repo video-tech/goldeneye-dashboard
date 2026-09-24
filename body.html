@@ -276,6 +276,11 @@
         .btn-gold:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; }
         .history-table { width: 100%; border-collapse: separate; border-spacing: 0; }
         .history-table td { padding: 16px; background: transparent; border-bottom: 1px solid var(--line); }
+        .history-table th { padding: 10px 16px; font-family: 'JetBrains Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--t3); }
+        @media (max-width: 900px) {
+            .cp-mobile-stack { grid-template-columns: 1fr !important; }
+            .cp-mobile-stack > div:last-child { text-align: left !important; }
+        }
         .modal-title { font-size: 1.25rem; font-weight: bold; margin-bottom: 1rem; color: var(--t1); font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif; font-stretch: 115%; }
 
         /* Kept for phase 4: these three still carry the pre-token light-mode overrides.
@@ -1530,53 +1535,45 @@
                 </div>
 
                 <div id="page-creatives" class="p-4 md:p-8 space-y-6 hidden">
-                    <header class="mb-6 flex justify-between items-end">
-                        <div><h1 class="text-3xl font-bold tracking-tight text-white">Ad Creatives</h1><p class="text-gray-400 mt-1">Upload and manage ad media for client approval.</p></div>
-                    </header>
-
-                    <div class="glass p-6 mb-8">
-                        <h3 class="text-lg font-bold mb-1 border-b border-white/10 pb-2">Send an ad for approval</h3>
-                        <p class="text-xs text-gray-400 mt-3 mb-4">
-                            Build the ad in Meta and leave it paused, then paste its Ad ID here. We pull Meta's own
-                            preview so the client reviews the finished ad &mdash; headline, copy and button &mdash; not just the image.
+                    <!-- Shared header now carries the title (updateGeHeader: "Accounts" /
+                         "ad approvals."), so the old per-page <h1>+<p> is gone. -->
+                    <div class="glass" style="padding:28px 30px;">
+                        <h3 class="ge-title" style="font-size:19px;">send an ad for approval.</h3>
+                        <p class="text-xs" style="margin:9px 0 22px; max-width:620px; color:var(--t2); line-height:1.6;">
+                            Build the ad in Meta and leave it paused, then paste its Ad ID. We pull Meta's own
+                            preview, so the client reviews the finished ad &mdash; headline, copy and button &mdash; not just the image.
                         </p>
-                        <form id="creative-upload-form" onsubmit="submitAdForApproval(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                            <div>
-                                <label class="modal-label">Client</label>
+                        <form id="creative-upload-form" onsubmit="submitAdForApproval(event)" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; align-items:end;">
+                            <div class="flex flex-col gap-1.5">
+                                <label class="ge-label">Client</label>
                                 <select id="creative-client" class="glass-input" required></select>
                             </div>
-                            <div>
-                                <label class="modal-label">Ad Name / Concept</label>
-                                <input type="text" id="creative-name" class="glass-input" placeholder="Summer Promo V1" required>
+                            <div class="flex flex-col gap-1.5">
+                                <label class="ge-label">Ad name</label>
+                                <input type="text" id="creative-name" class="glass-input" placeholder="Spring Promo V1" required>
                             </div>
-                            <div>
-                                <label class="modal-label">Meta Ad ID</label>
+                            <div class="flex flex-col gap-1.5">
+                                <label class="ge-label">Meta ad ID</label>
                                 <input type="text" id="creative-ad-id" class="glass-input" placeholder="120200000000000000" required>
                             </div>
-                            <div>
-                                <button type="submit" id="btn-upload-creative" class="w-full btn-primary font-bold py-2.5 rounded-lg transition">Request Previews</button>
-                            </div>
+                            <button type="submit" id="btn-upload-creative" class="btn-primary btn" style="height:36px;">Request previews</button>
                         </form>
                     </div>
 
-                    <div class="glass p-6">
-                        <h3 class="text-lg font-bold mb-4">Uploaded Creatives</h3>
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left text-sm">
-                                <thead class="text-xs uppercase tracking-wider text-gray-500 border-b border-white/10">
-                                    <tr>
-                                        <th class="pb-3 p-2">Client</th>
-                                        <th class="pb-3 p-2">Ad Name</th>
-                                        <th class="pb-3 p-2">Previews</th>
-                                        <th class="pb-3 p-2">Status</th>
-                                        <th class="pb-3 p-2">Client Feedback</th>
-                                        <th class="pb-3 p-2 text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="admin-creatives-list" class="divide-y divide-white/5">
-                                    </tbody>
-                            </table>
+                    <div>
+                        <div class="flex items-baseline justify-between" style="margin-bottom:14px;">
+                            <h2 class="flex items-center gap-2">
+                                <span class="ge-label" style="font-size:11px; color:var(--gold);">01.</span>
+                                <span class="ge-title" style="font-size:20px;">in review.</span>
+                            </h2>
+                            <span class="text-xs" id="creatives-summary-line" style="color:var(--t3);"></span>
                         </div>
+                        <!-- Card grid, not a <table> — matches the target design. Each card's
+                             preview well is the same "not fetched yet" placeholder the admin
+                             table always showed as text (no image); Real Golden Eye's live
+                             iframe preview lives in the client portal (renderClientCreatives),
+                             untouched — admin only ever summarized placement count. -->
+                        <div id="admin-creatives-list" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px;"></div>
                     </div>
                 </div>
 
@@ -2007,20 +2004,20 @@
         <div id="client-portal-container" class="hidden space-y-8 p-4 md:p-8">
             <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
                 <div class="flex items-center gap-4">
-                    <img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-12">
+                    <img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-10">
                     <div>
-                        <h1 class="text-3xl font-bold">Welcome, <span id="client-name-display" class="text-yellow-400">Partner</span></h1>
-                        <p class="text-gray-400 text-sm mt-1">Real-time performance metrics.</p>
+                        <div class="ge-label">Client portal preview</div>
+                        <h1 class="ge-title" style="font-size:24px; margin-top:3px;">welcome back, <span id="client-name-display" style="color:var(--gold);">partner</span>.</h1>
                     </div>
                 </div>
                 <div class="flex items-center flex-wrap gap-3">
-                    <div id="admin-switcher" style="display: none !important;" class="hidden glass-pill border-yellow-500/50">
-    <select id="admin-client-list" onchange="portalSwitchClient(this.value)" class="bg-transparent text-xs border-none outline-none text-white cursor-pointer">
+                    <div id="admin-switcher" style="display: none !important;" class="hidden glass-pill" style="border-color:var(--goldLine);">
+    <select id="admin-client-list" onchange="portalSwitchClient(this.value)" class="bg-transparent text-xs border-none outline-none cursor-pointer" style="color:var(--t1);">
     </select>
 </div>
                     <div id="portal-date-control" class="relative dropdown-container">
                         <div class="glass-pill" onclick="toggleDropdown('portal-date-menu')">
-                            <i class="fa-regular fa-calendar text-yellow-400"></i>
+                            <i class="fa-regular fa-calendar" style="color:var(--gold);"></i>
                             <span id="selected-date-label">Last 7 Days</span>
                             <i class="fa-solid fa-chevron-down text-[10px]"></i>
                         </div>
@@ -2029,11 +2026,11 @@
                             <div class="dropdown-item" onclick="selectPresetDate('last7', 'Last 7 Days')">Last 7 Days</div>
                             <div class="dropdown-item" onclick="selectPresetDate('last30', 'Last 30 Days')">Last 30 Days</div>
                             <div class="dropdown-item" onclick="selectPresetDate('max', 'Maximum')">Maximum</div>
-                            <div class="border-t border-white/10 my-2"></div>
+                            <div style="border-top:1px solid var(--line); margin:8px 0;"></div>
                             <div class="p-2 space-y-2" onclick="event.stopPropagation()">
                                 <input type="date" id="start-date" class="glass-input">
                                 <input type="date" id="end-date" class="glass-input">
-                                <button onclick="applyCustomRange()" class="w-full bg-white text-black text-[10px] font-bold py-2 rounded-lg mt-1">Apply</button>
+                                <button onclick="applyCustomRange()" class="btn-primary btn text-xs w-full mt-1">Apply</button>
                             </div>
                         </div>
                     </div>
@@ -2041,22 +2038,32 @@
                 </div>
             </header>
 
-            
+            <!-- Tabs restyled to the one gold-underline-active treatment (matches Accounts).
+                 Visible row trimmed to what the target design shows; Network Ranks, Knowledge
+                 Base, Profile and Pipeline move behind "More" — same tabs, same
+                 switchCpTab() calls, just relocated, so nothing about who sees what changes. -->
+            <div class="flex items-center gap-6 flex-wrap" style="border-bottom:1px solid var(--line); margin:16px 0 24px; padding:0 2px;">
+                <button id="cp-tab-getstarted" onclick="switchCpTab('getstarted')" class="hidden ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-flag-checkered mr-2" style="color:var(--pos);"></i>Get Started</button>
+                <button id="cp-tab-dashboard" onclick="switchCpTab('dashboard')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-chart-pie mr-2"></i>Dashboard</button>
+                <!-- 3Sixty Industries only; toggled by updateDeckCalcTabVisibility() in app.js. -->
+                <button id="cp-tab-deckcalc" onclick="switchCpTab('deckcalc')" class="hidden ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-calculator mr-2" style="color:var(--gold);"></i>Deck Calculator</button>
+                <button id="cp-tab-tasks" onclick="switchCpTab('tasks')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-list-check mr-2"></i>Tasks <span id="cp-tasks-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full" style="background:var(--warn);"></span></button>
+                <button id="cp-tab-reports" onclick="switchCpTab('reports')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-file-lines mr-2"></i>Reports</button>
+                <button id="cp-tab-checkin" onclick="switchCpTab('checkin')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-clipboard-check mr-2"></i>Weekly check-in <span id="cp-checkin-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full" style="background:var(--warn);"></span></button>
+                <button id="cp-tab-creatives" onclick="switchCpTab('creatives')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-palette mr-2"></i>Ad approvals</button>
+                <button id="cp-tab-seo" onclick="switchCpTab('seo')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-brands fa-google mr-2"></i>Search &amp; SEO</button>
+                <button id="cp-tab-support" onclick="switchCpTab('support')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-comments mr-2"></i>Get in touch</button>
+                <button id="cp-tab-settings" onclick="switchCpTab('settings')" class="hidden ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-gear mr-2"></i>Settings</button>
 
-            <div class="flex items-center gap-6 border-b border-white/10 mb-6 mt-4 px-2 overflow-x-auto">
-                <button id="cp-tab-getstarted" onclick="switchCpTab('getstarted')" class="hidden whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-flag-checkered mr-2 text-emerald-400"></i> Get Started</button>
-                <button id="cp-tab-dashboard" onclick="switchCpTab('dashboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-chart-pie mr-2"></i> Dashboard</button>
-                <button id="cp-tab-tasks" onclick="switchCpTab('tasks')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-list-check mr-2"></i> Tasks <span id="cp-tasks-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full bg-amber-400 align-middle"></span></button>
-                <button id="cp-tab-support" onclick="switchCpTab('support')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-comments mr-2"></i> Get in Touch</button>
-                <button id="cp-tab-reports" onclick="switchCpTab('reports')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-file-lines mr-2"></i> Reports</button>
-                <button id="cp-tab-checkin" onclick="switchCpTab('checkin')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-clipboard-check mr-2"></i> Weekly Check-in <span id="cp-checkin-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full bg-amber-400 align-middle"></span></button>
-                <button id="cp-tab-pipeline" onclick="switchCpTab('pipeline')" class="hidden whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-bars-progress mr-2"></i> Pipeline</button>
-                <button id="cp-tab-creatives" onclick="switchCpTab('creatives')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-palette mr-2"></i> Ad Creatives</button>
-                <button id="cp-tab-settings" onclick="switchCpTab('settings')" class="hidden whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-gear mr-2"></i> Settings</button>
-                <button id="cp-tab-seo" onclick="switchCpTab('seo')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-brands fa-google mr-2"></i> SEO</button>
-                <button id="cp-tab-leaderboard" onclick="switchCpTab('leaderboard')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-trophy mr-2 text-yellow-500"></i> Network Ranks</button>
-                <button id="cp-tab-knowledge" onclick="switchCpTab('knowledge')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-graduation-cap mr-2"></i> Knowledge Base</button>
-                <button id="cp-tab-profile" onclick="switchCpTab('profile')" class="whitespace-nowrap pb-3 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition"><i class="fa-solid fa-circle-user mr-2"></i> Profile</button>
+                <div class="dropdown-container" style="margin-left:auto; margin-bottom:6px;">
+                    <button onclick="toggleDropdown('cp-more-menu')" class="btn-secondary btn text-xs">More <i class="fa-solid fa-chevron-down ml-1" style="font-size:9px;"></i></button>
+                    <div id="cp-more-menu" class="custom-dropdown-menu !w-[200px] p-2" style="right:0; left:auto;">
+                        <div class="dropdown-item" onclick="switchCpTab('leaderboard'); toggleDropdown('cp-more-menu');"><i class="fa-solid fa-trophy w-4" style="color:var(--gold);"></i> Network Ranks</div>
+                        <div class="dropdown-item" onclick="switchCpTab('knowledge'); toggleDropdown('cp-more-menu');"><i class="fa-solid fa-graduation-cap w-4"></i> Knowledge Base</div>
+                        <div class="dropdown-item" onclick="switchCpTab('profile'); toggleDropdown('cp-more-menu');"><i class="fa-solid fa-circle-user w-4"></i> Profile</div>
+                        <div class="dropdown-item hidden" id="cp-more-pipeline" onclick="switchCpTab('pipeline'); toggleDropdown('cp-more-menu');"><i class="fa-solid fa-bars-progress w-4"></i> Pipeline</div>
+                    </div>
+                </div>
             </div>
 
             <!-- The date control is moved into whichever of these applies to the current
@@ -2088,60 +2095,69 @@
                 </div>
             </div>
 
-            <div id="cp-view-dashboard" class="space-y-8 hidden">
+            <div id="cp-view-dashboard" class="space-y-6 hidden">
                 <div id="cp-date-slot-dash" class="cp-order-date"></div>
-                <div class="cp-order-kpis grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4">
-                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Marketing ROI</p><h4 class="text-3xl font-bold text-yellow-400" id="stat-roi">0.0x</h4></div>
-                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">New Leads</p><h4 class="text-3xl font-bold text-green-400" id="stat-leads">0</h4></div>
-                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CPL</p><h4 class="text-3xl font-bold text-purple-400" id="stat-cpl">$0</h4></div>
-                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Total Ad Spend</p><h4 class="text-3xl font-bold" id="stat-spend">$0</h4></div>
-                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Closed Revenue</p><h4 class="text-3xl font-bold text-blue-400" id="stat-revenue">$0</h4></div>
-                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Estimates Sent</p><h4 class="text-3xl font-bold text-gray-300" id="stat-est-count">0</h4></div>
-                    <div class="glass cp-kpi p-6"><p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Jobs Closed</p><h4 class="text-3xl font-bold text-emerald-400" id="stat-deals-count">0</h4></div>
+
+                <!-- ROI hero + 2x2 KPI grid, replacing the old 7-tile strip. Estimates Sent /
+                     Jobs Closed move into the weekly check-ins table below, where the per-week
+                     breakdown already lives (stat-est-count / stat-deals-count stay in app.js,
+                     null-safe, in case a future screen wants them again). -->
+                <div class="cp-order-kpis cp-mobile-stack" style="display:grid; grid-template-columns:1.1fr 1fr; gap:16px;">
+                    <div class="glass" style="padding:28px; display:flex; flex-direction:column; justify-content:center; background:var(--goldWash); border-color:var(--goldLine);">
+                        <div class="ge-label" style="color:var(--gold);">Marketing ROI</div>
+                        <div class="ge-num" style="font-family:'Archivo',sans-serif; font-weight:800; font-size:56px; line-height:1.05; color:var(--t1); margin-top:6px;" id="stat-roi">0.0<span style="font-size:28px; font-weight:600; color:var(--t2);">x</span></div>
+                        <p style="color:var(--t2); font-size:13px; margin-top:8px;">Revenue back for every dollar spent on ads this period.</p>
+                    </div>
+                    <div class="cp-kpi-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                        <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label">New Leads</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--pos); margin-top:6px;" id="stat-leads">0</h4></div>
+                        <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label">Cost Per Lead</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--t1); margin-top:6px;" id="stat-cpl">$0</h4></div>
+                        <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label">Ad Spend</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--t1); margin-top:6px;" id="stat-spend">$0</h4></div>
+                        <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label">Closed Revenue</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--gold); margin-top:6px;" id="stat-revenue">$0</h4></div>
+                        <span class="hidden" id="stat-est-count"></span>
+                        <span class="hidden" id="stat-deals-count"></span>
+                    </div>
                 </div>
 
-                <div class="cp-split grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="cp-order-leads glass p-6 min-h-[400px] flex flex-col">
-                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 shrink-0">New Leads</h3>
+                <div class="cp-split grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="cp-order-leads glass p-6 min-h-[380px] flex flex-col">
+                        <h3 class="ge-label mb-4 shrink-0">Leads coming in.</h3>
                         <div class="flex-1 relative"><canvas id="leadsChart"></canvas></div>
                     </div>
-                    <div class="cp-order-spend glass p-6 min-h-[400px] flex flex-col">
-                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 shrink-0">Ad Spend vs Revenue</h3>
+                    <div class="cp-order-spend glass p-6 min-h-[380px] flex flex-col">
+                        <h3 class="ge-label mb-4 shrink-0">Ad spend vs. revenue</h3>
                         <div class="flex-1 relative"><canvas id="roiChart"></canvas></div>
                     </div>
                 </div>
 
-                <div class="cp-split grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="cp-order-checkins space-y-4">
-                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest px-2">Your Weekly Check-ins</h3>
-                        <div class="glass overflow-x-auto"><table class="history-table w-full"><thead><tr class="text-left text-[10px] text-gray-500"><th>Week of</th><th>Estimates</th><th>Closed</th><th class="text-right">Revenue</th></tr></thead><tbody id="job-history-body"></tbody></table></div>
+                <div class="cp-split grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="cp-order-checkins space-y-3">
+                        <h3 class="ge-label px-1">02. your weekly numbers.</h3>
+                        <div class="glass overflow-x-auto"><table class="history-table w-full"><thead><tr class="text-left"><th>Week of</th><th>Estimates</th><th>Closed</th><th class="text-right">Revenue</th></tr></thead><tbody id="job-history-body"></tbody></table></div>
                     </div>
 
-                    <div class="cp-order-tasks space-y-4">
-                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest px-2">Active Project Tasks</h3>
-                        <div id="portal-tasks-container" class="grid grid-cols-1 gap-4"></div>
+                    <div class="cp-order-tasks space-y-3">
+                        <h3 class="ge-label px-1">Active project tasks</h3>
+                        <div id="portal-tasks-container" class="grid grid-cols-1 gap-3"></div>
                     </div>
-                </div>
-                
-                <div class="cp-order-rest glass p-6 border-l-4 border-yellow-400 mt-8">
-                    <div class="flex items-center gap-2 mb-2">
-                        <i class="fa-solid fa-sparkles text-yellow-400"></i>
-                        <h3 class="font-bold">What We've Done This Week</h3>
-                    </div>
-                    <div id="work-summary-dash" class="text-gray-400 leading-relaxed text-sm">Loading this week's update&hellip;</div>
                 </div>
 
-                <div class="cp-order-rest glass p-6 border-l-4 border-blue-500 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-8">
-                    <div class="flex-1">
+                <!-- "This week from us" — merges the work-summary strip and the request card into
+                     one gold-wash panel, matching the target's 2-col "leads coming in./this week
+                     from us" pairing rather than two separate full-width strips. -->
+                <div class="cp-order-rest glass cp-mobile-stack" style="background:var(--goldWash); border-color:var(--goldLine); padding:24px; display:grid; grid-template-columns:1fr auto; gap:20px; align-items:start;">
+                    <div>
                         <div class="flex items-center gap-2 mb-2">
-                            <i class="fa-solid fa-headset text-blue-400"></i>
-                            <h3 class="font-bold text-white">Need something else?</h3>
+                            <i class="fa-solid fa-sparkles" style="color:var(--gold);"></i>
+                            <h3 class="ge-title" style="font-size:15px;">this week from us.</h3>
                         </div>
-                        <div class="text-gray-400 leading-relaxed text-sm">Request a new task, campaign adjustment, or schedule a strategy meeting with our team.</div>
+                        <div id="work-summary-dash" style="color:var(--t2); line-height:1.6; font-size:13px;">Loading this week's update&hellip;</div>
                     </div>
-                    <button onclick="openClientRequestModal()" class="btn-primary font-bold text-xs shrink-0 px-6 py-3 rounded-full transition">
-                        <i class="fa-solid fa-paper-plane mr-2"></i> Submit Request
-                    </button>
+                    <div style="min-width:180px; text-align:right;">
+                        <p style="color:var(--t3); font-size:12px; margin-bottom:10px;">Need something else? Request a task or a strategy call.</p>
+                        <button onclick="openClientRequestModal()" class="btn-primary btn text-xs">
+                            <i class="fa-solid fa-paper-plane mr-2"></i>Submit request
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -2449,6 +2465,23 @@
                             <div id="cp-seo-authority"></div>
                         </section>
                     </div>
+                </div>
+            </div>
+
+            <!-- Deck Calculator — 3Sixty Industries only. Hidden by default (cp-tab-deckcalc
+                 in the More menu); updateDeckCalcTabVisibility() in app.js shows it only when
+                 the active client is 3Sixty. The estimator itself is a large standalone page
+                 (snippets/3sixty-deck-estimator.html) loaded in an iframe rather than inlined
+                 here, so it stays editable on its own and doesn't bloat body.new.html. -->
+            <div id="cp-view-deckcalc" class="space-y-4 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 px-1">
+                    <div>
+                        <h3 class="ge-label">Deck cost calculator</h3>
+                        <p style="color:var(--t2); font-size:13px; margin-top:4px;">The same estimator your customers use, embedded here for reference.</p>
+                    </div>
+                </div>
+                <div class="glass" style="overflow:hidden;">
+                    <iframe id="cp-deckcalc-frame" title="Deck cost estimator" scrolling="no" style="width:100%; border:none; display:block; height:1400px;"></iframe>
                 </div>
             </div>
 

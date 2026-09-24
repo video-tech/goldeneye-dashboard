@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3Sixty Cost Estimator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300&display=swap">
+<style>
+/* ============================================================
+   3SIXTY INDUSTRIES - COST ESTIMATOR
+   Single file, no build step. Paste into GoHighLevel.
+   Every tunable value lives in the CONFIG block in the first
+   <script> below. You should never need to edit this CSS to
+   change a price, add a material, or redirect the data.
+   ============================================================ */
+
+:root{
+  --bg:#f5f3ee; --card:#ffffff; --surface:#edeae3;
+  --border:#d5d2c9; --hair:#e5e2d9; --hair2:#f0ede6;
+  --text:#1c1a17; --muted:#6b6860; --subtle:#9c9a92;
+  --green:#63893c; --green-dark:#4a6e2a; --green-light:#eef4e6;
+  --info:#1a4a7a; --info-light:#e4eef8; --info-edge:#85b7eb;
+  --warn:#7a4a00; --warn-light:#fdf0dc;
+  --danger:#a3332f; --danger-light:#fbeae9; --danger-edge:#eab6b4;
+  --r:10px; --rl:14px;
+  --shadow:0 1px 3px rgba(28,26,23,.05);
+  --shadow-lift:0 8px 40px rgba(28,26,23,.15);
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+
+body{
+  font-family:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:var(--bg); color:var(--text);
+  font-size:14px; line-height:1.5;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+
+:focus-visible{outline:2px solid var(--green);outline-offset:2px;border-radius:4px;}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;}
+}
+
+/* ---------- shell ---------- */
+#app{max-width:1080px;margin:0 auto;padding:20px 20px 40px;}
+.apphead{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;flex-wrap:wrap;
+  margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--hair);
+}
+.brand{font-family:"Fraunces",Georgia,serif;font-size:19px;font-weight:300;color:var(--green);letter-spacing:-.2px;}
+.brand span{color:var(--muted);}
+.namebadge{
+  font-size:12px;color:var(--muted);background:var(--surface);
+  padding:5px 12px;border-radius:20px;border:1px solid var(--border);
+}
+.namebadge:empty{display:none;}
+
+/* Single column at every width, by design: configure at the top, then the
+   price, CTA and notes underneath. This used to be two columns above 900px,
+   which never fired inside the old 770px WordPress column but does fire in a
+   full-width GHL row - putting the price off to the right of the config. */
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;align-items:start;}
+
+/* ---------- level blocks ---------- */
+.level{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--rl);
+  margin-bottom:8px;overflow:hidden;box-shadow:var(--shadow);
+}
+.levelhead{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:11px 13px;cursor:pointer;user-select:none;width:100%;
+  background:none;border:none;font-family:inherit;text-align:left;color:inherit;
+}
+.levelhead:hover{background:var(--bg);}
+.levelhead.open{border-bottom:1px solid var(--hair);}
+.lh-left{display:flex;align-items:center;gap:8px;min-width:0;}
+.lnum{
+  width:22px;height:22px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:600;color:#fff;
+}
+.ltitle{font-weight:500;font-size:13px;}
+.lsqft{
+  font-size:10px;color:var(--subtle);background:var(--bg);
+  padding:2px 7px;border-radius:8px;border:1px solid var(--hair);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.lh-right{display:flex;align-items:center;gap:7px;}
+.btn-remove{
+  font-size:11px;color:var(--danger);background:var(--danger-light);
+  border:1px solid var(--danger-edge);border-radius:7px;
+  padding:3px 9px;cursor:pointer;font-family:inherit;font-weight:500;
+}
+.btn-remove:hover{background:#f7dcda;}
+.chev{font-size:9px;color:var(--subtle);transition:transform .2s;}
+.chev.open{transform:rotate(180deg);}
+.levelbody{padding:13px;display:flex;flex-direction:column;gap:12px;}
+
+/* ---------- fields ---------- */
+.field{display:flex;flex-direction:column;gap:4px;}
+.flabel{font-size:12px;font-weight:500;color:var(--muted);display:flex;align-items:center;gap:5px;}
+.fhint{font-size:10px;color:var(--subtle);font-weight:400;}
+.fsub{font-size:10px;color:var(--subtle);}
+.inline{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.unit{font-size:12px;color:var(--muted);}
+.unit strong{font-variant-numeric:tabular-nums;}
+
+input[type=number],input[type=text],input[type=email],input[type=tel]{
+  font-family:inherit;font-size:14px;color:var(--text);
+  background:var(--bg);border:1px solid var(--border);border-radius:8px;
+  padding:6px 8px;outline:none;transition:border-color .15s,background .15s;
+}
+input[type=number]{width:64px;font-variant-numeric:tabular-nums;}
+input:focus{border-color:var(--green);background:#fff;}
+input[type=checkbox]{width:15px;height:15px;accent-color:var(--green);cursor:pointer;flex-shrink:0;}
+
+.pillrow{display:flex;gap:4px;flex-wrap:wrap;}
+.pill{
+  padding:5px 12px;border-radius:20px;border:1px solid var(--border);
+  background:transparent;color:var(--muted);
+  font-family:inherit;font-size:12px;cursor:pointer;
+  transition:background .12s,border-color .12s,color .12s;white-space:nowrap;
+}
+.pill:hover{background:var(--surface);}
+.pill.on{background:var(--info-light);border-color:var(--info-edge);color:var(--info);font-weight:500;}
+
+/* ---------- material tier cards ---------- */
+.tiers{display:flex;flex-direction:column;gap:3px;}
+.tier{
+  border:1px solid var(--border);border-radius:var(--r);
+  padding:5px 9px 6px;cursor:pointer;width:100%;text-align:left;
+  background:var(--card);font-family:inherit;color:inherit;
+  transition:border-color .12s,background .12s;
+}
+.tier:hover:not(.sel){border-color:#aaa;}
+.tier.sel{border-color:var(--green);background:var(--green-light);}
+.tierrow{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
+.tiername{font-size:12px;font-weight:500;}
+.tierprice{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.tiersub{font-size:10px;color:var(--subtle);margin-top:1px;}
+.tag{display:inline-block;font-size:9px;padding:1px 6px;border-radius:6px;font-weight:600;margin-left:3px;}
+.tag-conf{background:#e8f0df;color:#2d5016;}
+.tag-est{background:var(--warn-light);color:var(--warn);}
+
+/* ---------- rail cards ---------- */
+.rails{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
+.rail{
+  border:1px solid var(--border);border-radius:var(--r);overflow:hidden;
+  cursor:pointer;background:var(--card);padding:0;
+  font-family:inherit;color:inherit;text-align:left;
+  transition:border-color .12s,background .12s;
+}
+.rail:hover:not(.sel){border-color:#aaa;}
+.rail.sel{border-color:var(--green);background:var(--green-light);}
+.railswatch{
+  height:44px;display:flex;align-items:center;justify-content:center;
+  font-size:11px;color:var(--subtle);font-style:italic;
+}
+.railinfo{padding:5px 8px 6px;}
+.railname{font-size:12px;font-weight:500;}
+.railprice{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;}
+
+/* ---------- add-ons ---------- */
+.addons{display:flex;flex-direction:column;gap:8px;}
+.addon{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;}
+.addon span{color:var(--subtle);font-size:10px;}
+
+.btn-add{
+  width:100%;padding:9px;margin-bottom:6px;
+  border:1.5px dashed var(--border);border-radius:var(--rl);
+  background:transparent;color:var(--muted);
+  font-family:inherit;font-size:12px;cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s;
+}
+.btn-add:hover{border-color:var(--green);color:var(--green);background:var(--green-light);}
+
+/* ---------- output ---------- */
+.card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--rl);
+  padding:1rem 1.1rem;margin-bottom:12px;box-shadow:var(--shadow);
+}
+.cardhead{
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--subtle);margin-bottom:9px;
+}
+.hero{padding:1.4rem 1.2rem;}
+.herometa{font-size:11px;color:var(--muted);margin-bottom:8px;}
+.heroprice{
+  font-family:"Fraunces",Georgia,serif;font-size:44px;font-weight:300;
+  letter-spacing:-1.5px;line-height:1;font-variant-numeric:tabular-nums;
+}
+.herosub{font-size:13px;color:var(--muted);margin-top:5px;}
+.herosub em{font-style:normal;color:var(--subtle);font-size:12px;}
+.herostats{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--hair);
+}
+.statlabel{font-size:10px;color:var(--subtle);}
+.statvalue{font-weight:500;font-size:13px;margin-top:2px;font-variant-numeric:tabular-nums;}
+
+.tablewrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th,td{padding:5px 7px;text-align:left;}
+th{
+  font-weight:500;font-size:10px;color:var(--subtle);
+  text-transform:uppercase;letter-spacing:.05em;
+  border-bottom:1px solid var(--hair);
+}
+tr:not(:last-child) td{border-bottom:1px solid var(--hair2);}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.detail{color:var(--subtle);}
+.rowsection td{
+  background:var(--bg);padding:4px 7px;
+  font-size:10px;font-weight:600;color:var(--subtle);
+  letter-spacing:.04em;border-top:1px solid var(--hair);
+}
+.rowsub td{border-top:1px solid var(--border)!important;padding-top:8px;font-weight:500;}
+.rowadj td{color:var(--muted);}
+.rowtotal td{font-weight:600;font-size:15px;padding-top:8px;border-top:1px solid var(--border)!important;}
+.note{font-size:11px;color:var(--subtle);font-style:italic;margin-top:7px;line-height:1.5;}
+.note b{font-weight:600;color:var(--text);font-style:normal;}
+
+.ctabar{
+  background:var(--text);border-radius:var(--rl);
+  padding:18px 20px;display:flex;justify-content:space-between;
+  align-items:center;gap:14px;
+}
+.ctatitle{color:#fff;font-weight:600;font-size:14px;margin-bottom:3px;}
+.ctasub{color:rgba(255,255,255,.45);font-size:12px;line-height:1.4;}
+.btn-cta{
+  background:var(--green);color:#fff;border:none;
+  padding:11px 22px;border-radius:var(--r);
+  font-family:inherit;font-size:14px;font-weight:600;
+  cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-block;
+  transition:background .15s;
+}
+.btn-cta:hover{background:var(--green-dark);}
+
+textarea{
+  width:100%;min-height:80px;padding:8px 10px;
+  border:1px solid var(--border);border-radius:8px;
+  font-family:inherit;font-size:13px;color:var(--text);
+  background:var(--bg);outline:none;resize:vertical;
+}
+textarea:focus{border-color:var(--green);background:#fff;}
+
+/* ============================================================
+   THE LOCK - the blurred price behind the lead gate.
+   What sits under .locked is the REAL calculated number, blurred.
+   ============================================================ */
+.lockwrap{position:relative;}
+.locked{
+  filter:blur(9px);
+  user-select:none;pointer-events:none;
+  transition:filter .5s ease;
+}
+.lockwrap.open .locked{filter:blur(0);}
+.lockover{
+  position:absolute;inset:0;z-index:5;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;text-align:center;padding:20px;
+  background:linear-gradient(to bottom,rgba(245,243,238,.35),rgba(245,243,238,.85));
+  border-radius:var(--rl);
+}
+.lockwrap.open .lockover{display:none;}
+.locktitle{font-family:"Fraunces",Georgia,serif;font-size:20px;font-weight:300;letter-spacing:-.3px;text-wrap:balance;}
+.locksub{font-size:12px;color:var(--muted);max-width:34ch;}
+.btn-unlock{
+  background:var(--green);color:#fff;border:none;
+  padding:12px 26px;border-radius:var(--r);
+  font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;
+  box-shadow:0 4px 14px rgba(99,137,60,.3);transition:background .15s;
+}
+.btn-unlock:hover{background:var(--green-dark);}
+
+/* ---------- gate modal ---------- */
+#overlay{
+  position:fixed;inset:0;z-index:100;
+  display:none;align-items:center;justify-content:center;padding:20px;
+  background:rgba(28,26,23,.6);
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+}
+#overlay.show{display:flex;}
+#modal{
+  background:var(--card);border-radius:20px;box-shadow:var(--shadow-lift);
+  padding:32px 30px;width:100%;max-width:460px;
+  max-height:90vh;overflow-y:auto;
+  animation:rise .3s ease;
+}
+@keyframes rise{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}
+.g-brand{font-family:"Fraunces",Georgia,serif;font-size:20px;font-weight:300;color:var(--green);margin-bottom:16px;}
+.g-head{
+  font-family:"Fraunces",Georgia,serif;font-size:26px;font-weight:300;
+  line-height:1.2;letter-spacing:-.4px;margin-bottom:8px;text-wrap:balance;
+}
+.g-head em{font-style:italic;}
+.g-sub{font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.6;}
+.g-preview{
+  background:var(--bg);border:1px solid var(--hair);border-radius:var(--r);
+  padding:12px 14px;margin-bottom:18px;
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+}
+.g-price{
+  font-family:"Fraunces",Georgia,serif;font-size:26px;font-weight:300;
+  letter-spacing:-1px;filter:blur(7px);user-select:none;
+  font-variant-numeric:tabular-nums;
+}
+.g-plabel{font-size:12px;color:var(--subtle);}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.frow3{display:grid;grid-template-columns:1fr 84px;gap:10px;}
+.fgroup{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
+.fgroup label{
+  font-size:11px;font-weight:600;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.06em;
+}
+.fgroup input{padding:10px 12px;border-radius:var(--r);}
+.fgroup input.err{border-color:var(--danger);}
+.errmsg{font-size:11px;color:var(--danger);display:none;}
+.errmsg.show{display:block;}
+.btn-gate{
+  width:100%;padding:13px;margin-top:6px;
+  background:var(--green);color:#fff;border:none;border-radius:var(--r);
+  font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;
+  transition:background .15s;
+}
+.btn-gate:hover{background:var(--green-dark);}
+.btn-gate:disabled{background:var(--subtle);cursor:wait;}
+.g-fine{font-size:11px;color:var(--subtle);text-align:center;margin-top:10px;}
+.linkbtn{
+  background:none;border:none;padding:0;cursor:pointer;
+  font-family:inherit;font-size:11px;color:var(--green);
+  text-decoration:underline;
+}
+.linkbtn:hover{color:var(--green-dark);}
+/* A real GHL form needs more room than the built-in one. */
+#modal.wide{max-width:560px;}
+/* Honeypot: removed from layout and from the accessibility tree, but still
+   a real focusable input as far as a scripted bot is concerned. */
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;}
+
+/* ---------- inline gate ---------- */
+#gatesection{display:none;max-width:1080px;margin:0 auto;padding:20px 20px 0;}
+#gatesection.show{display:block;}
+@media(max-width:600px){#gatesection{padding:14px 14px 0;}}
+
+.gatecard{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--rl);
+  padding:28px 30px;box-shadow:var(--shadow);
+}
+@media(max-width:600px){.gatecard{padding:22px 18px;}}
+.gatecard .g-head{font-size:30px;}
+@media(max-width:600px){.gatecard .g-head{font-size:24px;}}
+
+/* The form is the point of this screen - give it room, and cap it so a tall
+   GHL form does not push the blurred preview off the bottom of the page. */
+.gateform{
+  margin-top:18px;padding-top:18px;border-top:1px solid var(--hair);
+}
+.gateform iframe{
+  width:100%;border:none;border-radius:8px;display:block;
+  background:transparent;
+}
+
+/* ---------- decorative blurred mock ---------- */
+#mock{
+  padding:20px;overflow:hidden;
+  pointer-events:none;filter:blur(5px);opacity:.55;display:none;
+}
+#mock.show{display:block;}
+/* Modal presentation pins it behind the overlay; inline mode leaves it in
+   the normal flow, below the form, as a preview of what unlocks. */
+#mock.pinned{position:fixed;inset:0;z-index:1;opacity:.65;}
+.mockwrap{max-width:1080px;margin:0 auto;}
+.mockhead{
+  display:flex;align-items:center;gap:10px;margin-bottom:14px;
+  padding-bottom:12px;border-bottom:1px solid var(--hair);
+}
+.mockgrid{display:grid;grid-template-columns:280px 1fr;gap:14px;}
+.mockpanel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px;}
+.mockbar{height:8px;background:var(--surface);border-radius:4px;margin-bottom:7px;}
+.mocktier{height:44px;border-radius:8px;border:1px solid var(--border);margin-bottom:4px;}
+.mockprice{font-family:"Fraunces",Georgia,serif;font-size:42px;font-weight:300;letter-spacing:-1.5px;}
+
+/* ---------- responsive ---------- */
+@media (max-width:900px){
+  #app{padding:14px 14px 32px;}
+  /* Column count is no longer width-dependent - see .grid above. This block
+     only tightens padding on smaller screens. */
+}
+@media (max-width:600px){
+  .heroprice{font-size:32px;}
+  .ctabar{flex-direction:column;align-items:stretch;text-align:center;}
+  .frow{grid-template-columns:1fr;}
+  #mock{display:none!important;}
+  table td:nth-child(2),table th:nth-child(2){display:none;}
+  #modal{padding:24px 18px;border-radius:14px;}
+  #overlay{padding:12px;}
+}
+</style>
+</head>
+<body>
+
+<!-- Inline gate. Filled by JS when gatePresentation is "inline". -->
+<div id="gatesection"></div>
+
+<!-- Decorative blurred mock. Only rendered when GATE_MODE is "before". -->
+<div id="mock" aria-hidden="true"><div class="mockwrap">
+  <div class="mockhead">
+    <div class="brand">3Sixty</div>
+    <span style="font-size:12px;color:var(--subtle);">Cost Estimator</span>
+  </div>
+  <div class="mockgrid">
+    <div class="mockpanel">
+      <div class="mockbar" style="width:60%;"></div>
+      <div class="mockbar" style="width:40%;"></div>
+      <div class="mocktier" style="background:var(--green-light);border-color:var(--green);"></div>
+      <div class="mocktier" style="background:var(--surface);"></div>
+      <div class="mocktier" style="background:var(--surface);"></div>
+    </div>
+    <div class="mockpanel">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">20 x 14 &middot; 280 sqft &middot; Trex Enhance</div>
+      <div class="mockprice">$19,800 &ndash; $20,900</div>
+    </div>
+  </div>
+</div></div>
+
+<div id="app">
+  <div class="apphead">
+    <div class="brand">3Sixty <span>&middot; Cost Estimator</span></div>
+    <div class="namebadge" id="namebadge"></div>
+  </div>
+
+  <div class="grid">
+    <div id="config"></div>
+    <div class="outcol">
+      <div id="out"></div>
+      <div class="card">
+        <div class="cardhead">Notes for your designer</div>
+        <textarea id="notes" placeholder="Anything we should know? Slope, access, existing structure, timing..."></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="overlay" role="dialog" aria-modal="true" aria-labelledby="gatehead">
+  <div id="modal"></div>
+</div>
+
+<script>
+/* ============================================================================
+   1. CONFIG - everything you will ever need to change lives here
+   ============================================================================ */
+var CONFIG = {
+
+  /* ---- where the answers go -------------------------------------------- */
+  ghl: {
+    /* The GHL form used as the gate. Keeps the native Form Submission record
+       and GHL's own spam protection.
+       NOTE this is a white-labeled domain, not api.leadconnectorhq.com. The
+       unlock listener trusts this exact origin and nothing else - a check
+       for "leadconnectorhq.com" would reject every message and the
+       calculator would never unlock.
+       Set to "" to fall back to the built-in styled form + webhook only.   */
+    formUrl: "",
+
+    /* GHL's own embed script. It resizes the iframe to fit the form and
+       drives the submit message. Must be served from the SAME host as
+       formUrl. Loaded lazily, only when the gate actually opens.          */
+    formEmbedScript: "https://link.midasmediafirm.com/js/form_embed.js",
+
+    /* Starting height in px, from data-height on the GHL embed snippet.
+       form_embed.js overrides this once it measures the real form.        */
+    formHeight: 863,
+
+    /* Inbound Webhook URL from a GHL workflow. Used to send the estimate
+       again whenever the customer changes their mind after unlocking, and as
+       the only capture path if formUrl is empty. Leave "" to disable.      */
+    webhookUrl: "https://services.leadconnectorhq.com/hooks/1V2SIOLvMSfiua6HxzYk/webhook-trigger/da02dec5-a8d2-43a9-9819-df011db62471",
+
+    /* Map our data to YOUR GHL custom field query keys. Left side is ours -
+       do not change it. Right side must match the "Query Key" shown on each
+       custom field in GHL. Delete a line to stop sending that field.
+       IMPORTANT: only list fields you always populate. A hidden GHL field
+       that submits empty will blank whatever the contact already had.      */
+    fieldMap: {
+      first_name:    "first_name",
+      last_name:     "last_name",
+      email:         "email",
+      phone:         "phone",
+      address:       "address1",
+      city:          "city",
+      postal_code:   "postal_code",
+      total_sqft:    "deck_total_sqft",
+      deck_levels:   "deck_levels",
+      material:      "deck_material",
+      rail_type:     "deck_rail_type",
+      rail_lf:       "deck_rail_lf",
+      steps:         "deck_steps",
+      addons:        "deck_addons",
+      price_low:     "deck_price_low",
+      price_high:    "deck_price_high",
+      breakdown:     "deck_breakdown",
+      notes:         "deck_notes"
+    }
+  },
+
+  /* ---- how the gate behaves --------------------------------------------
+     "before" - gate on load over the blurred mock, calculator after.
+                Matches the original. The form fires before a deck exists,
+                so identity comes from the form and the DECK CONFIGURATION
+                IS SENT SEPARATELY to webhookUrl once they start building.
+                That makes webhookUrl effectively required in this mode.
+     "none"   - no gate at all. The calculator is open, the real price shows
+                immediately, and nothing is written to the CRM because there
+                is no identity to attach it to. Used for the ungated build.
+     "after"  - customer configures first and sees their real price blurred
+                behind an unlock button. The form then carries every answer
+                as hidden fields, so no webhook is needed at all.
+                NOTE the GHL iframe form never reports WHO submitted - the
+                only message back is "submitted" - so in "before" mode the
+                webhook fires carrying a deck with no email to attach it to.
+                That is why this is set to "after".                       */
+  gateMode: "none",
+
+  /* How the gate is presented.
+     "inline" - the form sits on the page above a blurred preview of the
+                calculator. No overlay, no popup. Better for an iframe
+                embed, where a fixed-position modal can end up centred on
+                the iframe rather than on what the visitor is looking at.
+     "modal"  - full-screen overlay, the original behaviour.              */
+  gatePresentation: "inline",
+
+  /* ---- business details ------------------------------------------------- */
+  business: {
+    name:     "3Sixty Industries",
+    phone:    "(385) 396-7380",
+    ctaLabel: "Schedule free design",
+    ctaUrl:   "https://www.3sixty-industries.com/free-quote"
+  },
+
+  /* ---- pricing ---------------------------------------------------------- */
+  pricing: {
+    footingEach:   350,   /* per ground screw */
+    stepEach:      275,   /* per standard step */
+    waterproofPsf: 20,    /* RainEscape, per sqft */
+
+    /* Suggested step count shown next to the field, same idea as the ground
+       screw suggestion. Not derived from anything - deck height off grade
+       isn't a variable this calculator collects - so it is just the typical
+       run for a standard-height deck. Override for anything taller/shorter. */
+    standardSteps: 6,
+
+    /* Flat adjustment applied to the sum of all line items. 0.975 = the
+       estimate lands 2.5% under the raw sum. Shown as its own row so the
+       breakdown table actually adds up. Set to 1 to disable.              */
+    adjustment: 0.975,
+
+    /* How far below the adjusted total the bottom of the quoted range sits.
+       0.05 = the customer sees "adjusted x 0.95 - adjusted".              */
+    rangeSpread: 0.05,
+
+    /* Demo pricing exists but is presented as TBD by default, matching how
+       it is sold. Flip priced:true to show a real number instead.         */
+    demo: { priced:false, psf:5, minimum:650 }
+  },
+
+  /* Ground screws. One base pair plus one screw per ~152 sqft, ceiling
+     rounded, never fewer than 4. Monotonic: a bigger deck can never need
+     fewer screws than a smaller one.                                      */
+  footings: { base:1.86, perSqft:0.0066, minimum:4 },
+
+  /* ---- materials -------------------------------------------------------
+     ORDER IS LOAD-BEARING. A level stores its material by INDEX, so
+     inserting or reordering entries silently repriced every saved estimate.
+     Add new materials to the END only. Cards are displayed cheapest-first
+     regardless of the order here. "hidden" tiers show only when selected. */
+  tiers: [
+    { mfr:"Trex",       name:"Enhance® · 25yr",           sub:"Basics",              psf:51, confirmed:true },
+    { mfr:"Trex",       name:"Select® · 35yr",            sub:"Select collections",  psf:61, confirmed:false },
+    { mfr:"Trex",       name:"Transcend® · 50yr",         sub:"Transcend / Signature", psf:62, confirmed:false, hidden:true },
+    { mfr:"TimberTech", name:"Prime / Prime+ · 25yr",          sub:"Edge Prime, Prime+",  psf:54, confirmed:true },
+    { mfr:"TimberTech", name:"Terrain+ · 30yr",                sub:"Terrain+ grooved",    psf:57, confirmed:true },
+    { mfr:"TimberTech", name:"Legacy · 30yr",                  sub:"PRO Legacy",          psf:69, confirmed:true },
+    { mfr:"TimberTech", name:"AZEK Advanced · Lifetime",       sub:"Advanced PVC",        psf:65, confirmed:false, hidden:true },
+    { mfr:"Trex",       name:"Enhance Naturals® · 25yr",  sub:"Naturals grooved",    psf:53, confirmed:false },
+    { mfr:"TimberTech", name:"Premier · 30yr",                 sub:"PRO Premier",         psf:57, confirmed:false, hidden:true },
+    { mfr:"TimberTech", name:"Pro Reserve · 30yr",             sub:"PRO Reserve",         psf:62, confirmed:true }
+  ],
+
+  /* Railing is keyed, not indexed, so these can be reordered freely.
+     An unknown key falls back to the first entry AND logs - the old build
+     silently priced unknown rails at the custom-weld rate.                */
+  rails: [
+    { key:"cinch",     name:"Cinch (Pre-fab)", short:"Cinch",          price:85,  swatch:"#e8f3e8" },
+    { key:"trexal",    name:"Trex Aluminum",   short:"Trex Aluminum",  price:115, swatch:"#e0e8ee" },
+    { key:"comp",      name:"Composite",       short:"Composite",      price:100, swatch:"#ede5d4" },
+    { key:"custom",    name:"Custom weld",     short:"Custom weld",    price:135, swatch:"#f0e8f0" },
+    { key:"cable_rfx", name:"RailFX Cable",    short:"RailFX Cable",   price:250, swatch:"#e8eef2" },
+    { key:"cable_pr",  name:"Precision Cable", short:"Precision Cable",price:205, swatch:"#eef0e8" }
+  ],
+
+  /* Priced as TBD and quoted on site. Add or remove freely - the checkbox
+     list, the estimate rows and the GHL payload all read from this array. */
+  addons: [
+    { key:"drinkRail",  label:"Drink rail" },
+    { key:"custStairs", label:"Custom / wide steps" },
+    { key:"border",     label:"Picture frame border" },
+    { key:"skirt",      label:"Deck skirt" },
+    { key:"soffit",     label:"Soffit" },
+    { key:"postWrap",   label:"Post wrap" },
+    { key:"beamWrap",   label:"Beam wrap" },
+    { key:"electrical", label:"Electrical" },
+    { key:"gutters",    label:"Gutters" },
+    { key:"barTop",     label:"Custom bar top" },
+    { key:"paint",      label:"Paint" },
+    { key:"demo",       label:"Demo existing deck" }
+  ],
+
+  maxLevels: 3,
+  levelNames:  ["Main deck","Second level","Third level"],
+  levelColors: ["#63893c","#185fa5","#854f0b"]
+};
+</script>
+
+<script>
+/* ============================================================================
+   2. PRICING CORE - pure functions, no DOM. Safe to unit test or lift out.
+   ============================================================================ */
+
+var Pricing = (function(){
+
+  /* Ground screw count.
+     The previous build used two rounding regimes and a floor applied in the
+     wrong order, which made a 199 sqft deck need 4 screws while a 200 sqft
+     deck needed 3 - the larger deck came out cheaper. One ceiling plus one
+     floor is monotonic and matches the old numbers everywhere above 200. */
+  function footings(sqft){
+    var f = CONFIG.footings;
+    return Math.max(f.minimum, Math.ceil(f.base + f.perSqft * sqft));
+  }
+
+  /* Suggested railing run. Assumes the deck attaches to the house along its
+     LONGER side and railing wraps the other three - perimeter minus the
+     longer side, i.e. length + width + the shorter of the two again. This
+     is exactly the formula that produces 48lf for the original 20x14
+     default, so an untouched deck's price does not move. It is a suggestion
+     like the footing count, not a real measurement - an L-shaped deck, one
+     attached on its short side, or a deck with no house wall at all will
+     need the override. */
+  function suggestedRailLf(length, width){
+    return Math.max(0, length + width + Math.min(length, width));
+  }
+
+  function tierAt(index){
+    return CONFIG.tiers[index] || CONFIG.tiers[0];
+  }
+
+  function railFor(key){
+    for(var i=0;i<CONFIG.rails.length;i++){
+      if(CONFIG.rails[i].key === key) return CONFIG.rails[i];
+    }
+    if(window.console) console.warn("Unknown rail key: " + key + " - falling back to " + CONFIG.rails[0].key);
+    return CONFIG.rails[0];
+  }
+
+  /* Priced line items for one level. Returns real numbers only; TBD add-ons
+     are listed separately so they can never quietly enter a subtotal. */
+  function level(d){
+    var p     = CONFIG.pricing;
+    var sqft  = d.length * d.width;
+    var tier  = tierAt(d.tier);
+    var screws = (d.footingOverride > 0) ? d.footingOverride : footings(sqft);
+    /* Same override pattern as screws: the field shows a suggestion, the
+       actual state field only holds a REAL value once the customer (or a
+       length/width edit) changes it. Effective value falls back to the
+       suggestion so pricing is always driven by one of the two. */
+    var railLf = (d.railLfOverride > 0) ? d.railLfOverride : suggestedRailLf(d.length, d.width);
+    var stepCount = (d.stepOverride > 0) ? d.stepOverride : p.standardSteps;
+    var items = [];
+
+    items.push({
+      label:  tier.mfr + " " + tier.name,
+      detail: sqft + " sqft x $" + tier.psf,
+      amount: sqft * tier.psf
+    });
+
+    items.push({
+      label:  "Ground screw footings",
+      detail: screws + " x $" + p.footingEach,
+      amount: screws * p.footingEach
+    });
+
+    if(d.hasRail){
+      var rail = railFor(d.railType);
+      items.push({
+        label:  rail.name + " railing",
+        detail: railLf + " lf x $" + rail.price,
+        amount: railLf * rail.price
+      });
+    }
+
+    if(d.hasSteps){
+      items.push({
+        label:  "Standard steps",
+        detail: stepCount + " x $" + p.stepEach,
+        amount: stepCount * p.stepEach
+      });
+    }
+
+    if(d.hasWaterproof){
+      var wpSqft = d.waterproofSqft > 0 ? d.waterproofSqft : sqft;
+      items.push({
+        label:  "Waterproofing (RainEscape)",
+        detail: wpSqft + " sqft x $" + p.waterproofPsf,
+        amount: wpSqft * p.waterproofPsf
+      });
+    }
+
+    /* Demo can be a real number if you want it to be. */
+    if(d.addons.demo && CONFIG.pricing.demo.priced){
+      var dSqft = d.demoSqft > 0 ? d.demoSqft : sqft;
+      items.push({
+        label:  "Demo existing deck",
+        detail: dSqft + " sqft x $" + CONFIG.pricing.demo.psf,
+        amount: Math.max(CONFIG.pricing.demo.minimum, dSqft * CONFIG.pricing.demo.psf)
+      });
+    }
+
+    var tbd = [];
+    for(var i=0;i<CONFIG.addons.length;i++){
+      var a = CONFIG.addons[i];
+      if(!d.addons[a.key]) continue;
+      if(a.key === "demo" && CONFIG.pricing.demo.priced) continue;
+      tbd.push(a.label);
+    }
+
+    var subtotal = 0;
+    for(var j=0;j<items.length;j++) subtotal += items[j].amount;
+
+    return { sqft:sqft, tier:tier, screws:screws, railLf:railLf, stepCount:stepCount, items:items, tbd:tbd, subtotal:subtotal };
+  }
+
+  /* Whole-project total.
+     subtotal + adjustment == high, exactly, so the printed table adds up. */
+  function total(levels){
+    var results = [], subtotal = 0, sqft = 0, anyTbd = false;
+
+    for(var i=0;i<levels.length;i++){
+      var r = level(levels[i]);
+      results.push(r);
+      subtotal += r.subtotal;
+      sqft     += r.sqft;
+      if(r.tbd.length) anyTbd = true;
+    }
+
+    var high       = Math.round(subtotal * CONFIG.pricing.adjustment);
+    var adjustment = high - Math.round(subtotal);
+    var low        = Math.round(high * (1 - CONFIG.pricing.rangeSpread));
+
+    return {
+      levels:     results,
+      totalSqft:  sqft,
+      subtotal:   Math.round(subtotal),
+      adjustment: adjustment,
+      low:        low,
+      high:       high,
+      perSqft:    sqft > 0 ? Math.round(high / sqft) : 0,
+      anyTbd:     anyTbd
+    };
+  }
+
+  return { footings:footings, railLf:suggestedRailLf, tierAt:tierAt, railFor:railFor, level:level, total:total };
+})();
+</script>
+
+<script>
+/* ============================================================================
+   3. STATE + RENDER
+   ============================================================================ */
+
+var state = {
+  levels:   [newLevel()],
+  count:    1,
+  unlocked: false,
+  lead:     null,
+  notes:    "",
+  /* Latched by the honeypot. Suppresses every CRM write for the session
+     while leaving the calculator fully usable. */
+  blocked:  false
+};
+
+function newLevel(){
+  var addons = {};
+  for(var i=0;i<CONFIG.addons.length;i++) addons[CONFIG.addons[i].key] = false;
+  return {
+    length:20, width:14,
+    tier:0,
+    /* railLfOverride and stepOverride follow the same pattern as
+       footingOverride: null means "use the suggested value", a real number
+       means the customer (or a rep) has overridden it. Nothing here is the
+       actual priced value - level() and renderLevel() both compute that. */
+    hasRail:true, railLfOverride:null, railType:"cinch",
+    hasSteps:true, stepOverride:null,
+    hasWaterproof:false, waterproofSqft:null,
+    footingOverride:null, demoSqft:null,
+    addons:addons,
+    open:true
+  };
+}
+
+/* Cheapest-first display order over stable indices. */
+var TIER_ORDER = (function(){
+  var order = [];
+  for(var i=0;i<CONFIG.tiers.length;i++) order.push(i);
+  order.sort(function(a,b){ return (CONFIG.tiers[a].psf - CONFIG.tiers[b].psf) || (a - b); });
+  return order;
+})();
+
+var money = function(n){ return "$" + Math.round(n).toLocaleString("en-US"); };
+
+function esc(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+                  .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+/* ---------- configurator ---------- */
+
+function renderConfig(){
+  var html = "";
+
+  for(var n=0;n<state.count;n++){
+    var d = state.levels[n];
+    html += renderLevel(n, d);
+  }
+
+  if(state.count < CONFIG.maxLevels){
+    html += '<button class="btn-add" onclick="addLevel()">+ Add ' +
+            (state.count === 1 ? "second" : "third") + ' deck level</button>';
+  }
+
+  document.getElementById("config").innerHTML = html;
+}
+
+function renderLevel(n, d){
+  var sqft = d.length * d.width;
+  var screws = d.footingOverride > 0 ? d.footingOverride : Pricing.footings(sqft);
+  var suggestedRailLf = Pricing.railLf(d.length, d.width);
+  var railLf = d.railLfOverride > 0 ? d.railLfOverride : suggestedRailLf;
+  var stepCount = d.stepOverride > 0 ? d.stepOverride : CONFIG.pricing.standardSteps;
+  var open = d.open;
+  var h = "";
+
+  h += '<div class="level">';
+  h +=   '<button class="levelhead' + (open ? " open" : "") + '" onclick="toggleLevel(' + n + ')" aria-expanded="' + open + '">';
+  h +=     '<span class="lh-left">';
+  h +=       '<span class="lnum" style="background:' + CONFIG.levelColors[n] + ';">' + (n+1) + '</span>';
+  h +=       '<span class="ltitle">' + esc(CONFIG.levelNames[n]) + '</span>';
+  h +=       '<span class="lsqft">' + sqft + ' sqft</span>';
+  h +=     '</span>';
+  h +=     '<span class="lh-right">';
+  if(n > 0){
+    h +=     '<span class="btn-remove" role="button" tabindex="0" onclick="event.stopPropagation();removeLevel(' + n + ')">Remove</span>';
+  }
+  h +=       '<span class="chev' + (open ? " open" : "") + '">&#9660;</span>';
+  h +=     '</span>';
+  h +=   '</button>';
+
+  if(open){
+    h += '<div class="levelbody">';
+
+    /* dimensions */
+    h += '<div class="field">';
+    h +=   '<div class="flabel">Deck dimensions</div>';
+    h +=   '<div class="fsub">Length x width, in feet</div>';
+    h +=   '<div class="inline">';
+    h +=     '<input type="number" value="' + d.length + '" min="4" max="150" aria-label="Length in feet" oninput="setField(' + n + ',\'length\',+this.value)">';
+    h +=     '<span class="unit">ft x</span>';
+    h +=     '<input type="number" value="' + d.width + '" min="4" max="150" aria-label="Width in feet" oninput="setField(' + n + ',\'width\',+this.value)">';
+    h +=     '<span class="unit">ft = <strong>' + sqft + '</strong> sqft</span>';
+    h +=   '</div>';
+    h += '</div>';
+
+    /* footings */
+    h += '<div class="field">';
+    h +=   '<div class="flabel">Ground screws <span class="fhint">suggested: ' + Pricing.footings(sqft) + '</span></div>';
+    h +=   '<div class="inline">';
+    h +=     '<input type="number" value="' + screws + '" min="1" max="40" aria-label="Number of ground screws" oninput="setField(' + n + ',\'footingOverride\',+this.value)">';
+    h +=     '<span class="unit">screws &middot; $' + CONFIG.pricing.footingEach + ' each</span>';
+    h +=   '</div>';
+    h += '</div>';
+
+    /* material */
+    h += '<div class="field"><div class="flabel">Decking material</div><div class="tiers">';
+    for(var i=0;i<TIER_ORDER.length;i++){
+      var ti = TIER_ORDER[i], t = CONFIG.tiers[ti];
+      if(t.hidden && d.tier !== ti) continue;
+      var sel = d.tier === ti;
+      h += '<button class="tier' + (sel ? " sel" : "") + '" onclick="setField(' + n + ',\'tier\',' + ti + ')" aria-pressed="' + sel + '">';
+      h +=   '<span class="tierrow"><span class="tiername">' + esc(t.mfr + " " + t.name) + '</span>';
+      h +=   '<span class="tierprice">$' + t.psf + '/sqft</span></span>';
+      h +=   '<span class="tiersub">' + esc(t.sub) +
+             '<span class="tag ' + (t.confirmed ? "tag-conf" : "tag-est") + '">' +
+             (t.confirmed ? "confirmed" : "est.") + '</span></span>';
+      h += '</button>';
+    }
+    h += '</div></div>';
+
+    /* railing */
+    h += '<div class="field"><div class="flabel">Railing</div>';
+    h +=   yesNo(n, "hasRail", d.hasRail);
+    if(d.hasRail){
+      h += '<div class="rails">';
+      for(var r=0;r<CONFIG.rails.length;r++){
+        var rail = CONFIG.rails[r], rsel = d.railType === rail.key;
+        h += '<button class="rail' + (rsel ? " sel" : "") + '" onclick="setField(' + n + ',\'railType\',\'' + rail.key + '\')" aria-pressed="' + rsel + '">';
+        h +=   '<span class="railswatch" style="background:' + rail.swatch + ';">' + esc(rail.short) + '</span>';
+        h +=   '<span class="railinfo"><span class="railname">' + esc(rail.name) + '</span><br>';
+        h +=   '<span class="railprice">$' + rail.price + '/lf</span></span>';
+        h += '</button>';
+      }
+      h += '</div>';
+      h += '<div class="inline" style="margin-top:7px;">';
+      h +=   '<input type="number" value="' + railLf + '" min="0" max="600" aria-label="Railing linear feet" oninput="setField(' + n + ',\'railLfOverride\',+this.value)">';
+      h +=   '<span class="unit">linear feet <span class="fhint">suggested: ' + suggestedRailLf + '</span></span>';
+      h += '</div>';
+    }
+    h += '</div>';
+
+    /* steps */
+    h += '<div class="field">';
+    h +=   '<div class="flabel">Standard steps <span class="fhint">$' + CONFIG.pricing.stepEach + '/step &middot; suggested: ' + CONFIG.pricing.standardSteps + '</span></div>';
+    h +=   yesNo(n, "hasSteps", d.hasSteps);
+    if(d.hasSteps){
+      h += '<div class="inline" style="margin-top:6px;">';
+      h +=   '<input type="number" value="' + stepCount + '" min="1" max="40" aria-label="Number of steps" oninput="setField(' + n + ',\'stepOverride\',+this.value)">';
+      h +=   '<span class="unit">steps</span>';
+      h += '</div>';
+    }
+    h += '</div>';
+
+    /* waterproofing */
+    h += '<div class="field">';
+    h +=   '<div class="flabel">Waterproofing <span class="fhint">RainEscape &middot; $' + CONFIG.pricing.waterproofPsf + '/sqft</span></div>';
+    h +=   yesNo(n, "hasWaterproof", d.hasWaterproof);
+    if(d.hasWaterproof){
+      h += '<div class="inline" style="margin-top:6px;">';
+      h +=   '<input type="number" value="' + (d.waterproofSqft || sqft) + '" min="1" max="3000" style="width:76px;" aria-label="Waterproofed square feet" oninput="setField(' + n + ',\'waterproofSqft\',+this.value)">';
+      h +=   '<span class="unit">sqft</span>';
+      h += '</div>';
+    }
+    h += '</div>';
+
+    /* add-ons */
+    h += '<div class="field"><div class="flabel">Add-ons &amp; upgrades</div><div class="addons">';
+    for(var a=0;a<CONFIG.addons.length;a++){
+      var ad = CONFIG.addons[a];
+      h += '<label class="addon"><input type="checkbox"' + (d.addons[ad.key] ? " checked" : "") +
+           ' onchange="setAddon(' + n + ',\'' + ad.key + '\',this.checked)"> ' +
+           esc(ad.label) + ' <span>&mdash; quoted on site</span></label>';
+    }
+    h += '</div></div>';
+
+    h += '</div>';
+  }
+
+  h += '</div>';
+  return h;
+}
+
+function yesNo(n, key, val){
+  return '<div class="pillrow">' +
+    '<button class="pill' + (val ? " on" : "") + '" onclick="setField(' + n + ',\'' + key + '\',true)" aria-pressed="' + val + '">Yes</button>' +
+    '<button class="pill' + (!val ? " on" : "") + '" onclick="setField(' + n + ',\'' + key + '\',false)" aria-pressed="' + !val + '">No</button>' +
+  '</div>';
+}
+
+/* ---------- estimate output ---------- */
+
+function renderOut(){
+  var t = Pricing.total(state.levels.slice(0, state.count));
+  var b = CONFIG.business;
+  var showReal = state.unlocked;
+  var h = "";
+
+  /* hero */
+  h += '<div class="lockwrap' + (showReal ? " open" : "") + '">';
+  h +=   '<div class="locked">';
+  h +=     '<div class="card hero">';
+  h +=       '<div class="herometa">' +
+              (state.count > 1 ? state.count + "-level deck" : "Single-level deck") +
+              ' &middot; ' + t.totalSqft + ' sqft &middot; fully installed</div>';
+  h +=       '<div class="heroprice">' + money(t.low) + ' &ndash; ' + money(t.high) + '</div>';
+  h +=       '<div class="herosub">All materials and labor included' +
+              (t.anyTbd ? ' <em>+ add-ons quoted on site</em>' : '') + '</div>';
+  h +=       '<div class="herostats">';
+  h +=         '<div><div class="statlabel">Per sqft</div><div class="statvalue">~$' + t.perSqft + '</div></div>';
+  h +=         '<div><div class="statlabel">Total area</div><div class="statvalue">' + t.totalSqft + ' sqft</div></div>';
+  h +=         '<div><div class="statlabel">Deck levels</div><div class="statvalue">' + state.count + '</div></div>';
+  h +=       '</div>';
+  h +=     '</div>';
+  h +=   '</div>';
+  if(!showReal){
+    h += '<div class="lockover">';
+    h +=   '<div class="locktitle">Your estimate is ready</div>';
+    h +=   '<div class="locksub">Priced from real 3Sixty Industries jobs. Tell us where to send it and the number is yours.</div>';
+    h +=   '<button class="btn-unlock" onclick="openGate()">Reveal my estimate &rarr;</button>';
+    h += '</div>';
+  }
+  h += '</div>';
+
+  /* breakdown */
+  h += '<div class="lockwrap' + (showReal ? " open" : "") + '">';
+  h +=   '<div class="locked"><div class="card">';
+  h +=     '<div class="cardhead">Estimate breakdown</div>';
+  h +=     '<div class="tablewrap"><table>';
+  h +=       '<thead><tr><th>Item</th><th>Details</th><th class="num">Price</th></tr></thead><tbody>';
+
+  for(var i=0;i<t.levels.length;i++){
+    var lv = t.levels[i];
+    {
+      h += '<tr class="rowsection"><td colspan="3">' + esc(CONFIG.levelNames[i]) + ' &mdash; ' + lv.sqft + ' sqft</td></tr>';
+    }
+    for(var j=0;j<lv.items.length;j++){
+      var it = lv.items[j];
+      h += '<tr><td>' + esc(it.label) + '</td><td class="num detail">' + esc(it.detail) + '</td>' +
+           '<td class="num">' + money(it.amount) + '</td></tr>';
+    }
+    for(var k=0;k<lv.tbd.length;k++){
+      h += '<tr><td>' + esc(lv.tbd[k]) + '</td><td class="num detail">quoted on site</td>' +
+           '<td class="num detail">TBD</td></tr>';
+    }
+  }
+
+  /* This is the part the old build got wrong: the rows above now sum to the
+     subtotal, the adjustment is its own visible row, and subtotal plus
+     adjustment equals the top of the quoted range exactly. */
+  h += '<tr class="rowsub"><td>Subtotal</td><td></td><td class="num">' + money(t.subtotal) + '</td></tr>';
+  if(t.adjustment !== 0){
+    var pct = Math.round((1 - CONFIG.pricing.adjustment) * 1000) / 10;
+    h += '<tr class="rowadj"><td>Estimator adjustment</td><td class="num detail">&minus;' + pct + '%</td>' +
+         '<td class="num">' + (t.adjustment < 0 ? "&minus;" : "") + money(Math.abs(t.adjustment)) + '</td></tr>';
+  }
+  h += '<tr class="rowtotal"><td>Your estimate</td><td></td><td class="num">' +
+       money(t.low) + ' &ndash; ' + money(t.high) + '</td></tr>';
+  h += '</tbody></table></div>';
+
+  h += '<p class="note">Range low is ' + Math.round(CONFIG.pricing.rangeSpread * 100) +
+       '% under the adjusted total, covering normal variation in site conditions. ' +
+       'Based on real 3Sixty Industries jobs, ' + new Date().getFullYear() +
+       '. Final price confirmed at your free on-site design consultation.</p>';
+  h += '<p class="note"><b>Not included:</b> shading structures and concrete. ' +
+       'Items marked TBD are quoted on site.</p>';
+  h += '</div></div>';
+  /* No second unlock button here - the blur alone signals what is behind it,
+     and one call to action converts better than two identical ones. */
+  h += '</div>';
+
+  /* CTA */
+  h += '<div class="ctabar">';
+  h +=   '<div><div class="ctatitle">Ready for your exact quote?</div>';
+  h +=   '<div class="ctasub">Free design consultation &middot; No commitment &middot; ' +
+          esc(b.name) + ' &middot; ' + esc(b.phone) + '</div></div>';
+  h +=   '<a class="btn-cta" href="' + esc(b.ctaUrl) + '" target="_blank" rel="noopener" onclick="sendEstimate(\'cta_click\')">' +
+          esc(b.ctaLabel) + ' &rarr;</a>';
+  h += '</div>';
+
+  document.getElementById("out").innerHTML = h;
+}
+
+/* ---------- interaction ---------- */
+
+function setField(n, key, value){
+  var d = state.levels[n];
+  if(!d) return;
+  d[key] = value;
+  /* Clearing the override lets the formula take over again. */
+  /* Both suggestions are dimension-derived, so a resize invalidates any
+     stale override the same way it does for footings. stepOverride is left
+     alone - the step suggestion is a flat constant, not derived from
+     length/width, so resizing the deck has no bearing on it. */
+  if(key === "length" || key === "width"){ d.footingOverride = null; d.railLfOverride = null; }
+  render();
+}
+
+function setAddon(n, key, checked){
+  state.levels[n].addons[key] = checked;
+  render();
+}
+
+function toggleLevel(n){
+  state.levels[n].open = !state.levels[n].open;
+  renderConfig();
+  notifyHeight();
+}
+
+function addLevel(){
+  if(state.count >= CONFIG.maxLevels) return;
+  if(!state.levels[state.count]) state.levels[state.count] = newLevel();
+  state.count++;
+  render();
+}
+
+function removeLevel(n){
+  state.levels.splice(n, 1);
+  state.levels.push(newLevel());
+  state.count--;
+  render();
+}
+
+function render(){
+  renderConfig();
+  renderOut();
+  notifyHeight();
+  scheduleEstimateSend();
+}
+</script>
+
+<script>
+/* ============================================================================
+   4. LEAD GATE + GOHIGHLEVEL CAPTURE
+   ============================================================================ */
+
+/* Attribution captured on load, forwarded with the lead. */
+var attribution = (function(){
+  var p = new URLSearchParams(window.location.search);
+  return {
+    gclid:        p.get("gclid") || "",
+    utm_source:   p.get("utm_source") || document.referrer || "",
+    utm_medium:   p.get("utm_medium") || "",
+    utm_campaign: p.get("utm_campaign") || ""
+  };
+})();
+
+/* Flatten the whole configuration into the flat key/value shape both a GHL
+   form prefill and a GHL inbound webhook expect. */
+function buildPayload(){
+  var t = Pricing.total(state.levels.slice(0, state.count));
+  var materials = [], rails = [], steps = 0, railLf = 0, addons = {}, breakdown = [];
+
+  for(var i=0;i<t.levels.length;i++){
+    var lv = t.levels[i], d = state.levels[i];
+    materials.push(lv.tier.mfr + " " + lv.tier.name.replace(/®/g,""));
+    /* lv.railLf / lv.stepCount come from Pricing.level(), which already
+       resolved the override-or-suggestion for each - reading d.railLf here
+       would read a field that no longer exists now that both are optional
+       overrides rather than always-set values. */
+    if(d.hasRail){ rails.push(Pricing.railFor(d.railType).name); railLf += lv.railLf; }
+    if(d.hasSteps) steps += lv.stepCount;
+    for(var k=0;k<CONFIG.addons.length;k++){
+      if(d.addons[CONFIG.addons[k].key]) addons[CONFIG.addons[k].label] = true;
+    }
+    breakdown.push(CONFIG.levelNames[i] + " (" + lv.sqft + " sqft): " +
+      lv.items.map(function(it){ return it.label + " " + money(it.amount); }).join(", "));
+  }
+
+  var data = {
+    total_sqft:  t.totalSqft,
+    deck_levels: state.count,
+    material:    materials.join(" | "),
+    rail_type:   rails.length ? rails.join(" | ") : "None",
+    rail_lf:     railLf,
+    steps:       steps,
+    addons:      Object.keys(addons).join(", ") || "None",
+    price_low:   t.low,
+    price_high:  t.high,
+    breakdown:   breakdown.join("\n"),
+    notes:       state.notes || ""
+  };
+
+  if(state.lead){
+    data.first_name  = state.lead.firstName;
+    data.last_name   = state.lead.lastName;
+    data.email       = state.lead.email;
+    data.phone       = state.lead.phone;
+    data.address     = state.lead.address;
+    data.city        = state.lead.city;
+    data.postal_code = state.lead.postalCode;
+  }
+  return data;
+}
+
+/* Translate our keys into the customer's GHL query keys. Anything not in the
+   map is dropped, so an unmapped field can never overwrite a GHL field by
+   accident, and an empty value is never sent for a mapped-but-blank field. */
+function mapToGhl(data){
+  var map = CONFIG.ghl.fieldMap, out = {};
+  for(var ours in map){
+    if(!map.hasOwnProperty(ours)) continue;
+    var v = data[ours];
+    if(v === undefined || v === null || v === "") continue;
+    out[map[ours]] = v;
+  }
+  return out;
+}
+
+/* In "before" mode the gate fires before a deck exists, so the form must
+   carry identity and attribution ONLY. Sending the deck fields here would
+   push empty values into GHL and blank whatever the contact already had -
+   the exact failure mode that broke the onboarding chain twice. */
+function ghlFormSrc(){
+  var q = new URLSearchParams();
+  if(CONFIG.gateMode === "after"){
+    var mapped = mapToGhl(buildPayload());
+    for(var k in mapped){ if(mapped.hasOwnProperty(k)) q.set(k, mapped[k]); }
+  }
+  if(attribution.gclid) q.set("gclid", attribution.gclid);
+  var sep = CONFIG.ghl.formUrl.indexOf("?") > -1 ? "&" : "?";
+  return CONFIG.ghl.formUrl + sep + q.toString();
+}
+
+/* GHL webhooks send no CORS headers, so a browser POST has to be no-cors -
+   and no-cors silently downgrades application/json to text/plain, which
+   arrives in GHL as one unusable blob called "value". Form encoding survives
+   both that and sendBeacon, which is why everything here is URLSearchParams. */
+/* The gate fires before the customer has configured anything, so the deck at
+   that moment is just our defaults. Sending it would write a 280 sqft Trex
+   deck onto the contact that they never chose - and if they bounce, that is
+   what the sales rep sees. Identity only here; the deck follows once real. */
+var IDENTITY_ONLY = { estimate_unlocked:true };
+
+function webhookBody(trigger){
+  var body = new URLSearchParams();
+  var data = buildPayload();
+  if(IDENTITY_ONLY[trigger]){
+    var identity = {};
+    ["first_name","last_name","email","phone","address","city","postal_code","notes"]
+      .forEach(function(k){ if(data[k]) identity[k] = data[k]; });
+    data = identity;
+  }
+  var mapped = mapToGhl(data);
+  for(var k in mapped){ if(mapped.hasOwnProperty(k)) body.set(k, mapped[k]); }
+  body.set("trigger", trigger);
+  body.set("gclid", attribution.gclid);
+  body.set("utm_source", attribution.utm_source);
+  body.set("utm_medium", attribution.utm_medium);
+  body.set("utm_campaign", attribution.utm_campaign);
+  return body;
+}
+
+function postToWebhook(trigger){
+  if(!CONFIG.ghl.webhookUrl || state.blocked) return;
+  try{
+    fetch(CONFIG.ghl.webhookUrl, { method:"POST", mode:"no-cors", body:webhookBody(trigger) })
+      .catch(function(e){ if(window.console) console.warn("GHL webhook:", e); });
+  }catch(e){ if(window.console) console.warn("GHL webhook:", e); }
+}
+
+function sendEstimate(trigger){
+  if(!state.unlocked) return;
+  postToWebhook(trigger);
+}
+
+/* Gate-first means the deck is built AFTER we already have the contact, so
+   the configuration has to be pushed separately. Three moments catch it:
+   they stop fiddling, they click the CTA, or they leave the page.
+   The original used a blind 120s timer, which missed anyone who left at 90
+   seconds and re-sent for anyone who stayed. */
+var idleTimer = null;
+function scheduleEstimateSend(){
+  if(!state.unlocked || !CONFIG.ghl.webhookUrl) return;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(function(){ sendEstimate("idle"); }, 45000);
+}
+
+/* pagehide fires on close, back, and mobile app-switch, where fetch is killed
+   mid-flight. sendBeacon survives it and sets a form-encoded content type. */
+window.addEventListener("pagehide", function(){
+  if(!state.unlocked || !CONFIG.ghl.webhookUrl) return;
+  clearTimeout(idleTimer);
+  try{
+    if(navigator.sendBeacon) navigator.sendBeacon(CONFIG.ghl.webhookUrl, webhookBody("exit"));
+  }catch(e){}
+});
+
+/* ---------- the modal ---------- */
+
+function isInlineGate(){ return CONFIG.gatePresentation === "inline"; }
+
+function openGate(){
+  var usingGhl = !!CONFIG.ghl.formUrl;
+  var html = usingGhl ? gateGhlForm() : gateBuiltIn();
+
+  if(isInlineGate()){
+    var section = document.getElementById("gatesection");
+    section.innerHTML = '<div class="gatecard">' + html + '</div>';
+    section.classList.add("show");
+    /* Deliberately no autofocus here - stealing focus on page load would
+       scroll the host page to the iframe before the visitor has read
+       anything. The modal can focus, because opening it was an action. */
+
+    /* #gatesection sits ABOVE #app in the DOM, so in "after" mode the gate
+       opens off-screen behind a visitor who has scrolled down to their
+       blurred price - the Reveal button would look like it did nothing.
+       Scrolling is only correct here because opening the gate was a click,
+       never on load, which is why this is fenced to "after". */
+    if(CONFIG.gateMode === "after"){
+      try{ section.scrollIntoView({ behavior:"smooth", block:"start" }); }
+      catch(e){ section.scrollIntoView(); }
+      /* When the host page auto-heights this iframe there is no inner
+         scrollbar to move, so the OUTER page has to do the scrolling. */
+      try{ window.parent.postMessage({ scrollToIframe:true }, "*"); }catch(e){}
+    }
+  }else{
+    var modal = document.getElementById("modal");
+    modal.classList.toggle("wide", usingGhl);
+    modal.innerHTML = html;
+    document.getElementById("overlay").classList.add("show");
+    if(!usingGhl){
+      var first = modal.querySelector("input");
+      if(first) first.focus();
+    }
+  }
+
+  if(usingGhl) loadFormEmbedScript();
+  notifyHeight();
+}
+
+/* Only the modal can be dismissed. Hiding an inline gate would leave the
+   visitor staring at a blurred page with no way back in. */
+function closeGate(){
+  if(isInlineGate()) return;
+  document.getElementById("overlay").classList.remove("show");
+}
+
+function gateHeader(){
+  var t = Pricing.total(state.levels.slice(0, state.count));
+  var h = "";
+  h += '<div class="g-brand">' + esc(CONFIG.business.name) + '</div>';
+  h += '<div class="g-head" id="gatehead">Your <em>free</em> deck cost estimate</div>';
+  h += '<div class="g-sub">Built from real material costs and labor on jobs we have actually run &mdash; ' +
+       'typically within 0&ndash;5% of the final quote.</div>';
+  h += '<div class="g-preview"><div class="g-price">' + money(t.low) + ' &ndash; ' + money(t.high) +
+       '</div><div class="g-plabel">' +
+       (CONFIG.gateMode === "before" ? "example estimate" : "your estimate &middot; " + t.totalSqft + " sqft") +
+       '</div></div>';
+  return h;
+}
+
+/* The data-* attributes are not decoration - form_embed.js scans for them to
+   find the iframe it should resize. Without data-form-id and the matching
+   data-layout-iframe-id the form renders at a fixed height and clips. */
+function gateGhlForm(){
+  var id = ghlFormId();
+  return gateHeader() +
+    '<div class="gateform">' +
+    '<iframe id="inline-' + esc(id) + '"' +
+      ' src="' + esc(ghlFormSrc()) + '"' +
+      ' style="width:100%;height:' + CONFIG.ghl.formHeight + 'px;border:none;border-radius:8px;display:block;"' +
+      ' data-layout="{\'id\':\'INLINE\'}"' +
+      ' data-trigger-type="alwaysShow"' +
+      ' data-activation-type="alwaysActivated"' +
+      ' data-deactivation-type="neverDeactivate"' +
+      ' data-form-name="calculator form 1"' +
+      ' data-height="' + CONFIG.ghl.formHeight + '"' +
+      ' data-layout-iframe-id="inline-' + esc(id) + '"' +
+      ' data-form-id="' + esc(id) + '"' +
+      ' data-cookie-consent="true"' +
+      ' data-cookie-consent-provider="auto"' +
+      ' title="Get your deck estimate"></iframe>' +
+    '</div>' +
+    /* Safety net. If GHL changes its postMessage payload, or a browser
+       blocks it, the customer would submit the form and sit here forever.
+       This always works. */
+    '<div class="g-fine">Already submitted? ' +
+      '<button type="button" class="linkbtn" onclick="unlock()">Continue to my estimate &rarr;</button>' +
+    '</div>';
+}
+
+function ghlFormId(){
+  var parts = CONFIG.ghl.formUrl.split("?")[0].split("/");
+  return parts[parts.length - 1] || "";
+}
+
+/* Loaded once, on first gate open, so a visitor who never reaches the gate
+   never pays for it. */
+var embedScriptLoaded = false;
+function loadFormEmbedScript(){
+  if(embedScriptLoaded || !CONFIG.ghl.formEmbedScript) return;
+  embedScriptLoaded = true;
+  var s = document.createElement("script");
+  s.src = CONFIG.ghl.formEmbedScript;
+  s.async = true;
+  s.onerror = function(){
+    if(window.console) console.warn("GHL form_embed.js failed to load - the form will not auto-resize.");
+  };
+  document.body.appendChild(s);
+}
+
+function gateBuiltIn(){
+  var h = gateHeader();
+  h += '<div class="frow">';
+  h +=   field("gf-first", "First name", "text", "Jordan");
+  h +=   field("gf-last",  "Last name",  "text", "Goff");
+  h += '</div>';
+  h += field("gf-email", "Email", "email", "you@email.com");
+  h += field("gf-phone", "Phone", "tel", "(801) 555-0100");
+  h += field("gf-address", "Street address", "text", "1234 Main St");
+  h += '<div class="frow3">';
+  h +=   field("gf-city", "City", "text", "Sandy");
+  h +=   field("gf-zip",  "Zip",  "text", "84094");
+  h += '</div>';
+  /* Honeypot. Hidden from people, irresistible to naive bots. A GHL form
+     would have brought its own spam protection; this one has to carry its
+     own or the CRM fills up with junk contacts. */
+  h += '<div class="hp" aria-hidden="true">' +
+         '<label for="gf-company">Company</label>' +
+         '<input type="text" id="gf-company" tabindex="-1" autocomplete="off">' +
+       '</div>';
+  h += '<button class="btn-gate" id="gatebtn" onclick="submitGate()">Show me my estimate &rarr;</button>';
+  h += '<div class="g-fine">No commitment &nbsp;&middot;&nbsp; Your info is never sold &nbsp;&middot;&nbsp; ' +
+       esc(CONFIG.business.name) + '</div>';
+  return h;
+}
+
+function field(id, label, type, placeholder){
+  return '<div class="fgroup">' +
+    '<label for="' + id + '">' + esc(label) + '</label>' +
+    '<input type="' + type + '" id="' + id + '" placeholder="' + esc(placeholder) + '">' +
+    '<div class="errmsg" id="' + id + '-err">Required</div>' +
+  '</div>';
+}
+
+function submitGate(){
+  var get = function(id){ return (document.getElementById(id).value || "").trim(); };
+
+  /* A real person cannot see or tab to this field. If it is filled, unlock
+     the calculator anyway so a false positive never blocks a customer -
+     just skip the CRM write. */
+  if(get("gf-company") !== ""){
+    state.lead = null;
+    /* Nulling the lead stops the identity write, but the deck still goes out
+       on idle, CTA and exit - which would leave orphaned junk in the webhook
+       log. Latch it off for the rest of the session instead. */
+    state.blocked = true;
+    unlock();
+    return;
+  }
+
+  var v = {
+    firstName: get("gf-first"), lastName: get("gf-last"),
+    email:     get("gf-email"), phone:    get("gf-phone"),
+    address:   get("gf-address"), city:   get("gf-city"),
+    postalCode:get("gf-zip")
+  };
+
+  var ok = true;
+  function check(id, valid, message){
+    var input = document.getElementById(id), err = document.getElementById(id + "-err");
+    input.classList.toggle("err", !valid);
+    err.classList.toggle("show", !valid);
+    if(message) err.textContent = message;
+    if(!valid) ok = false;
+  }
+  check("gf-first",   v.firstName.length > 0);
+  check("gf-last",    v.lastName.length > 0);
+  check("gf-email",   /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email), "Enter a valid email address");
+  check("gf-phone",   v.phone.replace(/\D/g,"").length >= 10, "Enter a 10-digit phone number");
+  check("gf-address", v.address.length > 3);
+  check("gf-city",    v.city.length > 0);
+  check("gf-zip",     /^\d{5}$/.test(v.postalCode), "5-digit ZIP");
+  if(!ok) return;
+
+  state.lead = v;
+  unlock();
+  postToWebhook("estimate_unlocked");
+  trackConversion();
+}
+
+function unlock(){
+  if(state.unlocked) return;   /* GHL can fire more than one submit message */
+  state.unlocked = true;
+
+  document.getElementById("overlay").classList.remove("show");
+  var section = document.getElementById("gatesection");
+  section.classList.remove("show");
+  section.innerHTML = "";      /* drop the iframe so it stops loading */
+
+  /* Gate-first hides the whole app behind the mock until this moment. */
+  document.getElementById("mock").classList.remove("show");
+  document.getElementById("app").style.display = "";
+  if(state.lead){
+    document.getElementById("namebadge").textContent =
+      state.lead.firstName + " " + state.lead.lastName;
+  }
+  render();
+}
+
+/* A native GHL form lives in a cross-origin iframe, so the only signal we get
+   back is a postMessage. GHL's payload shape has changed before, so accept
+   anything that looks like a submit rather than matching one exact string. */
+/* Trust the form's OWN origin, read from formUrl, rather than a hardcoded
+   list. GHL agencies white-label the widget domain - this one is
+   link.midasmediafirm.com, so a check for "leadconnectorhq.com" would
+   reject every message and the calculator would never unlock. */
+function trustedFormOrigin(){
+  try{ return new URL(CONFIG.ghl.formUrl, window.location.href).origin; }
+  catch(e){ return null; }
+}
+
+window.addEventListener("message", function(e){
+  if(!CONFIG.ghl.formUrl) return;
+  if(e.origin !== trustedFormOrigin()) return;
+  var text = typeof e.data === "string" ? e.data : JSON.stringify(e.data || "");
+  /* GHL has changed this payload shape before, so match loosely on intent
+     rather than one exact string - but only from the origin above. */
+  if(/submit|success|complete/i.test(text)){ unlock(); return; }
+  /* Anything else from the form is usually form_embed.js resizing it, which
+     changes our own height - tell the host page so the outer iframe grows. */
+  notifyHeight();
+});
+
+function trackConversion(){
+  try{
+    if(window.fbq) fbq("track","Lead",{content_name:"Deck Estimator",currency:"USD",value:0});
+    if(window.gtag) gtag("event","generate_lead",{event_category:"estimator"});
+  }catch(e){}
+}
+
+/* ---------- iframe auto-height for the GHL page embed ---------- */
+var lastHeight = 0;
+function notifyHeight(){
+  var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+  if(Math.abs(h - lastHeight) > 10){
+    lastHeight = h;
+    try{ window.parent.postMessage({ iframeHeight:h }, "*"); }catch(e){}
+  }
+}
+window.addEventListener("resize", notifyHeight);
+window.addEventListener("load", function(){ setTimeout(notifyHeight, 120); });
+
+/* ---------- boot ---------- */
+document.getElementById("notes").addEventListener("change", function(){
+  state.notes = this.value;
+});
+document.getElementById("overlay").addEventListener("click", function(e){
+  if(e.target === this) closeGate();
+});
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape") closeGate();
+});
+
+/* A ?gate= override makes the two flows A/B testable without a redeploy. */
+(function boot(){
+  var override = new URLSearchParams(window.location.search).get("gate");
+  if(override === "before" || override === "after" || override === "none") CONFIG.gateMode = override;
+
+  if(CONFIG.gateMode === "none"){
+    /* Open tool: unlocked from the start, no form, no blurred mock. Blocked
+       is latched on because every webhook payload would carry a deck with no
+       email to attach it to - orphaned rows in the CRM rather than leads. */
+    state.unlocked = true;
+    state.blocked  = true;
+    render();
+  }else if(CONFIG.gateMode === "before"){
+    var mock = document.getElementById("mock");
+    mock.classList.add("show");
+    /* Modal mode pins the mock full-screen behind the overlay. Inline mode
+       leaves it in the flow, under the form, as a preview of what unlocks. */
+    if(!isInlineGate()) mock.classList.add("pinned");
+    document.getElementById("app").style.display = "none";
+    render();
+    openGate();
+  }else{
+    render();
+  }
+})();
+</script>
+</body>
+</html>
