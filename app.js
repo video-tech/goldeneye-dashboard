@@ -3188,7 +3188,15 @@ window.submitClientRequest = async function() {
         function selectPresetDate(v, l) { selectedDateRange = v; document.getElementById('selected-date-label').innerText = l; toggleDropdown('portal-date-menu'); filterPortalData(); }
         function applyCustomRange() { customStart = document.getElementById('start-date').value; customEnd = document.getElementById('end-date').value; if(customStart && customEnd) { selectedDateRange = 'custom'; document.getElementById('selected-date-label').innerText = `${customStart} to ${customEnd}`; toggleDropdown('portal-date-menu'); filterPortalData(); } }
         
-        function openInviteModal() { document.getElementById('invite-modal').style.display = 'flex'; }
+        function openInviteModal() {
+            const modal = document.getElementById('invite-modal');
+            // The modal is nested inside #client-portal-container in the markup, which is
+            // hidden on the admin dashboard — its own display:flex is overridden by that
+            // hidden ancestor, so clicking Invite from a client's page silently did nothing.
+            // Same trap CLAUDE.md documents for other drawers; this one was missed.
+            if (modal.parentElement.id !== 'theme-wrapper') document.getElementById('theme-wrapper').appendChild(modal);
+            modal.style.display = 'flex';
+        }
         function closeInviteModal() { document.getElementById('invite-modal').style.display = 'none'; }
         // Everything needed for one address to reach one client's portal. Three tables,
         // because each answers a different question: pre_approved_users is read when the
