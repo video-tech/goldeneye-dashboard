@@ -4153,7 +4153,7 @@ window.submitClientRequest = async function() {
 
         function openColumnDrawer() {
             const l=document.getElementById('optional-columns-list'); l.innerHTML=''; let o=[]; activeCols.forEach(id=>o.push(masterCols.find(c=>c.id===id))); masterCols.forEach(c=>{if(!activeCols.includes(c.id))o.push(c)});
-            o.forEach(c=>{ const act=activeCols.includes(c.id); l.innerHTML+=`<div class="glass p-3 flex justify-between items-center" data-id="${c.id}"><div class="flex items-center gap-3"><i class="fa-solid fa-grip-vertical drag-handle text-gray-500 px-2"></i><span class="font-medium ${act?'text-white':'text-gray-500'}">${c.label}</span></div><input type="checkbox" class="row-checkbox" ${act?'checked':''}></div>`; });
+            o.forEach(c=>{ const act=activeCols.includes(c.id); l.innerHTML+=`<div class="glass p-3 flex justify-between items-center" data-id="${c.id}"><div class="flex items-center gap-3"><i class="fa-solid fa-grip-vertical drag-handle px-2" style="color:var(--t3);"></i><span style="font-weight:500; color:${act?'var(--t1)':'var(--t3)'};">${c.label}</span></div><input type="checkbox" class="row-checkbox" ${act?'checked':''}></div>`; });
             document.getElementById('drawer-overlay').classList.add('show'); document.getElementById('column-drawer').classList.add('open');
         }
         function initColumnSortable() { 
@@ -8853,19 +8853,19 @@ window.openTemplateDrawer = function(type, id) {
         title.innerText = id.charAt(0).toUpperCase() + id.slice(1) + " Phase";
         
         content.innerHTML = `
-            <div class="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg mb-4 text-sm text-blue-200">
-                These tasks will automatically generate when a lead enters the <strong>${id}</strong> stage. 
-                <br><br><strong class="text-white">Pro Tip:</strong> Link critical operational tasks to Milestones to automate the Relationship Health Tracker.
+            <div class="p-4 mb-4 text-sm" style="background:var(--goldWash); border:1px solid var(--goldLine); border-radius:3px; color:var(--t2);">
+                These tasks will automatically generate when a lead enters the <strong>${id}</strong> stage.
+                <br><br><strong style="color:var(--t1);">Pro tip:</strong> Link critical operational tasks to Milestones to automate the Relationship Health Tracker.
             </div>
             <div>
-                <label class="modal-label">Default Assignee</label>
+                <label class="modal-label">Default assignee</label>
                 <input type="text" id="tpl-stage-assignee" class="glass-input" placeholder="e.g. Account Manager" required>
             </div>
-            
+
             <div class="mt-6">
                 <div class="flex justify-between items-center mb-2">
-                    <label class="modal-label !mb-0">Task Definitions</label>
-                    <button type="button" onclick="addStageTaskRow()" class="text-[10px] bg-white/10 hover:bg-white/20 text-white font-bold py-1 px-2 rounded transition shadow">+ Add Task</button>
+                    <label class="modal-label !mb-0">Task definitions</label>
+                    <button type="button" onclick="addStageTaskRow()" class="btn-secondary btn" style="height:26px; padding:0 10px; font-size:10px;">+ Add task</button>
                 </div>
                 <div id="tpl-stage-tasks-container" class="space-y-3">
                     </div>
@@ -8885,22 +8885,23 @@ window.addStageTaskRow = function() {
     const milestoneOptions = dbMilestones.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
     
     const row = document.createElement('div');
-    row.className = "flex gap-2 items-start bg-black/20 p-2 rounded border border-white/5 tpl-task-row";
+    row.className = "flex gap-2 items-start p-2 tpl-task-row";
+    row.style.cssText = "background:var(--inset); border:1px solid var(--line); border-radius:3px;";
     row.innerHTML = `
         <div class="flex-1 space-y-2">
             <input type="text" class="glass-input tpl-task-title !py-1.5" placeholder="Task Title (e.g. Meta Ads Setup)" required>
             <div class="flex gap-2">
-                <select class="glass-input tpl-task-type !py-1 !text-xs !bg-white/5" onchange="toggleMilestoneSelect(this)">
+                <select class="glass-input tpl-task-type !py-1 !text-xs" onchange="toggleMilestoneSelect(this)">
                     <option value="standard">Standard Task</option>
                     <option value="milestone">Health Milestone</option>
                 </select>
-                <select class="glass-input tpl-task-milestone !py-1 !text-xs !bg-yellow-500/10 !text-yellow-400 !border-yellow-500/30 hidden">
+                <select class="glass-input tpl-task-milestone !py-1 !text-xs hidden" style="color:var(--gold); border-color:var(--goldLine);">
                     <option value="" disabled selected>Link to Benchmark...</option>
                     ${milestoneOptions}
                 </select>
             </div>
         </div>
-        <button type="button" onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-300 transition w-8 h-8 rounded shrink-0 flex items-center justify-center bg-red-500/10 hover:bg-red-500/20"><i class="fa-solid fa-trash"></i></button>
+        <button type="button" onclick="this.parentElement.remove()" class="transition w-8 h-8 rounded shrink-0 flex items-center justify-center" style="color:var(--neg); background:var(--inset); border:1px solid var(--line);"><i class="fa-solid fa-trash"></i></button>
     `;
     container.appendChild(row);
 };

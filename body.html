@@ -980,7 +980,7 @@
 
                                         <div id="seo-al-link-box" class="hidden space-y-3">
                                             <div>
-                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-al-url">Webhook link <span class="normal-case font-normal text-gray-600">(private: paste it only into this client's site)</span></label>
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-al-url">Webhook link <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--t3);">(private: paste it only into this client's site)</span></label>
                                                 <div class="flex gap-2">
                                                     <input type="text" id="seo-al-url" class="glass-input font-mono text-xs" readonly>
                                                     <button type="button" onclick="copySeoAutologUrl()" id="seo-al-copy" class="shrink-0 text-xs font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-2 rounded-lg transition">Copy</button>
@@ -1013,7 +1013,7 @@
                                                 </select>
                                             </div>
                                             <div>
-                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-url">Page URL <span class="normal-case font-normal text-gray-600">(optional)</span></label>
+                                                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-url">Page URL <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--t3);">(optional)</span></label>
                                                 <input type="url" id="seo-cl-url" class="glass-input" placeholder="https://...">
                                             </div>
                                         </div>
@@ -1022,7 +1022,7 @@
                                             <input type="text" id="seo-cl-title" class="glass-input" required maxlength="200" placeholder="Published 'Deck Repair vs Replacement' article">
                                         </div>
                                         <div>
-                                            <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-notes">Notes <span class="normal-case font-normal text-gray-600">(optional). Clients may see these later, so write them for the client.</span></label>
+                                            <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1" for="seo-cl-notes">Notes <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--t3);">(optional). Clients may see these later, so write them for the client.</span></label>
                                             <textarea id="seo-cl-notes" class="glass-input" rows="2"></textarea>
                                         </div>
                                         <p id="seo-cl-error" class="text-xs text-red-400 hidden"></p>
@@ -1148,7 +1148,7 @@
                                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Content Ideas <span class="text-gray-600 font-normal normal-case">(from the client's top tracked searches, refreshed monthly)</span></h3>
                                         <div class="flex items-center gap-3">
                                             <label class="flex items-center gap-1.5 text-[10px] text-gray-500"><input type="checkbox" id="seo-ideas-show-dismissed" onchange="renderSeoIdeasList()"> Show dismissed</label>
-                                            <span id="seo-ideas-when" class="text-[10px] text-gray-500"></span>
+                                            <span id="seo-ideas-when" class="text-[10px]" style="color:var(--t3);"></span>
                                         </div>
                                     </div>
                                     <p class="text-[11px] text-gray-600 mb-4">Real questions people ask and phrases they search around this client's own top searches — a starting list for the next article or page, not a guarantee any one is worth writing.</p>
@@ -1166,7 +1166,7 @@
                                 <div id="seo-audit-panel" class="glass p-6 hidden">
                                     <div class="flex flex-wrap justify-between items-baseline gap-2 mb-4">
                                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Site Audit <span class="text-gray-600 font-normal normal-case">(SE Ranking, runs monthly on the 1st)</span></h3>
-                                        <span id="seo-audit-when" class="text-[10px] text-gray-500"></span>
+                                        <span id="seo-audit-when" class="text-[10px]" style="color:var(--t3);"></span>
                                     </div>
                                     <div id="seo-audit-empty" class="hidden text-sm text-gray-500"></div>
                                     <div id="seo-audit-body" class="hidden space-y-5">
@@ -1196,7 +1196,7 @@
                                         <div>
                                             <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Site Analytics <span class="text-gray-600 font-normal normal-case">(Google Analytics, every visit from every source)</span></h3>
                                         </div>
-                                        <span id="seo-ga4-when" class="text-[10px] text-gray-500"></span>
+                                        <span id="seo-ga4-when" class="text-[10px]" style="color:var(--t3);"></span>
                                     </div>
                                     <div id="seo-ga4-empty" class="hidden text-sm text-gray-500"></div>
                                     <div id="seo-ga4-body" class="hidden space-y-8">
@@ -1257,7 +1257,7 @@
 
                                         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                             <div class="overflow-x-auto">
-                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Most visited pages by session <span class="normal-case font-normal text-gray-600">(where visits start)</span></h4>
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Most visited pages by session <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--t3);">(where visits start)</span></h4>
                                                 <table class="w-full text-sm">
                                                     <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
                                                         <th class="text-left pb-2">Page</th><th class="text-right pb-2">Sessions</th><th class="text-right pb-2">Engaged</th><th class="text-right pb-2">Avg session</th><th class="text-right pb-2">Key events</th>
@@ -1266,7 +1266,7 @@
                                                 </table>
                                             </div>
                                             <div class="overflow-x-auto">
-                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Top posts <span id="seo-ga4-blog-path" class="normal-case font-normal text-gray-600"></span></h4>
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Top posts <span id="seo-ga4-blog-path" style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--t3);"></span></h4>
                                                 <table class="w-full text-sm">
                                                     <thead><tr class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
                                                         <th class="text-left pb-2">Post</th><th class="text-right pb-2">Views</th><th class="text-right pb-2">Avg time on page</th>
@@ -1305,7 +1305,7 @@
                                 <div id="seo-gbp-panel" class="glass p-6 hidden">
                                     <div class="flex flex-wrap justify-between items-baseline gap-2 mb-5">
                                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Google Business Profile <span class="text-gray-600 font-normal normal-case">(Maps and the profile in Search, via SE Ranking Local)</span></h3>
-                                        <span id="seo-gbp-when" class="text-[10px] text-gray-500"></span>
+                                        <span id="seo-gbp-when" class="text-[10px]" style="color:var(--t3);"></span>
                                     </div>
                                     <div id="seo-gbp-empty" class="hidden text-sm text-gray-500"></div>
                                     <div id="seo-gbp-body" class="hidden space-y-8">
@@ -1904,103 +1904,103 @@
 </div>
 
 <div id="edit-audit-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
-    <div style="max-width: 800px; width: 100%; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 2rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+    <div class="glass" style="max-width: 800px; width: 100%; margin: auto; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
         <div class="flex justify-between items-start mb-6">
             <div>
-                <p class="text-xs text-yellow-500 uppercase tracking-widest font-bold mb-1">Edit</p>
-                <h2 class="text-2xl font-bold text-white">Morning Audit</h2>
+                <p class="ge-label mb-1">Edit</p>
+                <h2 class="ge-title" style="font-size:20px;">morning audit.</h2>
             </div>
-            <button onclick="document.getElementById('edit-audit-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl">✕</button>
+            <button onclick="document.getElementById('edit-audit-modal').style.display='none'" style="color:var(--t3); font-size:20px; line-height:1;">✕</button>
         </div>
         <div class="space-y-4">
             <div>
-                <label class="modal-label">HTML Report Source Code</label>
+                <label class="modal-label">HTML report source code</label>
                 <textarea id="edit-audit-html" class="glass-input min-h-[300px] font-mono text-xs"></textarea>
             </div>
-            <button id="btn-save-edit-audit" class="w-full bg-yellow-500 hover:bg-yellow-400 text-yellow-900 font-bold py-3 rounded-xl mt-4 shadow-lg transition">Save Changes</button>
+            <button id="btn-save-edit-audit" class="btn-primary btn text-sm w-full mt-4">Save changes</button>
                         </div>
                     </div>
                 </div>
 
                 <div id="seo-baseline-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
-    <form onsubmit="saveSeoBaseline(event)" style="max-width: 480px; width: 100%; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.5rem; padding: 2rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+    <form onsubmit="saveSeoBaseline(event)" class="glass" style="max-width: 480px; width: 100%; margin: auto; padding: 2rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
         <div class="flex justify-between items-start mb-4">
             <div>
-                <p class="text-xs text-gray-400 uppercase tracking-widest font-bold mb-1">Capture Baseline</p>
-                <h2 class="text-lg font-bold text-white">Save this as a fixed snapshot</h2>
+                <p class="ge-label mb-1">Capture baseline</p>
+                <h2 class="ge-title" style="font-size:16px; margin-top:4px;">save this as a fixed snapshot.</h2>
             </div>
-            <button type="button" onclick="closeCaptureSeoBaseline()" class="text-gray-400 hover:text-white text-2xl">✕</button>
+            <button type="button" onclick="closeCaptureSeoBaseline()" style="color:var(--t3); font-size:20px; line-height:1;">✕</button>
         </div>
-        <p class="text-xs text-gray-500 mb-4">This saves exactly what's on screen for the client and date range currently selected. Once saved, it never changes — a case study shows it alongside its own derived baseline, so the number you tell a client today can't drift later.</p>
-        <div id="seo-baseline-summary" class="text-sm text-gray-300 bg-white/5 rounded-xl p-4 mb-4 space-y-1"></div>
+        <p class="text-xs mb-4" style="color:var(--t3);">This saves exactly what's on screen for the client and date range currently selected. Once saved, it never changes — a case study shows it alongside its own derived baseline, so the number you tell a client today can't drift later.</p>
+        <div id="seo-baseline-summary" class="glass text-sm p-4 mb-4 space-y-1" style="color:var(--t2);"></div>
         <div class="mb-4">
-            <label class="modal-label">Notes <span class="normal-case font-normal text-gray-600">(optional — shown on the case study)</span></label>
+            <label class="modal-label">Notes <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--t3);">(optional — shown on the case study)</span></label>
             <textarea id="seo-baseline-notes" class="glass-input" rows="2" placeholder="e.g. Captured at signing, before the site migration"></textarea>
         </div>
-        <p id="seo-baseline-error" class="hidden text-xs text-red-400 mb-3"></p>
+        <p id="seo-baseline-error" class="hidden text-xs mb-3" style="color:var(--neg);"></p>
         <div class="flex gap-2 justify-end">
-            <button type="button" onclick="closeCaptureSeoBaseline()" class="text-xs font-bold text-gray-400 hover:text-white px-3 py-2 rounded-lg transition">Cancel</button>
-            <button type="submit" id="seo-baseline-save" class="text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition">Save baseline</button>
+            <button type="button" onclick="closeCaptureSeoBaseline()" class="btn-secondary btn text-xs">Cancel</button>
+            <button type="submit" id="seo-baseline-save" class="btn-primary btn text-xs">Save baseline</button>
         </div>
     </form>
 </div>
 
 <div id="seo-case-study-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); padding:2rem 1rem; align-items:center; justify-content:center;">
-    <div style="max-width: 900px; width: 100%; height: 92vh; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.5rem; padding: 1.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6); display: flex; flex-direction: column;">
+    <div class="glass" style="max-width: 900px; width: 100%; height: 92vh; margin: auto; padding: 1.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6); display: flex; flex-direction: column;">
         <div class="flex justify-between items-center mb-3 shrink-0">
             <div>
-                <p class="text-xs text-blue-400 uppercase tracking-widest font-bold mb-1">Case Study</p>
-                <h2 id="seo-case-study-title" class="text-xl font-bold text-white">SEO Results</h2>
+                <p class="ge-label mb-1" style="color:var(--gold);">Case study</p>
+                <h2 id="seo-case-study-title" class="ge-title" style="font-size:18px;">SEO results</h2>
             </div>
             <div class="flex gap-2 items-center">
-                <button type="button" onclick="printSeoCaseStudy()" class="text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition"><i class="fa-solid fa-print mr-1.5"></i>Print / Save as PDF</button>
-                <button onclick="document.getElementById('seo-case-study-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl px-2">✕</button>
+                <button type="button" onclick="printSeoCaseStudy()" class="btn-primary btn text-xs"><i class="fa-solid fa-print mr-1.5"></i>Print / Save as PDF</button>
+                <button onclick="document.getElementById('seo-case-study-modal').style.display='none'" class="px-2" style="color:var(--t3); font-size:20px;">✕</button>
             </div>
         </div>
-        <p id="seo-case-study-error" class="hidden text-sm text-red-400 mb-3"></p>
+        <p id="seo-case-study-error" class="hidden text-sm mb-3" style="color:var(--neg);"></p>
         <iframe id="seo-case-study-frame" class="w-full flex-1 rounded-lg bg-white" frameborder="0" sandbox="allow-modals"></iframe>
     </div>
 </div>
 
 <div id="stage-transition-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
-                    <div style="max-width: 500px; width: 100%; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.5rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+                    <div class="glass" style="max-width: 500px; width: 100%; margin: auto; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
                         <div class="flex justify-between items-start mb-6">
                             <div>
-                                <p class="text-xs text-blue-500 uppercase tracking-widest font-bold mb-1">Lifecycle Management</p>
-                                <h2 class="text-2xl font-bold text-white">Stage Transition</h2>
+                                <p class="ge-label mb-1">Lifecycle management</p>
+                                <h2 class="ge-title" style="font-size:20px;">stage transition.</h2>
                             </div>
-                            <button onclick="document.getElementById('stage-transition-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl">✕</button>
+                            <button onclick="document.getElementById('stage-transition-modal').style.display='none'" style="color:var(--t3); font-size:20px; line-height:1;">✕</button>
                         </div>
-                        
-                        <div class="bg-black/20 p-5 rounded-xl border border-white/5 mb-6 text-sm">
+
+                        <div class="p-5 mb-6 text-sm" style="background:var(--inset); border:1px solid var(--line); border-radius:3px;">
                             <div class="flex justify-between items-center mb-4">
-                                <span class="text-gray-400">Current Stage:</span>
-                                <span class="font-bold text-white px-3 py-1 bg-white/10 rounded-md" id="trans-current-stage">Onboarding</span>
+                                <span style="color:var(--t2);">Current stage:</span>
+                                <span class="px-3 py-1" style="font-weight:600; color:var(--t1); background:var(--panel); border:1px solid var(--line); border-radius:2px;" id="trans-current-stage">Onboarding</span>
                             </div>
-                            <div class="flex justify-center text-blue-400 mb-4">
+                            <div class="flex justify-center mb-4" style="color:var(--gold);">
                                 <i class="fa-solid fa-arrow-down"></i>
                             </div>
                             <div class="flex justify-between items-center">
-                                <span class="text-gray-400">Target Stage:</span>
-                                <select id="trans-target-stage" class="glass-input !w-auto !py-1 !text-sm !font-bold !text-blue-400 !bg-blue-500/20 !border-blue-500/30 cursor-pointer outline-none" onchange="updateTransitionTaskCount()">
+                                <span style="color:var(--t2);">Target stage:</span>
+                                <select id="trans-target-stage" class="glass-input" style="width:auto; padding:4px 12px; font-size:13px; font-weight:600; color:var(--gold); background:var(--goldWash); border-color:var(--goldLine); cursor:pointer;" onchange="updateTransitionTaskCount()">
                                     <!-- Options injected via JS -->
                                 </select>
                             </div>
                         </div>
 
-                        <div class="flex justify-between items-center bg-black/20 p-4 border border-white/5 rounded-xl mb-4 cursor-pointer hover:bg-white/5 transition" onclick="const cb = document.getElementById('trans-generate-tasks'); cb.checked = !cb.checked; toggleAutoGenerationNotice();">
-                            <span class="font-bold text-white text-sm flex items-center gap-3"><i class="fa-solid fa-wand-magic-sparkles text-yellow-400"></i> Generate SOP Tasks</span>
+                        <div class="flex justify-between items-center p-4 mb-4 cursor-pointer transition" style="background:var(--inset); border:1px solid var(--line); border-radius:3px;" onclick="const cb = document.getElementById('trans-generate-tasks'); cb.checked = !cb.checked; toggleAutoGenerationNotice();">
+                            <span class="text-sm flex items-center gap-3" style="font-weight:600; color:var(--t1);"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--gold);"></i>Generate SOP tasks</span>
                             <input type="checkbox" id="trans-generate-tasks" checked class="row-checkbox w-5 h-5 pointer-events-none">
                         </div>
 
-                        <div id="trans-auto-gen-notice" class="bg-blue-900/20 border-l-4 border-blue-500 p-4 mb-6 rounded-r-lg transition-all duration-300">
-                            <h4 class="text-sm font-bold text-white flex items-center gap-2 mb-1"><i class="fa-solid fa-list-check text-blue-400"></i> Auto-Generation Active</h4>
-                            <p class="text-xs text-gray-300">Moving to this stage will automatically pull the SOP template and generate <strong class="text-white" id="trans-task-count">12</strong> new tasks for this client.</p>
+                        <div id="trans-auto-gen-notice" class="p-4 mb-6" style="background:var(--goldWash); border-left:2px solid var(--goldLine); border-radius:0 3px 3px 0;">
+                            <h4 class="text-sm flex items-center gap-2 mb-1" style="font-weight:600; color:var(--t1);"><i class="fa-solid fa-list-check" style="color:var(--gold);"></i>Auto-generation active</h4>
+                            <p class="text-xs" style="color:var(--t2);">Moving to this stage will automatically pull the SOP template and generate <strong style="color:var(--t1);" id="trans-task-count">12</strong> new tasks for this client.</p>
                         </div>
 
                         <div class="flex gap-3">
-                            <button onclick="document.getElementById('stage-transition-modal').style.display='none'" class="flex-1 glass-pill justify-center !py-3">Cancel</button>
-                            <button id="btn-confirm-transition" onclick="executeStageTransition()" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-full shadow-lg transition">Confirm Move</button>
+                            <button onclick="document.getElementById('stage-transition-modal').style.display='none'" class="btn-secondary btn text-sm flex-1 justify-center">Cancel</button>
+                            <button id="btn-confirm-transition" onclick="executeStageTransition()" class="btn-primary btn text-sm flex-1 justify-center">Confirm move</button>
                         </div>
                     </div>
                 </div>
@@ -2529,85 +2529,85 @@
             </div>
         <div id="health-drawer" class="side-drawer p-6">
             <div class="flex justify-between items-center mb-6">
-                <h2 class="text-xl font-bold text-white"><i class="fa-solid fa-heart-pulse mr-2 text-green-400"></i> Update Account Health</h2>
-                <button type="button" onclick="closeAllDrawers()" class="text-gray-400 hover:text-white text-2xl p-2">✕</button>
+                <h2 class="ge-title" style="font-size:17px; display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-heart-pulse" style="color:var(--pos);"></i>update account health.</h2>
+                <button type="button" onclick="closeAllDrawers()" class="p-2" style="color:var(--t3); font-size:20px;">✕</button>
             </div>
-            
-            <p class="text-xs text-gray-400 mb-6 uppercase tracking-wider font-bold">Client: <span id="h-client-name" class="text-white">---</span></p>
-            
+
+            <p class="ge-label mb-6">Client: <span id="h-client-name" style="color:var(--t1);">---</span></p>
+
             <div class="space-y-6 flex-1 overflow-y-auto pr-1">
                 <div>
-                    <label class="modal-label">Last Communication Date</label>
+                    <label class="modal-label">Last communication date</label>
                     <input type="date" id="h-date" class="glass-input">
                 </div>
-                
+
                 <div>
                     <div class="flex justify-between text-xs mb-1">
-                        <span class="text-gray-400">GHL Platform Usage</span>
-                        <span class="font-bold text-white"><span id="ghl-val">3</span>/5</span>
+                        <span style="color:var(--t2);">GHL platform usage</span>
+                        <span class="ge-num" style="font-weight:600; color:var(--t1);"><span id="ghl-val">3</span>/5</span>
                     </div>
-                    <input type="range" id="h-ghl" min="1" max="5" value="3" class="w-full accent-blue-500" oninput="document.getElementById('ghl-val').innerText=this.value">
+                    <input type="range" id="h-ghl" min="1" max="5" value="3" class="w-full" style="accent-color:var(--gold);" oninput="document.getElementById('ghl-val').innerText=this.value">
                 </div>
 
                 <div class="grid grid-cols-3 gap-3">
                     <div>
-                        <label class="modal-label">Lead Vol</label>
+                        <label class="modal-label">Lead vol</label>
                         <input type="number" id="h-leads" class="glass-input" placeholder="0">
                     </div>
                     <div>
-                        <label class="modal-label">Appts Set</label>
+                        <label class="modal-label">Appts set</label>
                         <input type="number" id="h-appts" class="glass-input" placeholder="0">
                     </div>
                     <div>
-                        <label class="modal-label">Deals Closed</label>
+                        <label class="modal-label">Deals closed</label>
                         <input type="number" id="h-deals" class="glass-input" placeholder="0">
                     </div>
                 </div>
 
-                <p id="h-checkin-hint" class="text-[10px] text-gray-500 -mt-2"></p>
+                <p id="h-checkin-hint" class="text-[10px] -mt-2" style="color:var(--t3);"></p>
 
                 <div>
-                    <label class="modal-label">Manual Health Override (Optional Score 1-100)</label>
+                    <label class="modal-label">Manual health override (optional score 1-100)</label>
                     <input type="number" id="h-manual-override" class="glass-input" placeholder="Leave blank for automatic scoring math">
                 </div>
 
                 <div>
-                    <label class="modal-label">Internal Health Notes</label>
+                    <label class="modal-label">Internal health notes</label>
                     <textarea id="h-note" class="glass-input min-h-[100px]" placeholder="E.g., Client loved the new performance wins..."></textarea>
                 </div>
 
                 <div>
-                    <label class="modal-label mb-2">Phase Benchmarks achieved</label>
+                    <label class="modal-label mb-2">Phase benchmarks achieved</label>
                     <div id="h-milestones" class="space-y-2">
                         </div>
                 </div>
             </div>
 
-            <div class="pt-6 border-t border-white/10 mt-6 bg-slate-900/20">
-                <button onclick="saveHealthData()" id="h-save-btn" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg shadow-lg transition">
-                    Save Account Health
+            <div class="pt-6 mt-6" style="border-top:1px solid var(--line);">
+                <button onclick="saveHealthData()" id="h-save-btn" class="btn-primary btn text-sm w-full">
+                    Save account health
                 </button>
             </div>
         </div>
         <div id="column-drawer" class="side-drawer p-6">
-                <div class="flex justify-between items-center mb-6"><h2 class="text-xl font-bold text-white"><i class="fa-solid fa-table-columns mr-2 text-blue-500"></i> Columns</h2><button onclick="closeAllDrawers(); return false;" class="text-gray-400 hover:text-white text-2xl z-[100] p-2">✕</button></div>
-                <div class="flex justify-between items-center mb-4"><p class="text-xs text-gray-400">Optional Columns</p><button onclick="resetColumns()" class="text-[10px] uppercase font-bold text-blue-400 hover:underline">Reset</button></div>
+                <div class="flex justify-between items-center mb-6"><h2 class="ge-title" style="font-size:17px; display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-table-columns" style="color:var(--gold);"></i>columns.</h2><button onclick="closeAllDrawers(); return false;" class="p-2" style="color:var(--t3); font-size:20px; z-index:100;">✕</button></div>
+                <div class="flex justify-between items-center mb-4"><p class="ge-label">Optional columns</p><button onclick="resetColumns()" class="text-[10px]" style="color:var(--gold); font-weight:600; text-transform:uppercase;">Reset</button></div>
                 <div id="optional-columns-list" class="space-y-2 flex-1"></div>
-                <button onclick="applyColumns()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg mt-6 shadow-lg">Apply</button>
+                <button onclick="applyColumns()" class="btn-primary btn text-sm w-full mt-6">Apply</button>
             </div>
 
             <form id="template-drawer" onsubmit="triggerTemplateSave(event)" class="side-drawer p-0">
-                <div class="p-6 border-b border-white/10 bg-white/5 relative">
-                    <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 text-gray-400 hover:text-white text-2xl z-[110] bg-black/20 hover:bg-red-500/20 rounded-lg w-8 h-8 flex items-center justify-center transition">✕</button>
-                    <p class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1" id="tpl-drawer-subtitle">Template Editor</p>
-                    <h3 class="text-2xl font-bold text-white mb-4" id="tpl-drawer-title">Template Details</h3>
+                <div class="p-6 relative" style="border-bottom:1px solid var(--line); background:var(--inset);">
+                    <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 z-[110] flex items-center justify-center transition" style="color:var(--t3); font-size:16px; width:28px; height:28px; border-radius:2px; background:var(--panel); border:1px solid var(--line);">✕</button>
+                    <p class="ge-label mb-1" style="color:var(--gold);" id="tpl-drawer-subtitle">Template editor</p>
+                    <h3 class="ge-title" style="font-size:22px; margin-top:4px;" id="tpl-drawer-title">Template details</h3>
                     <input type="hidden" id="tpl-active-type">
                     <input type="hidden" id="tpl-active-id">
                 </div>
                 <div class="p-6 space-y-6 flex-1 overflow-y-auto" id="tpl-drawer-content">
                     </div>
-                <div class="p-6 border-t border-white/10 bg-white/5 flex flex-col gap-3">
-                    <button type="submit" id="tpl-save-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg shadow-lg">Save Template</button>
+                <div class="p-6 flex flex-col gap-3" style="border-top:1px solid var(--line); background:var(--inset);">
+                    <button type="submit" id="tpl-save-btn" class="btn-primary btn text-sm w-full">Save template</button>
                 </div>
             </form>
 
@@ -2665,12 +2665,12 @@
         </form>
 
         <form id="cp-lead-drawer" onsubmit="saveCpLead(event)" class="side-drawer p-0">
-            <div class="p-6 border-b border-white/10 bg-white/5 relative">
-                <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 text-gray-400 hover:text-white text-2xl z-[110] bg-black/20 hover:bg-red-500/20 rounded-lg w-8 h-8 flex items-center justify-center transition">✕</button>
-                <p class="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Lead Details</p>
-                <input type="text" id="cp-ld-name" required class="w-full bg-transparent text-2xl font-bold text-white outline-none border-b border-white/20 focus:border-blue-500 mb-4 pb-2" placeholder="Lead Name...">
-                
-                <select id="cp-ld-stage" class="bg-white/10 text-white text-xs font-bold px-3 py-1.5 rounded-md border border-white/10 outline-none w-full max-w-[200px]">
+            <div class="p-6 relative" style="border-bottom:1px solid var(--line); background:var(--inset);">
+                <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 z-[110] flex items-center justify-center transition" style="color:var(--t3); font-size:16px; width:28px; height:28px; border-radius:2px; background:var(--panel); border:1px solid var(--line);">✕</button>
+                <p class="ge-label mb-3" style="color:var(--gold);">Lead details</p>
+                <input type="text" id="cp-ld-name" required class="w-full bg-transparent outline-none mb-4 pb-2" style="font-family:'Archivo',sans-serif; font-size:22px; font-weight:700; color:var(--t1); border-bottom:1px solid var(--line);" placeholder="Lead name...">
+
+                <select id="cp-ld-stage" class="glass-input" style="width:auto; max-width:200px; font-size:12px; font-weight:600; padding:0 12px;">
                     </select>
             </div>
             <div class="p-6 space-y-6 flex-1">
@@ -2685,34 +2685,34 @@
                     </div>
                 </div>
             </div>
-            <div class="p-6 border-t border-white/10 bg-white/5 flex flex-col gap-3">
-                <button type="submit" id="cp-ld-save-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg shadow-lg">Save Lead</button>
-                <button type="button" id="cp-ld-delete-btn" onclick="deleteCpLead()" class="w-full bg-red-500/10 text-red-400 hover:bg-red-500/20 font-bold py-2 rounded-lg hidden">Delete Lead</button>
+            <div class="p-6 flex flex-col gap-3" style="border-top:1px solid var(--line); background:var(--inset);">
+                <button type="submit" id="cp-ld-save-btn" class="btn-primary btn text-sm w-full">Save lead</button>
+                <button type="button" id="cp-ld-delete-btn" onclick="deleteCpLead()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--neg); color:var(--neg);">Delete lead</button>
             </div>
         </form>
 
 
         <!-- ADD CLIENT MODAL -->
         <div id="cp-report-viewer" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.9); backdrop-filter:blur(8px); padding:2rem 1rem; align-items:center; justify-content:center;">
-            <div style="max-width: 900px; width: 100%; height: 90vh; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.5rem; padding: 1.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6); display:flex; flex-direction:column;">
+            <div class="glass" style="max-width: 900px; width: 100%; height: 90vh; margin: auto; padding: 1.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6); display:flex; flex-direction:column;">
                 <div class="flex justify-between items-center mb-4 shrink-0">
-                    <h2 class="text-lg font-bold text-white" id="cp-report-viewer-title">Report</h2>
-                    <button onclick="document.getElementById('cp-report-viewer').style.display='none'" class="text-gray-400 hover:text-white text-2xl leading-none">✕</button>
+                    <h2 class="ge-title" style="font-size:16px;" id="cp-report-viewer-title">Report</h2>
+                    <button onclick="document.getElementById('cp-report-viewer').style.display='none'" style="color:var(--t3); font-size:20px; line-height:1;">✕</button>
                 </div>
                 <iframe id="cp-report-viewer-frame" class="w-full flex-1 rounded-lg bg-white" frameborder="0" sandbox=""></iframe>
             </div>
         </div>
 
         <div id="weekly-checkin-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
-            <div style="max-width: 560px; width: 100%; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.5rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+            <div class="glass" style="max-width: 560px; width: 100%; margin: auto; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
                 <div class="flex justify-between items-start mb-6">
                     <div>
-                        <p class="text-xs text-yellow-500 uppercase tracking-widest font-bold mb-1">Weekly Check-in</p>
-                        <h2 class="text-2xl font-bold text-white">How did last week go?</h2>
-                        <p class="text-sm font-bold text-yellow-400 mt-1" id="cp-checkin-modal-range"></p>
-                        <p class="text-sm text-gray-400 mt-2">A minute of numbers keeps your reporting accurate. You can close this and finish it later from the Weekly Check-in tab.</p>
+                        <p class="ge-label mb-1" style="color:var(--gold);">Weekly check-in</p>
+                        <h2 class="ge-title" style="font-size:20px; margin-top:4px;">how did last week go?</h2>
+                        <p class="ge-num" style="font-size:13px; font-weight:600; color:var(--gold); margin-top:4px;" id="cp-checkin-modal-range"></p>
+                        <p style="color:var(--t2); font-size:13px; margin-top:8px;">A minute of numbers keeps your reporting accurate. You can close this and finish it later from the Weekly Check-in tab.</p>
                     </div>
-                    <button onclick="dismissWeeklyCheckin()" class="text-gray-400 hover:text-white text-2xl leading-none shrink-0 ml-4">✕</button>
+                    <button onclick="dismissWeeklyCheckin()" class="shrink-0" style="color:var(--t3); font-size:20px; line-height:1; margin-left:16px;">✕</button>
                 </div>
                 <div id="cp-checkin-modal-mount"></div>
             </div>
@@ -2722,37 +2722,37 @@
             <div class="glass p-8 w-full max-w-lg mx-4">
                 <div class="flex justify-between items-start mb-6">
                     <div>
-                        <h3 class="text-2xl font-bold text-white">Add New Client</h3>
-                        <p class="text-xs text-gray-400 mt-1">Configure client details and baseline operational settings.</p>
+                        <h3 class="ge-title" style="font-size:20px;">add new client.</h3>
+                        <p style="color:var(--t2); font-size:12px; margin-top:4px;">Configure client details and baseline operational settings.</p>
                     </div>
-                    <button onclick="document.getElementById('add-client-modal').style.display='none'" class="text-gray-400 hover:text-white text-xl">✕</button>
+                    <button onclick="document.getElementById('add-client-modal').style.display='none'" style="color:var(--t3); font-size:20px; line-height:1;">✕</button>
                 </div>
-                
+
                 <form id="add-client-form" onsubmit="saveNewClient(event)" class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="modal-label">Business Name</label>
+                            <label class="modal-label">Business name</label>
                             <input type="text" id="new-client-name" class="glass-input" placeholder="Acme Corp" required>
                         </div>
                         <div>
-                            <label class="modal-label">Contact First Name <span class="text-gray-500 font-normal">(optional)</span></label>
+                            <label class="modal-label">Contact first name <span style="color:var(--t3); font-weight:400; text-transform:none; letter-spacing:normal;">(optional)</span></label>
                             <input type="text" id="new-client-contact-name" class="glass-input" placeholder="John">
-                            <p class="text-[10px] text-gray-500 mt-1">Used to address the weekly text.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Used to address the weekly text.</p>
                         </div>
                         <div class="col-span-2">
-                            <label class="modal-label">Industry <span class="text-gray-500 font-normal">(optional)</span></label>
+                            <label class="modal-label">Industry <span style="color:var(--t3); font-weight:400; text-transform:none; letter-spacing:normal;">(optional)</span></label>
                             <input type="text" id="new-client-industry" class="glass-input" placeholder="Cabinets, Basement Finishing, Roofing...">
-                            <p class="text-[10px] text-gray-500 mt-1">Shown on the client leaderboard so lead counts can be compared fairly.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Shown on the client leaderboard so lead counts can be compared fairly.</p>
                         </div>
                         <div class="col-span-2">
-                            <label class="modal-label">Client Email(s)</label>
+                            <label class="modal-label">Client email(s)</label>
                             <input type="text" id="new-client-email" class="glass-input" placeholder="owner@acme.com, manager@acme.com" required>
-                            <p class="text-[10px] text-gray-500 mt-1">Grants portal access and receives reports. Separate multiple with commas.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Grants portal access and receives reports. Separate multiple with commas.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">Add-ons</label>
                             <div id="new-client-services" class="flex flex-wrap gap-x-4 gap-y-2"></div>
-                            <p class="text-[10px] text-gray-500 mt-1">Every client gets Base. Their Get Started steps and our onboarding tasks follow what's ticked here.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Every client gets Base. Their Get Started steps and our onboarding tasks follow what's ticked here.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">Website</label>
@@ -2762,29 +2762,29 @@
                                 <option value="existing">They already have a site</option>
                                 <option value="none">No website</option>
                             </select>
-                            <p class="text-[10px] text-gray-500 mt-1">Steps that depend on the website, like giving us access to it, are skipped until this is set.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Steps that depend on the website, like giving us access to it, are skipped until this is set.</p>
                         </div>
                         <div class="col-span-2">
-                            <p class="text-[10px] text-gray-500 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-                                <i class="fa-solid fa-comment-sms mr-1 text-emerald-400"></i>
-                                Add the people who should receive the weekly check-in text via <strong class="text-gray-300">Edit</strong> once this client is created &mdash; you can list several.
+                            <p class="text-[10px] px-3 py-2" style="color:var(--t3); background:var(--inset); border:1px solid var(--line); border-radius:3px;">
+                                <i class="fa-solid fa-comment-sms mr-1" style="color:var(--pos);"></i>
+                                Add the people who should receive the weekly check-in text via <strong style="color:var(--t2);">Edit</strong> once this client is created &mdash; you can list several.
                             </p>
-                            <p class="text-[10px] text-gray-500 bg-white/5 border border-white/10 rounded-lg px-3 py-2 mt-2">
-                                <i class="fa-brands fa-google mr-1 text-emerald-400"></i>
-                                Search Console, GA4 and GoHighLevel ids also live under <strong class="text-gray-300">Edit</strong>. They need our service account added on their end first, so they're never ready at the moment a client is created.
+                            <p class="text-[10px] px-3 py-2 mt-2" style="color:var(--t3); background:var(--inset); border:1px solid var(--line); border-radius:3px;">
+                                <i class="fa-brands fa-google mr-1" style="color:var(--pos);"></i>
+                                Search Console, GA4 and GoHighLevel ids also live under <strong style="color:var(--t2);">Edit</strong>. They need our service account added on their end first, so they're never ready at the moment a client is created.
                             </p>
                         </div>
                         <div>
-                            <label class="modal-label">Meta Ad Account ID</label>
+                            <label class="modal-label">Meta ad account ID</label>
                             <input type="text" id="new-client-ad-account" class="glass-input" placeholder="371628055">
-                            <p class="text-[10px] text-gray-500 mt-1">Leave blank if you don't have it yet &mdash; you'll get it once they grant access during onboarding. Add it later via Edit.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Leave blank if you don't have it yet &mdash; you'll get it once they grant access during onboarding. Add it later via Edit.</p>
                         </div>
                         <div>
-                            <label class="modal-label">Business ID <span class="text-gray-500 font-normal">(optional)</span></label>
+                            <label class="modal-label">Business ID <span style="color:var(--t3); font-weight:400; text-transform:none; letter-spacing:normal;">(optional)</span></label>
                             <input type="text" id="new-client-business-id" class="glass-input" placeholder="1234567890">
                         </div>
                         <div>
-                            <label class="modal-label">Contract Type</label>
+                            <label class="modal-label">Contract type</label>
                             <select id="new-client-contract" class="glass-input" required>
                                 <option value="fixed_3mo">Fixed - 3 Months</option>
                                 <option value="fixed_6mo">Fixed - 6 Months</option>
@@ -2793,12 +2793,12 @@
                             </select>
                         </div>
                         <div>
-                            <label class="modal-label">Monthly Retainer ($)</label>
+                            <label class="modal-label">Monthly retainer ($)</label>
                             <input type="number" id="new-client-retainer" class="glass-input" placeholder="2500" required>
                         </div>
                     </div>
-                    <div class="pt-4 border-t border-white/10 mt-4">
-                        <button type="submit" id="btn-save-new-client" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl shadow-lg transition">Create Client Profile</button>
+                    <div class="pt-4 mt-4" style="border-top:1px solid var(--line);">
+                        <button type="submit" id="btn-save-new-client" class="btn-primary btn text-sm w-full">Create client profile</button>
                     </div>
                 </form>
             </div>
@@ -2840,7 +2840,7 @@
                         <div class="col-span-2">
                             <label class="modal-label">Add-ons</label>
                             <div id="edit-client-services" class="flex flex-wrap gap-x-4 gap-y-2"></div>
-                            <p class="text-[10px] text-gray-500 mt-1">Ticking a new add-on starts its onboarding: its steps show on their Get Started. Unticking ends it, and its history stays.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Ticking a new add-on starts its onboarding: its steps show on their Get Started. Unticking ends it, and its history stays.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">Website</label>
@@ -2854,15 +2854,15 @@
                         <div class="col-span-2">
                             <label class="modal-label">Check-in Contacts</label>
                             <div id="edit-client-contacts-list" class="space-y-2"></div>
-                            <button type="button" onclick="addContactRow()" class="mt-2 text-xs text-blue-400 hover:text-blue-300 font-bold">
+                            <button type="button" onclick="addContactRow()" class="mt-2 text-xs" style="color:var(--gold); font-weight:600;">
                                 <i class="fa-solid fa-plus mr-1"></i> Add contact
                             </button>
-                            <p class="text-[10px] text-gray-500 mt-1">Everyone listed gets the weekly check-in text, and their replies are combined into one weekly figure for this client.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Everyone listed gets the weekly check-in text, and their replies are combined into one weekly figure for this client.</p>
                         </div>
                         <div>
                             <label class="modal-label">Meta Ad Account ID</label>
                             <input type="text" id="edit-client-ad-account" class="glass-input" placeholder="371628055">
-                            <p class="text-[10px] text-gray-500 mt-1">Add this once they've granted access. Wrong id means no ad data at all.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Add this once they've granted access. Wrong id means no ad data at all.</p>
                         </div>
                         <div>
                             <label class="modal-label">Business ID</label>
@@ -2871,58 +2871,58 @@
                         <div class="col-span-2">
                             <label class="modal-label">Target CPL ($)</label>
                             <input type="number" min="0" step="0.01" id="edit-client-target-cpl" class="glass-input" placeholder="45">
-                            <p class="text-[10px] text-gray-500 mt-1">The cost per lead you expect from their ads. The morning audit judges them against this instead of their own history. At double it on $200+ a week they go Critical and you're texted. Leave blank to compare them with their own last 28 days.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">The cost per lead you expect from their ads. The morning audit judges them against this instead of their own history. At double it on $200+ a week they go Critical and you're texted. Leave blank to compare them with their own last 28 days.</p>
                         </div>
 
                         <!-- Organic search. Each field is its own on/off switch: fill one in and
                              that source starts collecting for this client, leave it blank and
                              nothing about it appears anywhere. No separate "SEO enabled" toggle
                              to drift out of step with whether the data can actually be fetched. -->
-                        <div class="col-span-2 pt-4 mt-2 border-t border-white/10">
-                            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">
-                                <i class="fa-brands fa-google mr-1 text-emerald-400"></i> Organic Search &amp; Lead Tracking
+                        <div class="col-span-2 pt-4 mt-2" style="border-top:1px solid var(--line);">
+                            <h4 class="ge-label mb-1">
+                                <i class="fa-brands fa-google mr-1" style="color:var(--pos);"></i> Organic search &amp; lead tracking
                             </h4>
-                            <p class="text-[10px] text-gray-500">Leave blank for clients we don't do SEO for. Each one needs our service account added as a user on that property first &mdash; Test connection tells you if it worked.</p>
+                            <p class="text-[10px]" style="color:var(--t3);">Leave blank for clients we don't do SEO for. Each one needs our service account added as a user on that property first &mdash; Test connection tells you if it worked.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">Search Console Property</label>
                             <input type="text" id="edit-client-gsc-property" class="glass-input" placeholder="sc-domain:example.com">
-                            <p class="text-[10px] text-gray-500 mt-1">Copy it <strong class="text-gray-300">exactly</strong> as Search Console shows it &mdash; a domain property looks like <code class="text-gray-400">sc-domain:example.com</code>, a URL-prefix one like <code class="text-gray-400">https://www.example.com/</code>, trailing slash included. Setting this starts a 16-month backfill on its own.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Copy it <strong style="color:var(--t2);">exactly</strong> as Search Console shows it &mdash; a domain property looks like <code style="color:var(--t2);">sc-domain:example.com</code>, a URL-prefix one like <code style="color:var(--t2);">https://www.example.com/</code>, trailing slash included. Setting this starts a 16-month backfill on its own.</p>
                         </div>
                         <div>
                             <label class="modal-label">GA4 Property ID</label>
                             <input type="text" id="edit-client-ga4-property" class="glass-input" placeholder="123456789">
-                            <p class="text-[10px] text-gray-500 mt-1">Digits only, from GA4 Admin &rarr; Property details.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Digits only, from GA4 Admin &rarr; Property details.</p>
                         </div>
                         <div>
                             <label class="modal-label">Business Profile: SE Ranking Local ID</label>
                             <input type="text" id="edit-client-seranking-local" class="glass-input" placeholder="42103">
-                            <p class="text-[10px] text-gray-500 mt-1">Add their profile in SE Ranking &rarr; Local Marketing and connect Google, then paste the location&rsquo;s number from its URL. Brings in calls, website clicks, directions, search terms and reviews.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Add their profile in SE Ranking &rarr; Local Marketing and connect Google, then paste the location&rsquo;s number from its URL. Brings in calls, website clicks, directions, search terms and reviews.</p>
                         </div>
                         <div class="col-span-2">
-                            <label class="modal-label">Google Location ID <span class="normal-case font-normal text-gray-600">(not used yet)</span></label>
+                            <label class="modal-label">Google Location ID <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--t3);">(not used yet)</span></label>
                             <input type="text" id="edit-client-gbp-location" class="glass-input" placeholder="1234567890">
-                            <p class="text-[10px] text-gray-500 mt-1">For Google&rsquo;s own API later. Business Profile data comes through SE Ranking for now.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">For Google&rsquo;s own API later. Business Profile data comes through SE Ranking for now.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">GHL Location ID</label>
                             <input type="text" id="edit-client-ghl-location" class="glass-input" placeholder="ve9EPM428h8vShlRW1KT">
-                            <p class="text-[10px] text-gray-500 mt-1">Their GoHighLevel sub-account id. This is how an incoming lead webhook knows the lead is theirs.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Their GoHighLevel sub-account id. This is how an incoming lead webhook knows the lead is theirs.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">SE Ranking Project ID</label>
                             <input type="number" id="edit-client-seranking-site" class="glass-input" placeholder="12898862">
-                            <p class="text-[10px] text-gray-500 mt-1">The numeric id in the project's SE Ranking URL. Keywords stay managed in SE Ranking &mdash; this only tells Golden Eye which project to pull tracked rank from.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">The numeric id in the project's SE Ranking URL. Keywords stay managed in SE Ranking &mdash; this only tells Golden Eye which project to pull tracked rank from.</p>
                         </div>
                         <div>
                             <label class="modal-label">SEO Start Date</label>
                             <input type="date" id="edit-client-seo-start" class="glass-input">
-                            <p class="text-[10px] text-gray-500 mt-1">When SEO work began. "Since SEO started" on their SEO tab compares against the month before this.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">When SEO work began. "Since SEO started" on their SEO tab compares against the month before this.</p>
                         </div>
                         <div>
                             <label class="modal-label">SEO Monthly Fee ($)</label>
                             <input type="number" min="0" step="0.01" id="edit-client-seo-fee" class="glass-input" placeholder="1500">
-                            <p class="text-[10px] text-gray-500 mt-1">What they pay for SEO only. Their tab shows a return-per-dollar figure only once revenue from Google beats this.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">What they pay for SEO only. Their tab shows a return-per-dollar figure only once revenue from Google beats this.</p>
                         </div>
                         <div class="col-span-2">
                             <button type="button" id="btn-test-seo-connection" onclick="testSeoConnection()" class="glass-pill px-4 py-2 text-xs font-bold">
@@ -2968,16 +2968,16 @@
 
         <div id="invite-modal">
             <div class="glass p-8 w-full max-w-sm mx-4">
-                <h3 class="modal-title">Invite Team Member</h3>
-                <p class="text-xs text-gray-400 mb-4">Give a colleague access to view these metrics.</p>
+                <h3 class="ge-title" style="font-size:19px;">invite to portal.</h3>
+                <p style="color:var(--t2); font-size:12px; margin-top:6px; margin-bottom:16px;">Give this client access to their portal.</p>
                 <div class="space-y-4">
                     <div>
-                        <label class="modal-label">Email Address</label>
+                        <label class="modal-label">Email address</label>
                         <input type="email" id="input-invite-email" class="glass-input" placeholder="colleague@company.com">
                     </div>
                     <div class="flex gap-2 pt-4">
-                        <button onclick="closeInviteModal()" class="flex-1 glass-pill justify-center">Cancel</button>
-                        <button onclick="submitClientInvite()" id="submit-invite-btn" class="flex-1 btn-gold !bg-purple-500 !text-white justify-center border border-purple-400">Send Invite</button>
+                        <button onclick="closeInviteModal()" class="btn-secondary btn text-sm flex-1 justify-center">Cancel</button>
+                        <button onclick="submitClientInvite()" id="submit-invite-btn" class="btn-primary btn text-sm flex-1 justify-center">Send invite</button>
                     </div>
                 </div>
             </div>
@@ -2985,11 +2985,11 @@
 
         <div id="client-request-modal">
             <div class="glass p-8 w-full max-w-sm mx-4">
-                <h3 class="modal-title">Submit a Request</h3>
-                <p class="text-xs text-gray-400 mb-4">Our team will be notified immediately.</p>
+                <h3 class="ge-title" style="font-size:19px;">submit a request.</h3>
+                <p style="color:var(--t2); font-size:12px; margin-top:6px; margin-bottom:16px;">Our team will be notified immediately.</p>
                 <div class="space-y-4">
                     <div>
-                        <label class="modal-label">Request Type</label>
+                        <label class="modal-label">Request type</label>
                         <select id="input-request-type" class="glass-input">
                             <option value="Task">New Task / Campaign</option>
                             <option value="Meeting">Schedule a Meeting</option>
@@ -3005,33 +3005,33 @@
                         <textarea id="input-request-details" class="glass-input min-h-[80px]" placeholder="Provide any necessary details..."></textarea>
                     </div>
                     <div class="flex gap-2 pt-4">
-                        <button onclick="closeClientRequestModal()" class="flex-1 glass-pill justify-center">Cancel</button>
-                        <button onclick="submitClientRequest()" id="submit-request-btn" class="flex-1 btn-gold !bg-blue-600 !text-white !border-blue-500 justify-center shadow-lg">Submit</button>
+                        <button onclick="closeClientRequestModal()" class="btn-secondary btn text-sm flex-1 justify-center">Cancel</button>
+                        <button onclick="submitClientRequest()" id="submit-request-btn" class="btn-primary btn text-sm flex-1 justify-center">Submit</button>
                     </div>
                 </div>
             </div>
         </div>
         <div id="edit-report-modal">
-            <div id="report-modal-inner" style="max-width: 800px; margin: auto; background: rgba(15, 23, 42, 0.97); border: 1px solid rgba(255,255,255,0.1); border-radius: 2rem; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+            <div id="report-modal-inner" style="max-width: 800px;">
                 <div class="flex justify-between items-start mb-6">
-                    <div><p class="rpt-label text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">Edit</p><h2 class="text-2xl font-bold text-white">Saved Report</h2></div>
-                    <button onclick="document.getElementById('edit-report-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl">✕</button>
+                    <div><p class="ge-label mb-1">Edit</p><h2 class="ge-title" style="font-size:20px;">saved report.</h2></div>
+                    <button onclick="document.getElementById('edit-report-modal').style.display='none'" style="color:var(--t3); font-size:20px; line-height:1;">✕</button>
                 </div>
-                
+
                 <div class="space-y-4">
                     <div id="edit-rpt-notes-wrap" hidden>
-                        <label class="modal-label">What You Typed (when this report was generated)</label>
-                        <div id="edit-rpt-notes" class="glass-input whitespace-pre-wrap text-amber-200 text-sm"></div>
+                        <label class="modal-label">What you typed (when this report was generated)</label>
+                        <div id="edit-rpt-notes" class="glass-input whitespace-pre-wrap text-sm" style="color:var(--warn);"></div>
                     </div>
                     <div>
-                        <label class="modal-label">Email Summary Text</label>
+                        <label class="modal-label">Email summary text</label>
                         <textarea id="edit-rpt-email" class="glass-input min-h-[150px]"></textarea>
                     </div>
                     <div>
-                        <label class="modal-label">HTML Report Source Code</label>
+                        <label class="modal-label">HTML report source code</label>
                         <textarea id="edit-rpt-html" class="glass-input min-h-[150px] font-mono text-xs"></textarea>
                     </div>
-                    <button id="btn-save-edit-report" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl mt-4 shadow-lg transition">Save Changes</button>
+                    <button id="btn-save-edit-report" class="btn-primary btn text-sm w-full mt-4">Save changes</button>
                 </div>
             </div>
         </div>
@@ -3039,40 +3039,40 @@
         <div id="report-modal">
             <div id="report-modal-inner" style="max-width: 900px;">
                 <div class="flex justify-between items-start mb-6">
-                    <div><p class="rpt-label text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">Weekly Report</p><h2 id="rpt-account-title" class="text-2xl font-bold text-white">Account</h2></div>
-                    <button onclick="document.getElementById('report-modal').style.display='none'" class="text-gray-400 hover:text-white text-2xl">✕</button>
+                    <div><p class="ge-label mb-1">Weekly report</p><h2 id="rpt-account-title" class="ge-title" style="font-size:20px;">Account</h2></div>
+                    <button onclick="document.getElementById('report-modal').style.display='none'" style="color:var(--t3); font-size:20px; line-height:1;">✕</button>
                 </div>
-                
+
                 <div class="rpt-kpi-grid">
-                    <div class="rpt-kpi-tile"><div class="text-[10px] font-bold text-gray-500 uppercase mb-1">Spend</div><div class="text-xl font-bold text-white" id="rpt-kpi-spend">—</div></div>
-                    <div class="rpt-kpi-tile"><div class="text-[10px] font-bold text-gray-500 uppercase mb-1">Leads</div><div class="text-xl font-bold text-green-400" id="rpt-kpi-leads">—</div></div>
-                    <div class="rpt-kpi-tile"><div class="text-[10px] font-bold text-gray-500 uppercase mb-1">CPL</div><div class="text-xl font-bold text-blue-400" id="rpt-kpi-cpl">—</div></div>
-                    <div class="rpt-kpi-tile"><div class="text-[10px] font-bold text-gray-500 uppercase mb-1">CPC</div><div class="text-xl font-bold text-white" id="rpt-kpi-cpc">—</div></div>
+                    <div class="rpt-kpi-tile"><div class="ge-label mb-1">Spend</div><div class="ge-num" style="font-size:19px; font-weight:700; color:var(--t1);" id="rpt-kpi-spend">—</div></div>
+                    <div class="rpt-kpi-tile"><div class="ge-label mb-1">Leads</div><div class="ge-num" style="font-size:19px; font-weight:700; color:var(--pos);" id="rpt-kpi-leads">—</div></div>
+                    <div class="rpt-kpi-tile"><div class="ge-label mb-1">CPL</div><div class="ge-num" style="font-size:19px; font-weight:700; color:var(--t1);" id="rpt-kpi-cpl">—</div></div>
+                    <div class="rpt-kpi-tile"><div class="ge-label mb-1">CPC</div><div class="ge-num" style="font-size:19px; font-weight:700; color:var(--t1);" id="rpt-kpi-cpc">—</div></div>
                 </div>
-                
-                <textarea id="rpt-improving" class="text-white" placeholder="What we did / What we're improving (Optional - AI will infer from data if left blank)..."></textarea>
-                <label for="rpt-next-week" class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-4">Next week's to-dos <span class="normal-case font-normal text-gray-600">— one per line. Each becomes a task for this client and is listed under "What We're Working On."</span></label>
-                <textarea id="rpt-next-week" class="text-white" style="min-height: 70px;" placeholder="Launch the 3 winning ads at a higher budget&#10;Rewrite the landing page headline"></textarea>
-                <button onclick="generateReport()" id="rpt-gen-btn" class="w-full bg-yellow-400 text-yellow-900 font-bold py-3 rounded-xl mt-4 hover:bg-yellow-300 transition">Generate Report</button>
-                
+
+                <textarea id="rpt-improving" placeholder="What we did / What we're improving (Optional - AI will infer from data if left blank)..."></textarea>
+                <label for="rpt-next-week" class="modal-label mt-4" style="display:block;">Next week's to-dos <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--t3);">— one per line. Each becomes a task for this client and is listed under "What We're Working On."</span></label>
+                <textarea id="rpt-next-week" style="min-height: 70px;" placeholder="Launch the 3 winning ads at a higher budget&#10;Rewrite the landing page headline"></textarea>
+                <button onclick="generateReport()" id="rpt-gen-btn" class="btn-primary btn text-sm w-full mt-4">Generate report</button>
+
                 <div id="rpt-results" style="display:none; margin-top:24px;" class="space-y-6">
                     <div>
-                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Email Summary</h4>
-                        <div class="rpt-output-box text-gray-300" id="rpt-email-output"></div>
-                    </div>
-                    
-                    <div>
-                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Live HTML Preview</h4>
-                        <iframe id="rpt-html-preview" class="w-full bg-white rounded-xl border border-white/20" style="height: 450px;" sandbox=""></iframe>
+                        <h4 class="ge-label mb-2">Email summary</h4>
+                        <div class="rpt-output-box" style="color:var(--t2);" id="rpt-email-output"></div>
                     </div>
 
                     <div>
-                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">HTML Source Code (Copy & Paste)</h4>
-                        <textarea id="rpt-html-src" class="w-full text-xs font-mono" readonly></textarea>
+                        <h4 class="ge-label mb-2">Live HTML preview</h4>
+                        <iframe id="rpt-html-preview" class="w-full rounded-lg bg-white" style="height: 450px; border:1px solid var(--line);" sandbox=""></iframe>
                     </div>
 
-                    <button onclick="sendToMake()" id="rpt-draft-btn" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl mt-6 hover:bg-blue-500 transition shadow-lg">
-                        <i class="fa-solid fa-paper-plane mr-2"></i> Send to Gmail Drafts
+                    <div>
+                        <h4 class="ge-label mb-2">HTML source code (copy &amp; paste)</h4>
+                        <textarea id="rpt-html-src" class="w-full text-xs" readonly></textarea>
+                    </div>
+
+                    <button onclick="sendToMake()" id="rpt-draft-btn" class="btn-primary btn text-sm w-full mt-6">
+                        <i class="fa-solid fa-paper-plane mr-2"></i>Send to Gmail drafts
                     </button>
                 </div>
             </div>
