@@ -284,11 +284,18 @@
         .modal-title { font-size: 1.25rem; font-weight: bold; margin-bottom: 1rem; color: var(--t1); font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif; font-stretch: 115%; }
 
         /* Kept for phase 4: these three still carry the pre-token light-mode overrides.
-           They're redundant now that --t1/--t2/--t3 already resolve correctly in light
-           mode (headers and gray text simply inherit color: var(--t1) from #theme-wrapper),
-           but harmless, so removal stays where the spec assigns it — phase 4's light-mode
-           cleanup — rather than half-migrating it here. */
-        .light-mode h1, .light-mode h2, .light-mode h3, .light-mode .text-white { color: #0f172a !important; }
+           They're redundant for a heading left at its default color — #0f172a matches what
+           --t1 already resolves to in light mode — but NOT harmless: any heading given a
+           lighter token color on purpose (.ge-label's --t3, used on section labels sitting
+           in an <h3>) got its color forced back to full-strength dark text by this
+           !important, invisibly, in light mode only. Found once .ge-label started landing
+           on h3 tags in the Portal tabs; excluding those two classes here rather than
+           deleting the rule outright, since the full removal this comment already flags
+           needs an audit of every h1/h2/h3 in the file, not just the ones caught so far. */
+        .light-mode h1:not(.ge-label):not(.ge-title),
+        .light-mode h2:not(.ge-label):not(.ge-title),
+        .light-mode h3:not(.ge-label):not(.ge-title),
+        .light-mode .text-white { color: #0f172a !important; }
         .light-mode .text-gray-400 { color: #475569 !important; }
         .light-mode .text-gray-300 { color: #64748b !important; }
 
@@ -2161,34 +2168,31 @@
                 </div>
             </div>
 
-            <div id="cp-view-tasks" class="space-y-8 hidden">
-                <div class="glass p-6 border-l-4 border-yellow-400">
-                    <div class="flex items-center gap-2 mb-2">
-                        <i class="fa-solid fa-sparkles text-yellow-400"></i>
-                        <h3 id="cp-tasks-summary-heading" class="font-bold">What We've Done This Week</h3>
-                    </div>
-                    <div id="work-summary-tasks" class="text-gray-400 leading-relaxed text-sm">Loading this week's update&hellip;</div>
-                </div>
-
-                <div class="glass p-6 border-l-4 border-blue-500 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div class="flex-1">
+            <div id="cp-view-tasks" class="space-y-6 hidden">
+                <!-- Merged gold-wash summary + request card, matching the Dashboard tab's
+                     "this week from us" pattern rather than two separate full-width strips. -->
+                <div class="glass cp-mobile-stack" style="background:var(--goldWash); border-color:var(--goldLine); padding:24px; display:grid; grid-template-columns:1fr auto; gap:20px; align-items:start;">
+                    <div>
                         <div class="flex items-center gap-2 mb-2">
-                            <i class="fa-solid fa-headset text-blue-400"></i>
-                            <h3 class="font-bold text-white">Need something else?</h3>
+                            <i class="fa-solid fa-sparkles" style="color:var(--gold);"></i>
+                            <h3 id="cp-tasks-summary-heading" class="ge-title" style="font-size:15px;">this week from us.</h3>
                         </div>
-                        <div class="text-gray-400 leading-relaxed text-sm">Request a new task, campaign adjustment, or schedule a strategy meeting with our team.</div>
+                        <div id="work-summary-tasks" style="color:var(--t2); line-height:1.6; font-size:13px;">Loading this week's update&hellip;</div>
                     </div>
-                    <button onclick="openClientRequestModal()" class="btn-primary font-bold text-xs shrink-0 px-6 py-3 rounded-full transition">
-                        <i class="fa-solid fa-paper-plane mr-2"></i> Submit Request
-                    </button>
+                    <div style="min-width:180px; text-align:right;">
+                        <p style="color:var(--t3); font-size:12px; margin-bottom:10px;">Need something else? Request a task or a strategy call.</p>
+                        <button onclick="openClientRequestModal()" class="btn-primary btn text-xs">
+                            <i class="fa-solid fa-paper-plane mr-2"></i>Submit request
+                        </button>
+                    </div>
                 </div>
 
-                <div class="flex flex-wrap items-center justify-between gap-4 px-2">
-                    <div class="flex flex-wrap items-center gap-4 text-[11px]">
-                        <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span><span class="text-gray-400 uppercase tracking-widest font-bold">What you need to do</span></span>
-                        <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-blue-400"></span><span class="text-gray-400 uppercase tracking-widest font-bold">We're handling it</span></span>
+                <div class="flex flex-wrap items-center justify-between gap-4 px-1">
+                    <div class="flex flex-wrap items-center gap-4">
+                        <span class="flex items-center gap-2"><span style="width:8px; height:8px; border-radius:50%; background:var(--gold);"></span><span class="ge-label">What you need to do</span></span>
+                        <span class="flex items-center gap-2"><span style="width:8px; height:8px; border-radius:50%; background:var(--t3);"></span><span class="ge-label">We're handling it</span></span>
                     </div>
-                    <div class="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                    <div style="display:flex; background:var(--inset); padding:3px; border-radius:3px; border:1px solid var(--line);">
                         <button onclick="switchCpTaskView('list')" id="cp-btn-tasks-list" class="view-btn active"><i class="fa-solid fa-list mr-2"></i>List</button>
                         <button onclick="switchCpTaskView('board')" id="cp-btn-tasks-board" class="view-btn"><i class="fa-solid fa-table-columns mr-2"></i>Board</button>
                     </div>
@@ -2196,41 +2200,41 @@
 
                 <div id="cp-tasks-board-view" class="hidden grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4"></div>
 
-                <div id="cp-tasks-list-view" class="space-y-8">
+                <div id="cp-tasks-list-view" class="space-y-6">
                 <div class="max-w-4xl">
-                    <div class="flex items-baseline justify-between mb-3 px-2">
-                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest"><i class="fa-solid fa-user-check mr-2 text-amber-400"></i> What you need to do</h3>
-                        <span id="cp-tasks-mine-count" class="text-[10px] text-gray-600 uppercase tracking-widest"></span>
+                    <div class="flex items-baseline justify-between mb-3 px-1">
+                        <h3 class="ge-label"><i class="fa-solid fa-user-check mr-2" style="color:var(--gold);"></i>What you need to do</h3>
+                        <span id="cp-tasks-mine-count" class="ge-label" style="color:var(--t3);"></span>
                     </div>
                     <div id="cp-tasks-mine" class="space-y-2"></div>
                 </div>
 
                 <div class="max-w-4xl">
-                    <div class="flex items-baseline justify-between mb-3 px-2">
-                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest"><i class="fa-solid fa-people-group mr-2 text-blue-400"></i> What we're working on</h3>
-                        <span id="cp-tasks-ours-count" class="text-[10px] text-gray-600 uppercase tracking-widest"></span>
+                    <div class="flex items-baseline justify-between mb-3 px-1">
+                        <h3 class="ge-label"><i class="fa-solid fa-people-group mr-2" style="color:var(--t3);"></i>What we're working on</h3>
+                        <span id="cp-tasks-ours-count" class="ge-label" style="color:var(--t3);"></span>
                     </div>
                     <div id="cp-tasks-ours" class="space-y-2"></div>
                 </div>
 
                 <div class="max-w-4xl">
-                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-2"><i class="fa-solid fa-check-double mr-2 text-emerald-400"></i> Recently finished</h3>
+                    <h3 class="ge-label mb-3 px-1"><i class="fa-solid fa-check-double mr-2" style="color:var(--pos);"></i>Recently finished</h3>
                     <div id="cp-tasks-done" class="space-y-2"></div>
                 </div>
                 </div>
             </div>
 
-            <div id="cp-view-support" class="space-y-6 hidden">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <div id="cp-view-support" class="space-y-5 hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
                     <div class="glass p-6">
-                        <h3 class="text-lg font-bold mb-1"><i class="fa-solid fa-calendar-check mr-2 text-yellow-400"></i> Book a call</h3>
-                        <p class="text-gray-400 text-sm mb-5">Pick a time that suits you — strategy, performance questions, or anything you'd rather talk through than type.</p>
+                        <h3 class="ge-title" style="font-size:16px; display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-calendar-check" style="color:var(--gold);"></i>book a call.</h3>
+                        <p style="color:var(--t2); font-size:13px; margin-top:6px; margin-bottom:20px;">Pick a time that suits you — strategy, performance questions, or anything you'd rather talk through than type.</p>
                         <div id="cp-support-calendar"></div>
                     </div>
 
                     <div class="glass p-6">
-                        <h3 class="text-lg font-bold mb-1"><i class="fa-solid fa-paper-plane mr-2 text-blue-400"></i> Send us a request</h3>
-                        <p class="text-gray-400 text-sm mb-5">Anything you need doing — a new campaign, a change to your ads, or a question. It lands straight in our queue.</p>
+                        <h3 class="ge-title" style="font-size:16px; display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-paper-plane" style="color:var(--gold);"></i>send us a request.</h3>
+                        <p style="color:var(--t2); font-size:13px; margin-top:6px; margin-bottom:20px;">Anything you need doing — a new campaign, a change to your ads, or a question. It lands straight in our queue.</p>
                         <div class="space-y-4">
                             <div>
                                 <label class="modal-label">What's this about?</label>
@@ -2248,56 +2252,56 @@
                                 <label class="modal-label">Details</label>
                                 <textarea id="cp-req-details" class="glass-input min-h-[110px]" placeholder="Anything that helps us get it right first time."></textarea>
                             </div>
-                            <p id="cp-req-error" class="text-sm text-red-400 hidden"></p>
-                            <button id="cp-req-submit" onclick="submitPortalRequest()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition">Send request</button>
+                            <p id="cp-req-error" class="text-sm hidden" style="color:var(--neg);"></p>
+                            <button id="cp-req-submit" onclick="submitPortalRequest()" class="btn-primary btn text-sm w-full">Send request</button>
                         </div>
                     </div>
                 </div>
 
                 <div class="max-w-4xl">
-                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-2">Your Open Requests</h3>
+                    <h3 class="ge-label mb-3 px-1">Your open requests</h3>
                     <div id="cp-support-open" class="space-y-2"></div>
                 </div>
             </div>
 
-            <div id="cp-view-reports" class="space-y-6 hidden">
-                <div id="cp-reports-locked" class="glass p-8 text-center border-l-4 border-amber-500 hidden max-w-2xl">
-                    <i class="fa-solid fa-lock text-3xl text-amber-400 mb-3"></i>
-                    <h3 class="text-xl font-bold text-white mb-1">Your report is waiting</h3>
-                    <p class="text-sm text-gray-400 mb-5" id="cp-reports-locked-msg">Send us this week's numbers and your report unlocks straight away.</p>
-                    <button onclick="switchCpTab('checkin')" class="bg-amber-500 hover:bg-amber-400 text-slate-900 btn text-sm transition">Fill in this week's numbers</button>
+            <div id="cp-view-reports" class="space-y-5 hidden">
+                <div id="cp-reports-locked" class="glass p-8 text-center hidden max-w-2xl" style="border-left:2px solid var(--warn);">
+                    <i class="fa-solid fa-lock" style="font-size:26px; color:var(--warn); margin-bottom:10px;"></i>
+                    <h3 class="ge-title" style="font-size:19px; margin-bottom:6px;">your report is waiting.</h3>
+                    <p style="color:var(--t2); font-size:13px; margin-bottom:20px;" id="cp-reports-locked-msg">Send us this week's numbers and your report unlocks straight away.</p>
+                    <button onclick="switchCpTab('checkin')" class="btn text-sm" style="background:var(--warn); color:var(--goldInk);">Fill in this week's numbers</button>
                 </div>
                 <div id="cp-reports-list" class="space-y-2 max-w-4xl"></div>
             </div>
 
-            <div id="cp-view-checkin" class="space-y-8 hidden">
+            <div id="cp-view-checkin" class="space-y-5 hidden">
                 <div class="glass p-6 max-w-2xl" id="cp-checkin-form-card">
-                    <h3 class="text-lg font-bold mb-1" id="cp-checkin-heading">This Week's Numbers</h3>
-                    <p class="text-gray-400 text-sm mb-6" id="cp-checkin-subhead">Takes about a minute. These build your revenue reporting and the network leaderboard.</p>
+                    <h3 class="ge-title" style="font-size:16px;" id="cp-checkin-heading">this week's numbers.</h3>
+                    <p style="color:var(--t2); font-size:13px; margin-top:6px; margin-bottom:20px;" id="cp-checkin-subhead">Takes about a minute. These build your revenue reporting and the network leaderboard.</p>
                     <div id="cp-checkin-form-mount"></div>
                 </div>
 
                 <div class="max-w-4xl">
-                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-2">Previous Check-ins</h3>
+                    <h3 class="ge-label mb-3 px-1">Previous check-ins</h3>
                     <div id="cp-checkin-history" class="space-y-2"></div>
                 </div>
             </div>
 
-            <div id="cp-view-pipeline" class="space-y-8 hidden">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
-                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Lead Pipeline</h3>
+            <div id="cp-view-pipeline" class="space-y-5 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-1">
+                    <h3 class="ge-label">Lead pipeline</h3>
                     <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
-                        <button onclick="openCpLeadDrawer('new')" class="glass-pill text-xs !py-2 shrink-0 border-white/10 text-white"><i class="fa-solid fa-plus mr-2"></i> Add Lead</button>
+                        <button onclick="openCpLeadDrawer('new')" class="btn-secondary btn text-xs shrink-0"><i class="fa-solid fa-plus mr-2"></i>Add lead</button>
                     </div>
                 </div>
                 <div class="flex gap-4 overflow-x-auto pb-4 items-start" id="cp-pipeline-container">
                     </div>
             </div>
 
-            <div id="cp-view-creatives" class="space-y-8 hidden">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
-                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest">Creative Approvals</h3>
-                    <p class="text-sm text-gray-400">Review your latest ad creatives, provide feedback, or approve them for launch.</p>
+            <div id="cp-view-creatives" class="space-y-5 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 px-1">
+                    <h3 class="ge-label">Creative approvals</h3>
+                    <p style="color:var(--t2); font-size:13px;">Review your latest ad creatives, provide feedback, or approve them for launch.</p>
                 </div>
                 <div class="space-y-6 max-w-2xl" id="client-creatives-grid"></div>
             </div>
@@ -2608,27 +2612,27 @@
             </form>
 
         <form id="task-drawer" onsubmit="saveTask(event)" class="side-drawer p-0">
-            <div class="p-6 border-b border-white/10 bg-white/5 relative">
-                <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 text-gray-400 hover:text-white text-2xl z-[110] bg-black/20 hover:bg-red-500/20 rounded-lg w-8 h-8 flex items-center justify-center transition">✕</button>
-                <h3 class="text-lg font-bold text-white mb-4" id="t-drawer-headline">Task Details</h3>
-                <input type="text" id="t-title" required class="w-full bg-transparent text-2xl font-bold text-white outline-none border-b border-white/20 focus:border-blue-500 mb-4 pb-2" placeholder="Task Title...">
+            <div class="p-6 relative" style="border-bottom:1px solid var(--line); background:var(--inset);">
+                <button type="button" onclick="closeAllDrawers(); return false;" class="absolute top-4 right-6 z-[110] flex items-center justify-center transition" style="color:var(--t3); font-size:16px; width:28px; height:28px; border-radius:2px; background:var(--panel); border:1px solid var(--line);">✕</button>
+                <h3 class="ge-label mb-3" id="t-drawer-headline">Task details</h3>
+                <input type="text" id="t-title" required class="w-full bg-transparent outline-none mb-4 pb-2" style="font-family:'Archivo',sans-serif; font-size:22px; font-weight:700; color:var(--t1); border-bottom:1px solid var(--line);" placeholder="Task title...">
                 <div class="flex gap-2">
-                    <button type="button" onclick="document.getElementById('t-status').value='Complete'" class="bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-bold px-3 py-1.5 rounded-md hover:bg-green-500/30 transition"><i class="fa-solid fa-check mr-1"></i> Complete</button>
-                    <select id="t-status" class="bg-white/10 text-white text-xs font-bold px-3 py-1.5 rounded-md border border-white/10 outline-none"><option value="Not Started">Not Started</option><option value="In Progress">In Progress</option><option value="Blocked">Blocked</option><option value="Complete">Complete</option></select>
+                    <button type="button" onclick="document.getElementById('t-status').value='Complete'" class="btn text-xs" style="background:transparent; border:1px solid var(--pos); color:var(--pos);"><i class="fa-solid fa-check mr-1"></i>Complete</button>
+                    <select id="t-status" class="glass-input" style="width:auto; font-size:12px; font-weight:600; padding:0 12px;"><option value="Not Started">Not Started</option><option value="In Progress">In Progress</option><option value="Blocked">Blocked</option><option value="Complete">Complete</option></select>
                 </div>
             </div>
             <div class="p-6 space-y-6 flex-1">
                 <div class="grid grid-cols-2 gap-4">
                     <div id="t-client-container" class="relative">
-                        <label class="modal-label">Client Name(s)</label>
+                        <label class="modal-label">Client name(s)</label>
                         <div id="t-client-display" class="glass-input cursor-pointer flex justify-between items-center" onclick="document.getElementById('t-client-dropdown').classList.toggle('hidden')">
-                            <span id="t-client-text" class="truncate text-gray-300">Select clients...</span>
-                            <i class="fa-solid fa-chevron-down text-[10px] opacity-50"></i>
+                            <span id="t-client-text" class="truncate" style="color:var(--t2);">Select clients...</span>
+                            <i class="fa-solid fa-chevron-down text-[10px]" style="opacity:0.5;"></i>
                         </div>
-                        <div id="t-client-dropdown" class="hidden absolute top-[calc(100%+4px)] left-0 w-full bg-slate-800 border border-white/10 rounded-lg p-2 max-h-48 overflow-y-auto z-[100] shadow-2xl">
-                            <label class="flex items-center gap-3 p-2 hover:bg-white/5 rounded cursor-pointer border-b border-white/10 mb-1 transition">
-                                <input type="checkbox" id="t-client-all" class="row-checkbox" onchange="toggleAllTaskClients(this)"> 
-                                <span class="text-sm font-bold text-white">Select All</span>
+                        <div id="t-client-dropdown" class="hidden absolute top-[calc(100%+4px)] left-0 w-full p-2 max-h-48 overflow-y-auto z-[100]" style="background:var(--panel); border:1px solid var(--line); border-radius:3px; box-shadow:0 12px 32px rgba(0,0,0,0.3);">
+                            <label class="flex items-center gap-3 p-2 rounded cursor-pointer mb-1 transition" style="border-bottom:1px solid var(--line);">
+                                <input type="checkbox" id="t-client-all" class="row-checkbox" onchange="toggleAllTaskClients(this)">
+                                <span class="text-sm" style="font-weight:600; color:var(--t1);">Select all</span>
                             </label>
                             <div id="t-client-list-container" class="space-y-1">
                                 </div>
@@ -2636,26 +2640,28 @@
                     </div>
                     <div><label class="modal-label">Stage</label><select id="t-stage" class="glass-input"><option value="Onboarding">Onboarding</option><option value="Camp. Building">Camp. Building</option><option value="Camp. Learning">Camp. Learning</option><option value="Optimizing">Optimizing</option><option value="Offboarding">Offboarding</option></select></div>
                     <div><label class="modal-label">Assignee</label><input type="text" id="t-assignee" required class="glass-input" placeholder="John Doe"></div>
-                    <div><label class="modal-label">Task Type</label><select id="t-type" class="glass-input"><option value="One-off">One-off</option><option value="Recurring">Recurring</option><option value="Checklist">Checklist</option><option value="Milestone">Milestone</option><option value="Client Request">Client Request</option></select></div>
-                    <div class="col-span-2"><label class="modal-label">Due Date</label><input type="date" id="t-due" class="glass-input"></div>
-                    <label class="col-span-2 flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+                    <div><label class="modal-label">Task type</label><select id="t-type" class="glass-input"><option value="One-off">One-off</option><option value="Recurring">Recurring</option><option value="Checklist">Checklist</option><option value="Milestone">Milestone</option><option value="Client Request">Client Request</option></select></div>
+                    <div class="col-span-2"><label class="modal-label">Due date</label><input type="date" id="t-due" class="glass-input"></div>
+                    <label class="col-span-2 flex items-start gap-2 text-sm cursor-pointer" style="color:var(--t2);">
                         <input type="checkbox" id="t-hidden" class="row-checkbox mt-0.5">
-                        <span><i class="fa-solid fa-eye-slash text-amber-400/80 mr-1"></i>Hide from client
-                            <span class="block text-[11px] text-gray-500">Stays on our board. It won't show in their portal, their work summary or their weekly report.</span></span>
+                        <span><i class="fa-solid fa-eye-slash mr-1" style="color:var(--warn);"></i>Hide from client
+                            <span class="block text-[11px]" style="color:var(--t3);">Stays on our board. It won't show in their portal, their work summary or their weekly report.</span></span>
                     </label>
                 </div>
-                <div class="bg-black/20 border border-white/5 rounded-xl p-5 relative overflow-hidden">
-                    <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-400 to-purple-500"></div>
-                    <div class="flex justify-between items-start mb-4"><h3 class="text-sm font-bold text-white flex items-center gap-2"><i class="fa-solid fa-calculator text-blue-400"></i> Priority Engine</h3><div class="text-right"><span class="text-2xl font-extrabold text-white" id="t-calc-score">0</span><span class="text-xs text-gray-500">/100</span></div></div>
+                <div class="p-5 relative overflow-hidden" style="background:var(--inset); border:1px solid var(--line); border-radius:3px; border-left:2px solid var(--goldLine);">
+                    <div class="flex justify-between items-start mb-4"><h3 class="ge-label" style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-calculator" style="color:var(--gold);"></i>Priority engine</h3><div class="text-right"><span class="ge-num" style="font-size:22px; font-weight:800; color:var(--t1);" id="t-calc-score">0</span><span class="text-xs" style="color:var(--t3);">/100</span></div></div>
                     <div class="space-y-4">
-                        <div><div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Priority (Impact)</span><span class="font-bold text-white" id="val-p">3</span></div><input type="range" id="t-p" min="1" max="5" value="3" class="w-full accent-blue-500" oninput="updateTaskScore()"></div>
-                        <div><div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Urgency (Time)</span><span class="font-bold text-white" id="val-u">3</span></div><input type="range" id="t-u" min="1" max="5" value="3" class="w-full accent-purple-500" oninput="updateTaskScore()"></div>
-                        <div><div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Effort (1=Easy, 5=Hard)</span><span class="font-bold text-white" id="val-e">3</span></div><input type="range" id="t-e" min="1" max="5" value="3" class="w-full accent-yellow-500" oninput="updateTaskScore()"></div>
+                        <div><div class="flex justify-between text-xs mb-1"><span style="color:var(--t2);">Priority (Impact)</span><span class="ge-num" style="font-weight:600; color:var(--t1);" id="val-p">3</span></div><input type="range" id="t-p" min="1" max="5" value="3" class="w-full" style="accent-color:var(--gold);" oninput="updateTaskScore()"></div>
+                        <div><div class="flex justify-between text-xs mb-1"><span style="color:var(--t2);">Urgency (Time)</span><span class="ge-num" style="font-weight:600; color:var(--t1);" id="val-u">3</span></div><input type="range" id="t-u" min="1" max="5" value="3" class="w-full" style="accent-color:var(--gold);" oninput="updateTaskScore()"></div>
+                        <div><div class="flex justify-between text-xs mb-1"><span style="color:var(--t2);">Effort (1=Easy, 5=Hard)</span><span class="ge-num" style="font-weight:600; color:var(--t1);" id="val-e">3</span></div><input type="range" id="t-e" min="1" max="5" value="3" class="w-full" style="accent-color:var(--gold);" oninput="updateTaskScore()"></div>
                     </div>
                 </div>
                 <div><label class="modal-label">Notes</label><textarea id="t-notes" class="glass-input min-h-[100px]"></textarea></div>
             </div>
-            <div class="p-6 border-t border-white/10 bg-white/5 flex flex-col gap-3"><button type="submit" id="t-save-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg shadow-lg">Save Task</button><button type="button" id="t-delete-btn" onclick="deleteTask()" class="w-full bg-red-500/10 text-red-400 hover:bg-red-500/20 font-bold py-2 rounded-lg hidden">Delete Task</button></div>
+            <div class="p-6 flex flex-col gap-3" style="border-top:1px solid var(--line); background:var(--inset);">
+                <button type="submit" id="t-save-btn" class="btn-primary btn text-sm w-full">Save task</button>
+                <button type="button" id="t-delete-btn" onclick="deleteTask()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--neg); color:var(--neg);">Delete task</button>
+            </div>
         </form>
 
         <form id="cp-lead-drawer" onsubmit="saveCpLead(event)" class="side-drawer p-0">
@@ -2803,10 +2809,10 @@
             <div class="glass p-8 w-full max-w-lg mx-4">
                 <div class="flex justify-between items-start mb-6">
                     <div>
-                        <h3 class="text-2xl font-bold text-white">Edit Client</h3>
-                        <p class="text-xs text-gray-400 mt-1">Update details for <span id="edit-client-current-name" class="text-white font-bold">this client</span>.</p>
+                        <h3 class="ge-title" style="font-size:20px;">edit client.</h3>
+                        <p style="color:var(--t2); font-size:12px; margin-top:4px;">Update details for <span id="edit-client-current-name" style="color:var(--t1); font-weight:600;">this client</span>.</p>
                     </div>
-                    <button onclick="document.getElementById('edit-client-modal').style.display='none'" class="text-gray-400 hover:text-white text-xl">✕</button>
+                    <button onclick="document.getElementById('edit-client-modal').style.display='none'" style="color:var(--t3); font-size:20px; line-height:1;">✕</button>
                 </div>
 
                 <form id="edit-client-form" onsubmit="saveClientEdits(event)" class="space-y-4">
@@ -2817,7 +2823,7 @@
                         <div>
                             <label class="modal-label">Business Name</label>
                             <input type="text" id="edit-client-name" class="glass-input" required>
-                            <p class="text-[10px] text-amber-400/80 mt-1">Renaming also updates tasks, health, check-ins and reports.</p>
+                            <p class="text-[10px] mt-1" style="color:var(--warn);">Renaming also updates tasks, health, check-ins and reports.</p>
                         </div>
                         <div>
                             <label class="modal-label">Contact First Name</label>
@@ -2952,9 +2958,9 @@
                         </div>
                     </div>
 
-                    <div class="pt-4 border-t border-white/10 mt-4 flex gap-3">
-                        <button type="button" onclick="document.getElementById('edit-client-modal').style.display='none'" class="glass-pill justify-center px-6">Cancel</button>
-                        <button type="submit" id="btn-save-client-edits" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition">Save Changes</button>
+                    <div class="pt-4 mt-4 flex gap-3" style="border-top:1px solid var(--line);">
+                        <button type="button" onclick="document.getElementById('edit-client-modal').style.display='none'" class="btn-secondary btn text-sm justify-center px-6">Cancel</button>
+                        <button type="submit" id="btn-save-client-edits" class="btn-primary btn text-sm flex-1 justify-center">Save changes</button>
                     </div>
                 </form>
             </div>

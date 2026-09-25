@@ -1,7 +1,50 @@
         // ================= GLOBAL STATE =================
         const wrapper = document.getElementById('midas-master');
         const supabaseClient = window.supabase.createClient(wrapper.dataset.supaUrl, wrapper.dataset.supaKey);
-        
+
+        // Line and bar charts draw in left to right the first time they appear. A clip that
+        // widens across the plot area, rather than Chart.js's own grow-from-the-axis
+        // animation, which is switched off for those charts so the two don't fight. The
+        // timer starts on the first frame the chart is actually visible, so a chart built
+        // on a hidden tab still animates when that tab is opened. Doughnuts keep Chart.js's
+        // own sweep. Registered globally, so every chart in the app gets it.
+        (function registerChartReveal() {
+            if (!window.Chart) return;
+            const DURATION = 900;
+            const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const wipes = type => type === 'line' || type === 'bar';
+            Chart.register({
+                id: 'geReveal',
+                beforeInit(chart) {
+                    if (reduced || !wipes(chart.config.type)) { chart.$geRevealDone = true; return; }
+                    chart.config.options.animation = false;
+                },
+                afterDestroy(chart) { chart.$geRevealDone = true; },
+                beforeDatasetsDraw(chart) {
+                    chart.$geRevealClipped = false;
+                    if (chart.$geRevealDone) return;
+                    const area = chart.chartArea;
+                    if (!area || area.right - area.left <= 0 || !chart.canvas || chart.canvas.offsetParent === null) return;
+                    const now = performance.now();
+                    if (chart.$geRevealStart == null) chart.$geRevealStart = now;
+                    const t = Math.min(1, (now - chart.$geRevealStart) / DURATION);
+                    const eased = 1 - Math.pow(1 - t, 3);
+                    const ctx = chart.ctx;
+                    ctx.save();
+                    ctx.beginPath();
+                    // Full canvas height, so points and bar tops at the edge of the plot aren't cut
+                    ctx.rect(0, 0, area.left + (area.right - area.left) * eased, chart.height);
+                    ctx.clip();
+                    chart.$geRevealClipped = true;
+                    if (t < 1) requestAnimationFrame(() => { if (!chart.$geRevealDone) chart.draw(); });
+                    else chart.$geRevealDone = true;
+                },
+                afterDatasetsDraw(chart) {
+                    if (chart.$geRevealClipped) { chart.ctx.restore(); chart.$geRevealClipped = false; }
+                }
+            });
+        })();
+
         let currentUserRole = 'pending'; 
         let currentUserName = 'User';
         let clientEmail = '';
@@ -851,30 +894,31 @@ function cpTasksForClient() {
 // colour is the only thing distinguishing what they owe us from what we owe them.
 function cpOwnerBadge(t) {
     return cpTaskIsClients(t)
-        ? '<span class="text-[9px] uppercase tracking-widest font-bold text-amber-400 shrink-0"><span class="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1 align-middle"></span>Your to-do</span>'
-        : '<span class="text-[9px] uppercase tracking-widest font-bold text-blue-400 shrink-0"><span class="inline-block w-2 h-2 rounded-full bg-blue-400 mr-1 align-middle"></span>We\'re handling it</span>';
+        ? '<span class="ge-label shrink-0" style="color:var(--gold);"><span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--gold); margin-right:5px; vertical-align:middle;"></span>Your to-do</span>'
+        : '<span class="ge-label shrink-0" style="color:var(--t3);"><span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--t3); margin-right:5px; vertical-align:middle;"></span>We\'re handling it</span>';
 }
 
 function cpDueHtml(t) {
     if (!t.due) return '';
     const overdue = t.status !== 'Complete' && t.due < new Date().toISOString().split('T')[0];
-    return `<span class="${overdue ? 'text-red-400' : 'text-gray-500'} text-xs whitespace-nowrap">${overdue ? 'Overdue &middot; ' : 'Due '}${t.due}</span>`;
+    return `<span class="ge-num text-xs" style="color:var(${overdue ? '--neg' : '--t2'}); white-space:nowrap;">${overdue ? 'Overdue &middot; ' : 'Due '}${t.due}</span>`;
 }
 
 function cpDoneButtonHtml(t) {
-    return `<button onclick="cpCompleteTask('${escapeAttr(t.id)}')" class="shrink-0 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg transition">
-        <i class="fa-solid fa-check mr-1"></i> Done
+    return `<button onclick="cpCompleteTask('${escapeAttr(t.id)}')" class="btn text-xs shrink-0" style="background:var(--pos); color:var(--goldInk);">
+        <i class="fa-solid fa-check mr-1"></i>Done
     </button>`;
 }
 
 function cpTaskRowHtml(t, actionable) {
     // Notes are where the internal detail lives, so only the title crosses over
-    return `<div class="glass px-5 py-4 flex items-center justify-between gap-4 border-l-4 ${cpTaskIsClients(t) ? 'border-amber-400' : 'border-blue-400'}">
+    const statusColor = t.status === 'In Progress' ? '--t2' : t.status === 'Blocked' ? '--warn' : '--t3';
+    return `<div class="glass px-5 py-4 flex items-center justify-between gap-4" style="border-left:2px solid var(${cpTaskIsClients(t) ? '--goldLine' : '--line'});">
         <div class="min-w-0">
-            <p class="text-sm font-bold ${t.status === 'Complete' ? 'text-gray-500 line-through' : 'text-white'} truncate">${escapeAttr(stripSlashEscapes(t.title))}</p>
-            <div class="flex items-center gap-3 mt-1">
+            <p style="font-size:13.5px; font-weight:450; ${t.status === 'Complete' ? 'color:var(--t3); text-decoration:line-through;' : 'color:var(--t1);'}" class="truncate">${escapeAttr(stripSlashEscapes(t.title))}</p>
+            <div class="flex items-center gap-3 mt-1.5">
                 ${cpOwnerBadge(t)}
-                <span class="text-[10px] uppercase tracking-widest ${t.status === 'In Progress' ? 'text-blue-400' : t.status === 'Blocked' ? 'text-amber-400' : 'text-gray-500'}">${escapeAttr(t.status || 'Not Started')}</span>
+                <span class="ge-label" style="color:var(${statusColor});">${escapeAttr(t.status || 'Not Started')}</span>
                 ${cpDueHtml(t)}
             </div>
         </div>
@@ -907,27 +951,27 @@ function renderCpTaskBoard(all) {
     // Same columns as the internal board, so a conversation about a task means the same
     // thing on both sides of the screen
     const columns = [
-        ['Not Started', 'text-gray-400'],
-        ['In Progress', 'text-blue-400'],
-        ['Blocked',     'text-amber-400'],
-        ['Complete',    'text-emerald-400']
+        ['Not Started', '--t3'],
+        ['In Progress', '--t2'],
+        ['Blocked',     '--warn'],
+        ['Complete',    '--pos']
     ];
 
     board.innerHTML = columns.map(([status, colour]) => {
         const rows = all.filter(t => (t.status || 'Not Started') === status);
 
         const cards = rows.length
-            ? rows.map(t => `<div class="glass p-4 border-l-4 ${cpTaskIsClients(t) ? 'border-amber-400' : 'border-blue-400'}">
+            ? rows.map(t => `<div class="glass p-4" style="border-left:2px solid var(${cpTaskIsClients(t) ? '--goldLine' : '--line'});">
                    <div class="flex justify-between items-start gap-2 mb-2">${cpOwnerBadge(t)}${cpDueHtml(t)}</div>
-                   <p class="font-bold text-white text-sm leading-snug ${t.status === 'Complete' ? 'line-through opacity-60' : ''}">${escapeAttr(stripSlashEscapes(t.title))}</p>
+                   <p style="font-size:13px; font-weight:450; line-height:1.4; ${t.status === 'Complete' ? 'color:var(--t3); text-decoration:line-through;' : 'color:var(--t1);'}">${escapeAttr(stripSlashEscapes(t.title))}</p>
                    ${cpTaskIsClients(t) && t.status !== 'Complete' ? `<div class="mt-3">${cpDoneButtonHtml(t)}</div>` : ''}
                </div>`).join('')
-            : '<p class="text-xs text-gray-600 italic px-1">Nothing here.</p>';
+            : '<p class="text-xs italic px-1" style="color:var(--t3);">Nothing here.</p>';
 
         return `<div class="space-y-3">
             <div class="flex items-center justify-between px-1">
-                <h4 class="text-[10px] font-bold uppercase tracking-widest ${colour}">${status}</h4>
-                <span class="text-[10px] text-gray-600">${rows.length}</span>
+                <h4 class="ge-label" style="color:var(${colour});">${status}</h4>
+                <span class="ge-label" style="color:var(--t3);">${rows.length}</span>
             </div>
             ${cards}
         </div>`;
@@ -1088,10 +1132,10 @@ window.renderCpSupport = function() {
     const cal = document.getElementById('cp-support-calendar');
     if (cal) {
         cal.innerHTML = CP_SUPPORT_CALENDAR_URL
-            ? `<div class="w-full rounded-lg overflow-hidden border border-white/10 bg-white" style="height:60vh">
+            ? `<div class="w-full rounded-lg overflow-hidden bg-white" style="height:60vh; border:1px solid var(--line);">
                    <iframe src="${escapeAttr(prefillFormUrl(CP_SUPPORT_CALENDAR_URL))}" class="w-full h-full" frameborder="0"></iframe>
                </div>`
-            : `<p class="text-sm text-gray-500 italic">Booking isn't set up yet — send a request instead and we'll come back to you with times.</p>`;
+            : `<p class="text-sm italic" style="color:var(--t3);">Booking isn't set up yet — send a request instead and we'll come back to you with times.</p>`;
     }
 
     const list = document.getElementById('cp-support-open');
@@ -1104,17 +1148,17 @@ window.renderCpSupport = function() {
         t.client_visible !== false);
 
     if (!open.length) {
-        list.innerHTML = '<p class="text-sm text-gray-500 italic px-2">Nothing open. Anything you send will show here until it\'s done.</p>';
+        list.innerHTML = '<p class="text-sm italic px-1" style="color:var(--t3);">Nothing open. Anything you send will show here until it\'s done.</p>';
         return;
     }
 
     list.innerHTML = open.map(t => `
         <div class="glass px-5 py-4 flex items-center justify-between gap-4">
             <div class="min-w-0">
-                <p class="text-sm font-bold text-white truncate">${escapeAttr(stripSlashEscapes(t.title))}</p>
-                <p class="text-xs text-gray-500 mt-1">Sent ${t.updated_at ? new Date(t.updated_at).toLocaleDateString() : 'recently'}</p>
+                <p style="font-size:13.5px; font-weight:450; color:var(--t1);" class="truncate">${escapeAttr(stripSlashEscapes(t.title))}</p>
+                <p class="text-xs mt-1" style="color:var(--t3);">Sent ${t.updated_at ? new Date(t.updated_at).toLocaleDateString() : 'recently'}</p>
             </div>
-            <span class="shrink-0 text-[10px] uppercase tracking-widest ${t.status === 'In Progress' ? 'text-blue-400' : 'text-gray-500'}">${escapeAttr(t.status || 'Not Started')}</span>
+            <span class="ge-label shrink-0" style="color:var(${t.status === 'In Progress' ? '--t2' : '--t3'});">${escapeAttr(t.status || 'Not Started')}</span>
         </div>`).join('');
 };
 
@@ -2508,8 +2552,8 @@ function weeklyCheckinFormHtml(suffix) {
     const sourceRows = CHECKIN_SOURCES.map(s => `
                 <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_6.5rem] gap-2 items-center">
                     <div class="min-w-0">
-                        <span class="text-sm text-white">${s.label}</span>
-                        ${s.hint ? `<span class="block text-[11px] text-gray-500 leading-tight">${s.hint}</span>` : ''}
+                        <span class="text-sm" style="color:var(--t1);">${s.label}</span>
+                        ${s.hint ? `<span class="block text-[11px] leading-tight" style="color:var(--t3);">${s.hint}</span>` : ''}
                     </div>
                     <input type="number" min="0" step="1" inputmode="numeric" id="wc-src-${s.key}-jobs-${suffix}" class="glass-input" placeholder="0"
                         aria-label="${s.label}: jobs closed" value="${escapeAttr(cellVal(s.key, 'closes'))}" oninput="updateCheckinSourceTotal('${suffix}')">
@@ -2526,20 +2570,20 @@ function weeklyCheckinFormHtml(suffix) {
             <div>
                 <label class="modal-label">Jobs closed and revenue, by where the customer came from</label>
                 <div class="space-y-2 mt-1">
-                    <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_6.5rem] gap-2 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                    <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_6.5rem] gap-2 ge-label">
                         <span>Came from</span><span>Jobs</span><span>Revenue</span>
                     </div>
                     ${sourceRows}
-                    <p id="wc-src-total-${suffix}" class="text-xs text-gray-400 pt-1"></p>
+                    <p id="wc-src-total-${suffix}" class="text-xs pt-1" style="color:var(--t2);"></p>
                 </div>
             </div>
             <div>
                 <label class="modal-label">Leads that found you through the ads but came in another way</label>
-                <p class="text-[11px] text-gray-500 mb-2 -mt-1">Someone who called, walked in or used your website, but told you they'd seen the ads. We can't track these automatically, so this is the only way they get counted.</p>
+                <p class="text-[11px] mb-2 -mt-1" style="color:var(--t3);">Someone who called, walked in or used your website, but told you they'd seen the ads. We can't track these automatically, so this is the only way they get counted.</p>
                 <input type="number" min="0" step="1" id="wc-indirect-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('indirect_leads'))}">
             </div>
-            <p id="wc-error-${suffix}" class="text-sm text-red-400 hidden"></p>
-            <button id="wc-submit-${suffix}" onclick="submitWeeklyCheckin('${suffix}')" class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold py-3 rounded-lg transition">
+            <p id="wc-error-${suffix}" class="text-sm hidden" style="color:var(--neg);"></p>
+            <button id="wc-submit-${suffix}" onclick="submitWeeklyCheckin('${suffix}')" class="btn-primary btn text-sm w-full">
                 ${existing ? 'Update this week' : 'Submit'}
             </button>
         </div>`;
@@ -2570,7 +2614,7 @@ window.renderCpReports = function() {
         .filter(r => r.html_body || r.report_body);
 
     if (!mine.length) {
-        list.innerHTML = '<p class="text-sm text-gray-500 italic px-2">No reports yet — your first one will appear here.</p>';
+        list.innerHTML = '<p class="text-sm italic px-1" style="color:var(--t3);">No reports yet — your first one will appear here.</p>';
         return;
     }
 
@@ -2582,11 +2626,11 @@ window.renderCpReports = function() {
 
         return `<div class="glass px-5 py-4 flex items-center justify-between gap-4">
             <div class="min-w-0">
-                <p class="text-sm font-bold text-white">${escapeAttr(date)}</p>
-                ${snippet ? `<p class="text-xs text-gray-400 mt-1 truncate">${escapeAttr(stripSlashEscapes(snippet))}</p>` : ''}
+                <p style="font-size:13.5px; font-weight:450; color:var(--t1);">${escapeAttr(date)}</p>
+                ${snippet ? `<p class="text-xs mt-1 truncate" style="color:var(--t2);">${escapeAttr(stripSlashEscapes(snippet))}</p>` : ''}
             </div>
-            <button onclick="openCpReport('${escapeAttr(r.id)}')" class="shrink-0 text-sm bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 font-bold py-2 px-4 rounded-lg transition">
-                <i class="fa-solid fa-eye mr-1"></i> View
+            <button onclick="openCpReport('${escapeAttr(r.id)}')" class="btn-secondary btn text-xs shrink-0">
+                <i class="fa-solid fa-eye mr-1"></i>View
             </button>
         </div>`;
     }).join('');
@@ -2639,13 +2683,13 @@ window.renderWeeklyCheckin = function() {
 
     const weeks = checkinsByWeek(currentActiveClient);
     if (!weeks.length) {
-        history.innerHTML = '<p class="text-sm text-gray-500 italic px-2">Nothing yet — this week will be the first.</p>';
+        history.innerHTML = '<p class="text-sm italic px-1" style="color:var(--t3);">Nothing yet — this week will be the first.</p>';
         return;
     }
 
     const cell = (reported, value) => reported
-        ? `<span class="font-bold text-white">${value}</span>`
-        : '<span class="text-gray-600">&mdash;</span>';
+        ? `<span class="ge-num" style="font-weight:600; color:var(--t1);">${value}</span>`
+        : '<span style="color:var(--t3);">&mdash;</span>';
 
     const num = v => v !== null && v !== undefined;
 
@@ -2656,10 +2700,10 @@ window.renderWeeklyCheckin = function() {
         // Who reported what, so a week that came in low is obviously one person short
         // rather than a bad week. Only worth showing once more than one person replied.
         const breakdown = w.contributors.length < 2 ? '' : `
-            <div class="w-full border-t border-white/5 mt-2 pt-2 space-y-1">
+            <div class="w-full mt-2 pt-2 space-y-1" style="border-top:1px solid var(--line);">
                 ${w.contributors.map(c => `
-                    <div class="flex flex-wrap justify-between gap-x-4 text-[11px] text-gray-500">
-                        <span>${escapeAttr(stripSlashEscapes(c.contact_name || c.contact_phone || 'Unknown'))}${c.source === 'portal' ? '' : ' <span class="opacity-60">(text)</span>'}</span>
+                    <div class="flex flex-wrap justify-between gap-x-4 text-[11px]" style="color:var(--t3);">
+                        <span>${escapeAttr(stripSlashEscapes(c.contact_name || c.contact_phone || 'Unknown'))}${c.source === 'portal' ? '' : ' <span style="opacity:0.6;">(text)</span>'}</span>
                         <span>
                             ${num(c.estimates_count) ? c.estimates_count + ' est' : ''}
                             ${num(c.closes_count) ? ' &middot; ' + c.closes_count + ' closed' : ''}
@@ -2670,13 +2714,13 @@ window.renderWeeklyCheckin = function() {
             </div>`;
 
         return `<div class="glass px-4 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm">
-            <span class="text-gray-400 whitespace-nowrap">${weekRangeLabel(w.week_start)}</span>
+            <span class="ge-num whitespace-nowrap" style="color:var(--t2);">${weekRangeLabel(w.week_start)}</span>
             <div class="flex flex-wrap gap-x-6 gap-y-1">
-                <span class="text-gray-500">Estimates ${cell(w.reportedEstimates, w.estimates_count)}</span>
-                <span class="text-gray-500">Closed ${cell(w.reportedCloses, w.closes_count)}</span>
-                <span class="text-gray-500">Revenue ${cell(w.reportedRevenue, money0(w.revenue_total))}</span>
-                ${w.reportedSources ? `<span class="text-gray-500">From Google ${cell(true, `${w.google_closes} · ${money0(w.google_revenue)}`)}</span>` : ''}
-                <span class="text-gray-500">Ad-attributed ${cell(anyIndirect, indirect)}</span>
+                <span style="color:var(--t3);">Estimates ${cell(w.reportedEstimates, w.estimates_count)}</span>
+                <span style="color:var(--t3);">Closed ${cell(w.reportedCloses, w.closes_count)}</span>
+                <span style="color:var(--t3);">Revenue ${cell(w.reportedRevenue, money0(w.revenue_total))}</span>
+                ${w.reportedSources ? `<span style="color:var(--t3);">From Google ${cell(true, `${w.google_closes} · ${money0(w.google_revenue)}`)}</span>` : ''}
+                <span style="color:var(--t3);">Ad-attributed ${cell(anyIndirect, indirect)}</span>
             </div>
             ${breakdown}
         </div>`;
@@ -4025,7 +4069,7 @@ window.submitClientRequest = async function() {
 
         function populateTaskClientDropdown() {
             const container = document.getElementById('t-client-list-container'); if(!container) return;
-            container.innerHTML = globalClientsData.map(c => `<label class="flex items-center gap-3 p-2 hover:bg-white/5 rounded cursor-pointer transition"><input type="checkbox" class="row-checkbox t-client-cb" value="${escapeAttr(c.name)}" onchange="updateTaskClientDisplay()"> <span class="text-sm font-medium text-gray-300">${c.name}</span></label>`).join('');
+            container.innerHTML = globalClientsData.map(c => `<label class="flex items-center gap-3 p-2 rounded cursor-pointer transition" style="color:var(--t1);"><input type="checkbox" class="row-checkbox t-client-cb" value="${escapeAttr(c.name)}" onchange="updateTaskClientDisplay()"> <span class="text-sm" style="font-weight:500;">${c.name}</span></label>`).join('');
         }
 
         function toggleAllTaskClients(masterCb) { document.querySelectorAll('.t-client-cb').forEach(cb => cb.checked = masterCb.checked); updateTaskClientDisplay(); }
@@ -4033,10 +4077,10 @@ window.submitClientRequest = async function() {
         function updateTaskClientDisplay() {
             const checked = Array.from(document.querySelectorAll('.t-client-cb')).filter(cb => cb.checked);
             const display = document.getElementById('t-client-text'); const allCb = document.getElementById('t-client-all');
-            if (checked.length === 0) { display.innerText = "Select clients..."; display.classList.add('text-gray-300'); if(allCb) allCb.checked = false;}
-            else if (checked.length === document.querySelectorAll('.t-client-cb').length) { display.innerText = "All Clients Selected"; display.classList.remove('text-gray-300'); if(allCb) allCb.checked = true;}
-            else if (checked.length === 1) { display.innerText = checked[0].nextElementSibling.innerText; display.classList.remove('text-gray-300'); if(allCb) allCb.checked = false;}
-            else { display.innerText = `${checked.length} Clients Selected`; display.classList.remove('text-gray-300'); if(allCb) allCb.checked = false;}
+            if (checked.length === 0) { display.innerText = "Select clients..."; display.style.color = 'var(--t2)'; if(allCb) allCb.checked = false;}
+            else if (checked.length === document.querySelectorAll('.t-client-cb').length) { display.innerText = "All clients selected"; display.style.color = 'var(--t1)'; if(allCb) allCb.checked = true;}
+            else if (checked.length === 1) { display.innerText = checked[0].nextElementSibling.innerText; display.style.color = 'var(--t1)'; if(allCb) allCb.checked = false;}
+            else { display.innerText = `${checked.length} clients selected`; display.style.color = 'var(--t1)'; if(allCb) allCb.checked = false;}
         }
 
        function openTaskDrawer(id, fromClientPage = false) {
@@ -4060,11 +4104,11 @@ window.submitClientRequest = async function() {
 
     if(id==='new'){ 
         activeEditId=null;
-        document.getElementById('t-drawer-headline').innerText="New Task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
+        document.getElementById('t-drawer-headline').innerText="New task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
         if (clientToSet) checkTaskClientBox(clientToSet);
     } else { 
         const t=globalTasksData.find(x=>x.id===id);
-        if(!t) return; activeEditId=t.id; document.getElementById('t-drawer-headline').innerText="Edit Task"; document.getElementById('t-title').value=t.title; 
+        if(!t) return; activeEditId=t.id; document.getElementById('t-drawer-headline').innerText="Edit task"; document.getElementById('t-title').value=t.title; 
         if(t.client) checkTaskClientBox(t.client);
         document.getElementById('t-stage').value=t.stage||'Onboarding'; document.getElementById('t-assignee').value=t.assignee||''; document.getElementById('t-type').value=t.type||'One-off'; document.getElementById('t-due').value=t.due||'';
         document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden');
@@ -4074,7 +4118,7 @@ window.submitClientRequest = async function() {
     updateTaskScore(); document.getElementById('drawer-overlay').classList.add('show'); f.classList.add('open');
 }
         
-        function updateTaskScore(){ const p=parseInt(document.getElementById('t-p').value); const u=parseInt(document.getElementById('t-u').value); const e=parseInt(document.getElementById('t-e').value); document.getElementById('val-p').innerText=p; document.getElementById('val-u').innerText=u; document.getElementById('val-e').innerText=e; const s=Math.round(((p*0.4)+(u*0.4)+((6-e)*0.2))*20); const el=document.getElementById('t-calc-score'); el.innerText=s; el.className=`text-2xl font-extrabold ${s>75?'text-red-400':(s>50?'text-yellow-400':'text-blue-400')}`; }
+        function updateTaskScore(){ const p=parseInt(document.getElementById('t-p').value); const u=parseInt(document.getElementById('t-u').value); const e=parseInt(document.getElementById('t-e').value); document.getElementById('val-p').innerText=p; document.getElementById('val-u').innerText=u; document.getElementById('val-e').innerText=e; const s=Math.round(((p*0.4)+(u*0.4)+((6-e)*0.2))*20); const el=document.getElementById('t-calc-score'); el.innerText=s; el.style.color = `var(${s>75?'--neg':(s>50?'--warn':'--t1')})`; }
         
         async function saveTask(e){ 
             e.preventDefault(); 
