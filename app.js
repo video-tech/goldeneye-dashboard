@@ -2,6 +2,23 @@
         const wrapper = document.getElementById('midas-master');
         const supabaseClient = window.supabase.createClient(wrapper.dataset.supaUrl, wrapper.dataset.supaKey);
 
+        // Startup timings, printed once as a table in the console (look for [STARTUP]).
+        // Times are ms since the page began loading, so the first row shows how long the
+        // GHL page, the libraries and body.html/app.js took before this code even ran.
+        const geStartupMarks = [];
+        function geStartupMark(label) {
+            if (geStartupReport.done) return; // later refetches aren't startup
+            geStartupMarks.push({ step: label, at_ms: Math.round(performance.now()) });
+        }
+        function geStartupReport() {
+            if (geStartupReport.done) return;
+            geStartupReport.done = true;
+            const rows = geStartupMarks.map((m, i) => ({ ...m, step_ms: i ? m.at_ms - geStartupMarks[i - 1].at_ms : m.at_ms }));
+            console.log('[STARTUP] Golden Eye load timings (ms):');
+            console.table(rows);
+        }
+        geStartupMark('app.js running');
+
         // Line and bar charts draw in left to right the first time they appear. A clip that
         // widens across the plot area, rather than Chart.js's own grow-from-the-axis
         // animation, which is switched off for those charts so the two don't fight. The
@@ -324,16 +341,20 @@
                     clientEmail = session.user.email;
                     currentUserName = session.user.user_metadata?.full_name || "User";
                     
-                    const { data: profile } = await supabaseClient.from('user_profiles').select('role').eq('email', clientEmail).single();
-                    currentUserRole = profile?.role || 'pending';
+                    geStartupMark('signed in');
 
                     // user_client_access has a foreign key to user_profiles, so access
                     // can't be written until the person has actually signed up. That's
                     // what pre_approved_users is for — an invite made before the account
                     // exists — but nothing was applying it once they arrived, so an
                     // invited client signed in and sat on the pending screen forever.
-                    const { data: preApproved } = await supabaseClient
-                        .from('pre_approved_users').select('role, client_access').eq('email', clientEmail).maybeSingle();
+                    // The two lookups don't depend on each other, so they go together.
+                    const [{ data: profile }, { data: preApproved }] = await Promise.all([
+                        supabaseClient.from('user_profiles').select('role').eq('email', clientEmail).single(),
+                        supabaseClient.from('pre_approved_users').select('role, client_access').eq('email', clientEmail).maybeSingle()
+                    ]);
+                    currentUserRole = profile?.role || 'pending';
+                    geStartupMark('role checked');
 
                     if (preApproved && (currentUserRole === 'pending' || !profile)) {
                         currentUserRole = preApproved.role || currentUserRole;
@@ -412,18 +433,34 @@
                             });
                         }
                         
-                        await fetchAllGlobalData(globalAllowedClients);
-                        
+                        // The lifecycle catch-up (handoff tasks, auto-checks, stage advances) used
+                        // to run before anything was drawn, and it's several database round trips,
+                        // some once per client. It now runs after the first paint, and the page is
+                        // drawn again only if it actually changed something.
+                        await fetchAllGlobalData(globalAllowedClients, { deferCatchUp: true });
+                        geStartupMark('data loaded');
+
                         // Restore the last visited page from memory, or default to the goldeneye dashboard
                         const savedPage = localStorage.getItem('midas_current_page') || 'goldeneye';
-                        switchAppPage(savedPage); 
+                        switchAppPage(savedPage);
+                        geStartupMark('page shown');
+
+                        runLifecycleCatchUp().then(changed => {
+                            geStartupMark(changed ? 'catch-up done (changed data, redrawn)' : 'catch-up done (nothing changed)');
+                            geStartupReport();
+                            if (!changed) return;
+                            updateNavBadges();
+                            switchAppPage(localStorage.getItem('midas_current_page') || 'goldeneye');
+                        }).catch(err => console.error('[LIFECYCLE ENGINE] Catch-up after load failed:', err));
                     } else {
                         if (globalAllowedClients.length === 0) {
                             document.getElementById('auth-pending-view').classList.remove('hidden');
                         } else {
                             document.getElementById('client-portal-container').classList.remove('hidden');
                             await initClientPortal(globalAllowedClients);
+                            geStartupMark('portal shown');
                         }
+                        geStartupReport();
                     }
                 }
             } catch(e) {
@@ -570,7 +607,8 @@
             if (currentUserRole !== 'admin') clientLeadsQuery = clientLeadsQuery.in('client_name', allowedClients);
 
             const results = await Promise.allSettled([
-                supabaseClient.from('daily_reports').select('*'),
+                // Paged past the 1000-row cap; RLS still limits a client to their own rows
+                fetchAllRows('daily_reports'),
                 supabaseClient.from('tasks').select('*').in('client', allowedClients),
                 clientLeadsQuery,
                 supabaseClient.from('ad_approvals').select('*').in('client_name', allowedClients),
@@ -3312,11 +3350,43 @@ window.submitClientRequest = async function() {
         //                               ADMIN DASHBOARD LOGIC
         // =========================================================================================
 
-        async function fetchAllGlobalData(allowedClients) {
+        // Every row of a table, past PostgREST's per-request row cap (1000 here). The first
+        // page comes back with the total count; the remaining pages are then fetched together
+        // rather than one after another, so 3,600 rows cost two round trips, not four. Pages
+        // step by however many rows the server actually returned, so a lower cap can't make
+        // it skip rows, and they're ordered by a unique column so they can't overlap.
+        // `filter` narrows the query (e.g. q => q.in('client_name', names)).
+        // Resolves to the same { data, error } shape as a normal query.
+        async function fetchAllRows(table, { filter = q => q, orderBy = 'id' } = {}) {
+            const query = withCount => filter(supabaseClient.from(table)
+                .select('*', withCount ? { count: 'exact' } : undefined))
+                .order(orderBy, { ascending: true });
+            const first = await query(true).range(0, 999);
+            if (first.error) return first;
+            const rows = first.data || [];
+            const total = first.count ?? rows.length;
+            const step = rows.length;
+            if (!step || step >= total) return { data: rows, error: null };
+
+            const rest = [];
+            for (let from = step; from < total; from += step) rest.push(query(false).range(from, from + step - 1));
+            for (const p of await Promise.all(rest)) {
+                if (p.error) {
+                    console.error(`fetchAllRows(${table}): a page failed, returning ${rows.length} of ${total} rows:`, p.error);
+                    return { data: rows, error: p.error };
+                }
+                rows.push(...(p.data || []));
+            }
+            return { data: rows, error: null };
+        }
+
+        async function fetchAllGlobalData(allowedClients, { deferCatchUp = false } = {}) {
     let clientsQ = supabaseClient.from('clients').select('*');
     let healthQ = supabaseClient.from('client_health').select('*');
     let tasksQ = supabaseClient.from('tasks').select('*');
-    let adsQ = supabaseClient.from('daily_reports').select('*');
+    // Paged: PostgREST returns at most 1000 rows per request, and daily_reports passed that
+    // long ago, so a single select('*') silently handed back an arbitrary 1000 of them.
+    let adsQ = fetchAllRows('daily_reports');
     let crQ = supabaseClient.from('ad_approvals').select('*').order('created_at', { ascending: false });
     let seoQ = supabaseClient.from('seo_metrics').select('*');
     
@@ -3350,6 +3420,7 @@ window.submitClientRequest = async function() {
     }
 
     const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ, servicesQ, clientServicesQ, answersQ ]);
+    geStartupMark('15 tables loaded');
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
     
@@ -3430,15 +3501,39 @@ window.submitClientRequest = async function() {
             // it after the advance would leave it filed against a stage they've left.
             // Which onboarding steps apply to each client, before anything below reads it
             await loadOnboardingApplicability(globalClientsData.map(c => c.name));
+            geStartupMark('onboarding rules loaded');
 
-            if (currentUserRole === 'admin') {
+            // Only the first load defers this (see initApp): every other caller refetches
+            // after a change and renders straight after, so it still waits for the result.
+            if (!deferCatchUp) await runLifecycleCatchUp();
+
+            if (typeof updateNavBadges === 'function') updateNavBadges();
+        }
+
+        // Handoff tasks, automatic checks and stage advances, admin only. Runs are queued one
+        // behind another: the load-time run happens in the background now, and two runs at
+        // once could both decide a task was missing and insert it twice. Resolves to whether
+        // anything on screen changed, so the caller knows if it needs to draw again.
+        let geLifecycleQueue = Promise.resolve();
+        function lifecycleSnapshot() {
+            return globalTasksData.map(t => `${t.id}:${t.status}`).join('|') + '#' +
+                globalClientsData.map(c => `${c.id}:${c.current_stage}`).join('|');
+        }
+        function queueLifecycle(fn) {
+            const next = geLifecycleQueue.then(fn, fn);
+            geLifecycleQueue = next.catch(() => {});
+            return next;
+        }
+        function runLifecycleCatchUp() {
+            return queueLifecycle(async () => {
+                if (currentUserRole !== 'admin') return false;
+                const before = lifecycleSnapshot();
                 await reconcileOnboardingHandoffTasks();
                 // Before the stage advance, so a task Golden Eye just ticked off can move its client on
                 await runAutoChecks();
                 await autoAdvanceCompletedOnboarding();
-            }
-
-            if (typeof updateNavBadges === 'function') updateNavBadges();
+                return lifecycleSnapshot() !== before;
+            });
         }
 
         // Sidebar counts, next to Tasks / Accounts / Ad approvals — real numbers off the
@@ -3572,8 +3667,10 @@ window.submitClientRequest = async function() {
     const auditsPage = document.getElementById('page-audits'); if(auditsPage) auditsPage.classList.add('hidden');
     
     if (page === 'goldeneye') { 
-        document.getElementById('page-goldeneye').classList.remove('hidden'); 
-        setTimeout(() => renderGoldenEye(), 250); 
+        document.getElementById('page-goldeneye').classList.remove('hidden');
+        // Was a fixed 250 ms wait. The page is already unhidden above, so the charts can
+        // measure their size on the next tick; the wait only added to every dashboard load.
+        setTimeout(() => renderGoldenEye(), 0);
     }
     else if (page === 'tasks') { document.getElementById('page-tasks').classList.remove('hidden'); setTimeout(() => initTasksPage(), 50); } 
     else if (page === 'clients') { document.getElementById('page-clients').classList.remove('hidden'); setTimeout(() => initClientsPage(), 50); }
@@ -4012,7 +4109,7 @@ window.submitClientRequest = async function() {
             document.querySelectorAll('#page-tasks .kanban-col').forEach(c => {
                 sortableInstances.push(new Sortable(c, { group:'kanban', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
                     const id = e.item.getAttribute('data-id'); const nS = e.to.getAttribute('data-status'); const t = globalTasksData.find(x=>x.id==id);
-                    if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); if(await autoAdvanceCompletedOnboarding()) renderKanban(); }
+                    if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); if(await queueLifecycle(autoAdvanceCompletedOnboarding)) renderKanban(); }
                 }}));
             });
         }
