@@ -164,7 +164,15 @@
         }
 
         .dropdown-container { position: relative; }
-        .custom-dropdown-menu { position: absolute; top: calc(100% + 8px); right: 0; width: 240px; z-index: 100; display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; backdrop-filter: none; box-shadow: none; }
+        /* isolation:isolate forces this to be its own clean stacking-context root, so its
+           z-index is compared directly against page content instead of getting trapped
+           behind a static sibling somewhere in the ancestor chain (seen live on the
+           Accounts page client switcher: the menu had real content and z-index:100, but a
+           static, non-positioned tab button was still painting on top of it — a case
+           default stacking rules should not produce, and isolation is the standard,
+           safe fix regardless of the exact cause). box-shadow restored for the same
+           reason drawers/modals already carry one — content behind it needs a visible edge. */
+        .custom-dropdown-menu { position: absolute; top: calc(100% + 8px); right: 0; width: 240px; z-index: 500; isolation: isolate; display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; backdrop-filter: none; box-shadow: 0 12px 32px rgba(0,0,0,0.35); }
         .custom-dropdown-menu.show { display: block; animation: slideIn 0.2s ease-out; }
         .dropdown-item { padding: 0.8rem 1.25rem; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; border-radius: 2px; color: var(--t1); }
         .dropdown-item:hover { background: var(--inset); color: var(--gold); }
