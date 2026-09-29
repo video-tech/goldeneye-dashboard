@@ -586,7 +586,32 @@
             } else { filterPortalData(); }
         }
         
-        function toggleDropdown(id) { const el = document.getElementById(id); const isOpen = el.classList.contains('show'); document.querySelectorAll('.custom-dropdown-menu').forEach(m => m.classList.remove('show')); if(!isOpen) el.classList.add('show'); }
+        // position:fixed, computed from the trigger's real screen position, rather than
+        // the CSS's own position:absolute. A dropdown positioned absolute is only ever
+        // guaranteed to paint above content that shares its nearest ancestor stacking
+        // context — and on the Accounts page, .sticky-toolbar (position:sticky) sits
+        // between the client switcher and the page root, painting over the open menu
+        // even at z-index:500. position:fixed escapes that: it's placed relative to the
+        // viewport, immune to any ancestor's stacking, sticky or scroll behavior.
+        function toggleDropdown(id) {
+            const el = document.getElementById(id);
+            const isOpen = el.classList.contains('show');
+            document.querySelectorAll('.custom-dropdown-menu').forEach(m => m.classList.remove('show'));
+            if (isOpen) return;
+
+            el.classList.add('show');
+            const trigger = el.previousElementSibling;
+            if (trigger) {
+                const r = trigger.getBoundingClientRect();
+                el.style.position = 'fixed';
+                el.style.top = (r.bottom + 8) + 'px';
+                // Right-aligned to the trigger, matching every one of these dropdowns'
+                // existing `right:0` CSS convention; clamped so it can't run off the
+                // left edge of the viewport.
+                el.style.left = Math.max(8, r.right - el.offsetWidth) + 'px';
+                el.style.right = 'auto';
+            }
+        }
         
         window.onclick = (e) => { 
             if (!e.target.closest('.dropdown-container') && !e.target.closest('.fa-caret-down') && !e.target.closest('.fa-calendar')) { document.querySelectorAll('.custom-dropdown-menu, .sort-dropdown').forEach(m => m.classList.remove('show')); }
