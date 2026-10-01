@@ -8307,6 +8307,18 @@ async function buildChatSeoBriefing(clientName) {
      frame.src = 'https://video-tech.github.io/goldeneye-dashboard/snippets/3sixty-deck-estimator.html?v=' + Date.now();
  }
 
+ // The estimator posts {iframeHeight} on every render (notifyHeight in the snippet). Without
+ // this the frame stayed at body.html's fixed 1400px with scrolling off, so the single-column
+ // calculator (~3000px) was cut off at the bottom. Only our own frame's messages are honoured,
+ // and the height is bounds-checked since the payload comes from another document.
+ window.addEventListener('message', (e) => {
+     const frame = document.getElementById('cp-deckcalc-frame');
+     if (!frame || e.source !== frame.contentWindow) return;
+     const h = Number(e.data && e.data.iframeHeight);
+     if (!Number.isFinite(h) || h < 200 || h > 20000) return;
+     frame.style.height = Math.ceil(h) + 'px';
+ });
+
  // Position buckets, with the validated ordinal ramp for each theme
  function cpSeoRamp() {
      const light = document.getElementById('theme-wrapper')?.classList.contains('light-mode');
