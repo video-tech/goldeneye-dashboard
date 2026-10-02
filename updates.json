@@ -2,6 +2,14 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-02",
+      "area": "Security",
+      "title": "Client records are private to each client",
+      "what": "A client signed into the portal could read every client's record (retainer, payment status, emails, ad account) and could change or delete any of them. Each client now sees only their own record, and only admins can add, edit or delete clients. Admins, the client portal and the investor's view work as before.",
+      "note": "Members no longer see the Save and Log Payment buttons on the Payments tab, since only admins can change payment details. Overdue payments are still flagged on screen for everyone, and saved as overdue when an admin loads the dashboard.",
+      "action": "Run supabase/sql/clients_rls_tests.sql (all 8 must pass), then supabase/sql/clients_rls.sql"
+    },
+    {
       "date": "2026-09-16",
       "area": "SEO",
       "title": "Content ideas",

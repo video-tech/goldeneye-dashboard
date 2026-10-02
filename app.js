@@ -3455,8 +3455,12 @@ window.submitClientRequest = async function() {
         // If they are marked paid, but the deadline has passed...
         if (c.payment_status === 'paid' && c.payment_deadline && c.payment_deadline < todayStr) {
             c.payment_status = 'overdue'; // Instantly change it locally
-            // Silently update Supabase in the background so it stays accurate
-            supabaseClient.from('clients').update({ payment_status: 'overdue' }).eq('id', c.id).then();
+            // Write it back only for admins: since clients_rls.sql only admins can update
+            // clients, and anyone else's update would silently match 0 rows. This load runs
+            // for every signed-in user, portal clients included.
+            if (currentUserRole === 'admin') {
+                supabaseClient.from('clients').update({ payment_status: 'overdue' }).eq('id', c.id).then();
+            }
         }
         return c;
     });
@@ -9102,10 +9106,17 @@ window.renderClientPayments = function() {
             document.getElementById('edit-pay-since').value = clientData.client_since || '';
             document.getElementById('edit-pay-last').value = clientData.last_payment_date || '';
             document.getElementById('edit-pay-deadline').value = clientData.payment_deadline || '';
+
+            // Only admins can write clients (clients_rls.sql), so members don't get buttons
+            // that would report "Saved!" while changing nothing.
+            ['btn-save-payments', 'btn-quick-pay'].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) b.classList.toggle('hidden', currentUserRole !== 'admin');
+            });
         };
 
         window.saveClientPayments = async function() {
-            if (cSelectedAccount === "ALL") return;
+            if (cSelectedAccount === "ALL" || currentUserRole !== 'admin') return;
 
             const btn = document.getElementById('btn-save-payments');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
@@ -9911,7 +9922,7 @@ window.setLeaderboardMetric = function(metric) {
 };
 
 window.logQuickPayment = async function() {
-            if (cSelectedAccount === "ALL") return;
+            if (cSelectedAccount === "ALL" || currentUserRole !== 'admin') return;
             const btn = document.getElementById('btn-quick-pay');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
             btn.disabled = true;

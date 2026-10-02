@@ -367,6 +367,33 @@ and `morning-audit` share a hook, so the filter went in only after that function
   - **Order:** run the SQL, then deploy `client-summary`, which selects the column. Saving a task
     marked hidden before the SQL exists is refused rather than saved visible.
   - **Tests:** 6 PGlite checks.
+- **`clients` policies, fixed 2026-10-02** (`supabase/sql/clients_rls.sql`). This was the same bug as
+  `daily_reports`/`weekly_reports`/`tasks`, but worse. Five `authenticated` policies said `true`
+  for SELECT, INSERT (twice), UPDATE and DELETE, so any portal client could read every client's
+  retainer, payment status, emails and ad account id, and could edit or delete any client row.
+  - **Now:** `Admins manage all clients` (ALL, `current_user_is_admin()` on both using and with
+    check) and `Clients read their own client row` (SELECT, `client_row_visible(name)`), plus
+    `Investor Read Access` left untouched (the intentional investor exception, like
+    `Admin and Investor Task Access`).
+  - **Members** read through `user_client_access`, which `client_row_visible` covers. Nobody but an
+    admin writes. A non-admin UPDATE/DELETE silently matches 0 rows, and an INSERT gets 42501.
+  - **No recursion:** `client_row_visible()` reads `clients`, but it's SECURITY DEFINER owned by
+    postgres (the table owner, no FORCE RLS), so its inner read bypasses RLS.
+  - **app.js:** the auto-overdue `payment_status` write in `fetchAllGlobalData` used to run for
+    whoever was signed in. It's now admin-only, and the screen still shows overdue for everyone.
+    The Payments tab's Save / Log Payment buttons are hidden and guarded for non-admins.
+  - **Unaffected:** edge functions (service_role), Make (its connection can't be anon, since anon
+    never had a policy and the pull has always worked), the SECURITY DEFINER functions, the invoker
+    SEO RPCs (a client reads their own row), and the `daily_reports`/`tasks` policies that look
+    into `clients` (they only need rows this policy still shows).
+  - **Known limit:** the portal's daily_reports auto-match resolves ad account → client name
+    by reading `clients`, so a person matched only by `daily_reports.client_email`, with no
+    access row and not in `clients.client_email`, now gets the Meta account name. Nobody signed
+    in is in that position today. One 3Sixty daily_reports email isn't in its `client_email`.
+  - **Tests:** `clients_rls_tests.sql` applies the change in a rolled-back transaction and
+    simulates 8 JWTs: an access-row client, an email-fallback client, both, a member, a signed-in
+    user with no access, anon, the investor and an admin. All 8 pass in PGlite, and against the
+    old policies 7 fail (the control).
 - **`client_row_visible(text)`, added 2026-09-10** — the RLS helper every client-facing table
   added from here on should use. Wraps admin / `user_has_client_access()` / `client_email`
   fallback into one call so the fallback cannot be forgotten. See SEO measurement for why that
