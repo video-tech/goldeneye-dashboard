@@ -100,6 +100,25 @@
            title with a literal trailing period, replacing the old <h1>+<p> pair. */
         .ge-page-title { font-size: 27px; line-height: 1.2; text-wrap: balance; }
         .dash-roster-row:hover { background: var(--inset); }
+        /* Roster page */
+        .roster-grid { display: grid; grid-template-columns: minmax(0,1.6fr) 92px minmax(0,1.2fr) 120px 84px 96px 84px 96px; gap: 14px; align-items: center; }
+        .roster-row { padding: 13px 16px; border-top: 1px solid var(--line); cursor: pointer; }
+        .roster-row:hover { background: var(--inset); }
+        .roster-sort { cursor: pointer; user-select: none; }
+        .roster-sort:hover { color: var(--t1); }
+        .roster-seg { padding: 7px 13px; font-size: 12px; color: var(--t2); background: transparent; border: none; border-right: 1px solid var(--line); cursor: pointer; white-space: nowrap; }
+        .roster-seg:last-child { border-right: none; }
+        .roster-seg.on { background: var(--goldWash); color: var(--gold); }
+        .roster-chip { display: inline-block; padding: 2px 7px; border-radius: 2px; background: var(--inset); color: var(--t2); font-size: 11px; white-space: nowrap; }
+        #roster-drawer { max-width: 620px; }
+        .rd-section { padding: 20px 0; border-top: 1px solid var(--line); }
+        .rd-kv { display: grid; grid-template-columns: 140px minmax(0,1fr); gap: 6px 16px; font-size: 13px; }
+        .rd-kv dt { color: var(--t3); }
+        .rd-kv dd { color: var(--t1); margin: 0; overflow-wrap: anywhere; }
+        .rd-person { display: flex; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+        .rd-person:first-child { border-top: none; padding-top: 0; }
+        .rd-edit-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; background: var(--inset); border-radius: 3px; }
+        @media (max-width: 640px) { .rd-kv { grid-template-columns: 1fr; gap: 2px; } .rd-kv dd { margin-bottom: 8px; } .rd-edit-row { grid-template-columns: 1fr; } }
         .ge-search-row:hover { background: var(--inset); }
         .kanban-card:hover { border-color: var(--t3); }
         .ge-table-row:hover { background: var(--inset); }
@@ -507,7 +526,12 @@
                                     <span class="ge-label" style="font-size:11px;">02.</span>
                                     <span class="ge-title" style="font-size:15px;">active roster.</span>
                                 </h3>
-                                <span class="ge-label" style="background:var(--inset); padding:2px 9px; border-radius:2px;" id="dash-client-count">0 Clients</span>
+                                <div class="flex items-center gap-3">
+                                    <span class="ge-label" style="background:var(--inset); padding:2px 9px; border-radius:2px;" id="dash-client-count">0 Clients</span>
+                                    <!-- Admin only (toggled in renderGoldenEye): the roster page shows
+                                         contact details and private notes. -->
+                                    <button id="btn-roster-view-all" onclick="navTo('roster')" class="hidden ge-label" style="color:var(--gold); cursor:pointer;">View all &rarr;</button>
+                                </div>
                             </div>
                             <!-- Div-grid rows, not a <table> — matches the target design's
                                  fixed side columns (Stage/Health/MRR) with the account name
@@ -550,6 +574,50 @@
                             <div id="global-ai-output" class="hidden mt-4 pt-4 text-sm overflow-y-auto" style="border-top:1px solid var(--goldLine); color:var(--t2); max-height:340px;">
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Roster: every client, filterable, with a full profile panel (roster-drawer).
+                     Admin only — contacts and private notes live here. Rendered by renderRoster()
+                     in app.js from data fetchAllGlobalData already loads, plus client_profiles. -->
+                <div id="page-roster" class="p-4 md:p-8 space-y-6 hidden">
+                    <div class="glass" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+                        <div class="p-5" style="border-right:1px solid var(--line);">
+                            <div class="ge-label">Active MRR</div>
+                            <div class="ge-display ge-num" style="font-size:30px; margin-top:6px;" id="roster-stat-mrr">$0</div>
+                        </div>
+                        <div class="p-5" style="border-right:1px solid var(--line);">
+                            <div class="ge-label">Active</div>
+                            <div class="ge-display ge-num" style="font-size:30px; margin-top:6px; color:var(--pos);" id="roster-stat-active">0</div>
+                        </div>
+                        <div class="p-5" style="border-right:1px solid var(--line);">
+                            <div class="ge-label">Paused</div>
+                            <div class="ge-display ge-num" style="font-size:30px; margin-top:6px; color:var(--warn);" id="roster-stat-paused">0</div>
+                        </div>
+                        <div class="p-5">
+                            <div class="ge-label">Archived</div>
+                            <div class="ge-display ge-num" style="font-size:30px; margin-top:6px; color:var(--t3);" id="roster-stat-archived">0</div>
+                        </div>
+                    </div>
+
+                    <div class="glass p-5 md:p-6">
+                        <div class="flex flex-wrap items-center gap-3 mb-5">
+                            <div id="roster-status-filter" class="flex" style="border:1px solid var(--line); border-radius:3px; overflow:hidden;"></div>
+                            <select id="roster-service-filter" class="glass-input" style="width:auto; min-width:170px; padding-top:7px; padding-bottom:7px;" onchange="rosterSetService(this.value)"></select>
+                            <div style="display:flex; align-items:center; gap:9px; background:var(--inset); border:1px solid var(--line); border-radius:3px; padding:7px 12px; flex:1 1 200px; max-width:320px; margin-left:auto;">
+                                <i class="fa-solid fa-magnifying-glass" style="font-size:11px; color:var(--t3);"></i>
+                                <input type="text" id="roster-search" placeholder="Search clients or people…" autocomplete="off"
+                                       style="background:transparent; border:none; outline:none; color:var(--t1); font-family:inherit; font-size:12.5px; width:100%;"
+                                       oninput="rosterSetSearch(this.value)">
+                            </div>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <div style="min-width:900px; border:1px solid var(--line); border-radius:3px; overflow:hidden;">
+                                <div id="roster-head" class="ge-label roster-grid" style="padding:10px 16px;"></div>
+                                <div id="roster-list"></div>
+                            </div>
+                        </div>
+                        <p id="roster-empty" class="hidden text-sm" style="color:var(--t2); padding:24px 4px;">No clients match these filters.</p>
                     </div>
                 </div>
 
@@ -2495,6 +2563,32 @@
                 <div class="glass" style="overflow:hidden;">
                     <iframe id="cp-deckcalc-frame" title="Deck cost estimator" scrolling="no" style="width:100%; border:none; display:block; height:1400px;"></iframe>
                 </div>
+
+                <!-- Create a QuickBooks estimate from the deck above. Hidden until the deck-estimate
+                     edge function says this client's QuickBooks is connected (deckQbRefresh in
+                     app.js); until then the tab is exactly what it was. The deck comes from the
+                     calculator itself (postEstimateToParent), never re-typed here. -->
+                <div id="cp-deckcalc-qb" class="glass p-6 hidden">
+                    <h3 class="ge-title" style="font-size:16px;">Create a QuickBooks estimate</h3>
+                    <p style="color:var(--t2); font-size:13px; margin-top:6px;">Uses the deck above, at the top of its price range. Nothing is emailed to the customer; review and send it from QuickBooks.</p>
+                    <p id="cp-deckcalc-qb-deck" style="color:var(--t1); font-size:13px; margin-top:14px; margin-bottom:18px;">Waiting for the calculator…</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="modal-label">First name</label><input type="text" id="cp-qb-first" class="glass-input" autocomplete="off" maxlength="60"></div>
+                        <div><label class="modal-label">Last name</label><input type="text" id="cp-qb-last" class="glass-input" autocomplete="off" maxlength="60"></div>
+                        <div><label class="modal-label">Email</label><input type="email" id="cp-qb-email" class="glass-input" autocomplete="off" maxlength="254" placeholder="customer@email.com"></div>
+                        <div><label class="modal-label">Phone <span style="color:var(--t3);">(optional)</span></label><input type="tel" id="cp-qb-phone" class="glass-input" autocomplete="off" maxlength="40"></div>
+                        <div class="md:col-span-2"><label class="modal-label">Street address <span style="color:var(--t3);">(optional)</span></label><input type="text" id="cp-qb-address" class="glass-input" autocomplete="off" maxlength="200"></div>
+                        <div><label class="modal-label">City <span style="color:var(--t3);">(optional)</span></label><input type="text" id="cp-qb-city" class="glass-input" autocomplete="off" maxlength="100"></div>
+                        <div><label class="modal-label">ZIP <span style="color:var(--t3);">(optional)</span></label><input type="text" id="cp-qb-zip" class="glass-input" autocomplete="off" maxlength="10" inputmode="numeric"></div>
+                    </div>
+                    <p id="cp-qb-msg" class="text-sm hidden" style="margin-top:16px;"></p>
+                    <button id="cp-qb-create" onclick="deckQbCreate()" class="btn-primary btn text-sm" style="margin-top:16px;" disabled>Create QuickBooks estimate</button>
+
+                    <div id="cp-qb-history-wrap" class="hidden" style="margin-top:28px;">
+                        <h4 class="ge-label">Recent estimates</h4>
+                        <div id="cp-qb-history" style="margin-top:10px;"></div>
+                    </div>
+                </div>
             </div>
 
             <div id="cp-view-leaderboard" class="space-y-8 hidden">
@@ -2535,6 +2629,18 @@
 
                 <div id="kb-video-grid" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
             </div>
+        <!-- Client profile from the Roster page. Body is rendered by openRosterDrawer() in app.js. -->
+        <div id="roster-drawer" class="side-drawer p-6">
+            <div class="flex justify-between items-start gap-4 mb-2">
+                <div style="min-width:0;">
+                    <div class="ge-label" id="rd-eyebrow">Client</div>
+                    <h2 class="ge-title" id="rd-name" style="font-size:22px; margin-top:6px; overflow-wrap:anywhere;">client.</h2>
+                </div>
+                <button type="button" onclick="closeAllDrawers()" class="p-2" style="color:var(--t3); font-size:20px;">✕</button>
+            </div>
+            <div id="rd-body" class="flex-1"></div>
+        </div>
+
         <div id="health-drawer" class="side-drawer p-6">
             <div class="flex justify-between items-center mb-6">
                 <h2 class="ge-title" style="font-size:17px; display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-heart-pulse" style="color:var(--pos);"></i>update account health.</h2>
@@ -2860,12 +2966,14 @@
                             </select>
                         </div>
                         <div class="col-span-2">
-                            <label class="modal-label">Check-in Contacts</label>
-                            <div id="edit-client-contacts-list" class="space-y-2"></div>
-                            <button type="button" onclick="addContactRow()" class="mt-2 text-xs" style="color:var(--gold); font-weight:600;">
-                                <i class="fa-solid fa-plus mr-1"></i> Add contact
+                            <label class="modal-label">People</label>
+                            <!-- Contacts (owner, sales reps, website person…) and who gets the weekly
+                                 check-in text are edited on the client's Roster profile, the one place
+                                 that shows every field. This is a read-only summary. -->
+                            <div id="edit-client-people-summary" class="text-sm" style="color:var(--t2);"></div>
+                            <button type="button" onclick="openRosterFromEditClient()" class="mt-2 text-xs" style="color:var(--gold); font-weight:600;">
+                                Manage people &rarr;
                             </button>
-                            <p class="text-[10px] mt-1" style="color:var(--t3);">Everyone listed gets the weekly check-in text, and their replies are combined into one weekly figure for this client.</p>
                         </div>
                         <div>
                             <label class="modal-label">Meta Ad Account ID</label>

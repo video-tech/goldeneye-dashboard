@@ -1673,6 +1673,89 @@ stays null when no row has a value, so "not reported" still differs from a repor
 - **Text check-ins:** no breakdown (null). The SEO tab counts them as "source not given".
 - **Missing column:** if `closes_by_source` isn't in the database, the submit retries without
   it, so a client's totals are never lost to a schema that's behind.
+## Deck calculator → QuickBooks estimates (built 2026-10-01, NOT live yet)
+
+3Sixty's Deck Calculator tab gets a **Create QuickBooks estimate** panel: a rep builds the deck, enters
+the customer, clicks once, and an estimate lands in 3Sixty's QuickBooks with one line per priced item.
+The client-facing plan (what 3Sixty must supply) is claude.ai/code/artifact/dc852f18-0f20-4598-a696-84c490663274.
+
+- **Pieces:**
+  - **The calculator** (`snippets/3sixty-deck-estimator.html`) posts `{deckEstimate}` to this page on
+    every render: line items, totals, deck fields, notes. Only this copy does (`postEstimateToParent:
+    true`); the public GHL embeds send height only. **It is generated, never hand-edited:** the
+    source is `estimator.html` in the deck calculator folder beside this repo, and
+    `node build-ghl-embed.js` there writes this file. Commit it from here.
+  - **app.js** (`deckQbRefresh` / `deckQbCreate` / `deckQbLoadHistory`, after `ensureDeckCalcLoaded`):
+    the panel `#cp-deckcalc-qb` in body.html, hidden unless the function answers `ready` for the
+    current client. Messages are accepted only from the calculator's own frame. A client switch
+    clears the cached deck, so one client's deck can't be sent under another.
+  - **`supabase/functions/deck-estimate/`**: checks the caller with `client_row_visible()` **asked as
+    the caller** (3Sixty has no `user_client_access` rows; they get in by `client_email`), validates
+    every field, stores a `deck_estimates` row, calls that client's Make hook, records what comes
+    back. Its header holds the full Make contract.
+  - **`deck_estimates`** (`supabase/sql/deck_estimates.sql`): written only by the function
+    (service_role, no write policies), read via `client_row_visible`. Holds the customer's name,
+    email, phone and address on purpose. In `rename_client.sql`.
+- **Why not make-relay:** it accepts admins only, and the people clicking are client staff. Widening
+  it would widen every hook it carries; this opens one action for the clients named in a secret.
+- **Hooks live in a secret, not the repo:** `DECK_ESTIMATE_HOOKS = {"<exact clients.name>": "<Make
+  hook URL>"}`. Each client goes to its own scenario because each is connected to that client's
+  QuickBooks. A client not in the map gets `ready:false` and a hidden panel. Renaming a client
+  means updating its key here too.
+- **Statuses:** `created` (QuickBooks number recorded), `failed` (refused; safe to retry),
+  `unconfirmed` (timed out, or Make answered without an estimate number: it may exist, so the rep
+  is told to check QuickBooks before retrying). A repeat within 60 seconds for the same client,
+  customer email and total returns the first one instead of creating a second.
+- **QuickBooks access (decided 2026-10-01):** 3Sixty adds us as a **Company admin** user. Intuit only
+  lets primary or company admins connect an app, and the connection belongs to the user who made it,
+  so that user must stay. An accountant invite was rejected because Intuit doesn't confirm it can
+  connect apps.
+- **Go-live order** (deploy before pushing, same rule as make-relay):
+  1. `supabase/sql/deck_estimates.sql`, then re-run `supabase/sql/rename_client.sql`.
+  2. Deploy `deck-estimate`. With no `DECK_ESTIMATE_HOOKS` it answers `ready:false`, so pushing the
+     app.js/body.html/snippet change next is safe: nothing visible changes.
+  3. Connect 3Sixty's QuickBooks in Make, build the scenario from the contract (filter on `secret`
+     first; exact-email customer match, never a fuzzy search result), test with a fake customer.
+  4. `supabase secrets set DECK_ESTIMATE_HOOKS=...` and the panel appears.
+- **Unverified until the first real estimate:** whether QuickBooks takes the negative adjustment as
+  an ordinary line or needs a discount line, and how it rounds qty × rate on fractional square feet.
+- **Tests:** 30 node checks on the function (validation, access, hook scoping, every Make outcome,
+  double clicks), with mutations of the access check and hook routing confirmed caught; 12 jsdom
+  checks on the real panel markup and app.js code; strict `tsc` on `validate.ts`/`handler.ts`; and
+  an end-to-end run of the real snippet posting its deck to a parent page, with the public GHL build
+  confirmed to post height only.
+
+## Roster (built 2026-10-02)
+
+`page-roster`, opened by **View all** on the overview's Active roster. Admin only: `switchAppPage`
+sends anyone else to the overview, and `openRosterDrawer` refuses them. `renderRoster` (filters:
+status, service incl. "Base only", search over client and people) and the profile drawer
+`#roster-drawer` (`renderRosterDrawer`) live in app.js after the Roster comment block.
+
+- **People are `client_contacts`**, the table the check-in reminder reads. `client_directory.sql`
+  added `email`, `role` (owner/sales/office/website/marketing/other) and **`checkin_texts`**
+  (default true, so existing rows kept texting). `send_weekly_checkin_reminders()` now skips rows
+  with it off, and `isCheckinContact()` in app.js applies the same rule to the portal team step,
+  profile and reporter counts. The Roster's new-person rows default it off.
+  `checkin_reminder_secret.sql` is superseded for the function; don't re-run its function body.
+- **Phone is unique per client** (`uniq_client_contacts_client_phone`), not table-wide, so one
+  website person can be listed at two clients. The portal team step upserts on
+  `client_name,phone` and falls back to `phone` (error 42P10) if the SQL hasn't run.
+- **People are edited only on the Roster.** Edit client shows a summary and links there. Its old
+  editor kept only rows with a phone and deleted the rest, which would have wiped email-only people.
+  The Roster saves by id: delete removed, update kept, insert new.
+- **`client_profiles`** (business phone, website, address, private notes) is **admin-only by RLS**
+  and keyed on exact `clients.name`, so it's in `rename_client.sql`. Not `clients` columns: the
+  clients row is readable by clients.
+- **RLS fixed in the same SQL:** `client_contacts` had `Auth manage contacts` = `for all using
+  (true)`, so any signed-in user could read, change or delete every client's contacts. Now admin
+  full access, and client select/insert/update via `client_row_visible()` (the email fallback is
+  what lets most clients save the team step). No client delete.
+- **Tests:** 62 jsdom checks on the real markup and app.js (filters, sorting, escaping, drawer,
+  saving, validation, the 42P10 fallback, admin gating), 6 deliberate mutations all caught; 27
+  PGlite checks on the SQL against the live policy/index shape, including RLS as a client signing
+  in through the email fallback.
+
 - The check-in history shows "From Google" for weeks with a breakdown. 16 checks. Reporting week is the **completed** Mon–Sun.
 **One row per person** — several reps per client, totals sum them. Reports tab stays
 locked until the week's numbers are in. Reminder recipients come from `client_contacts`,
@@ -1807,6 +1890,10 @@ GitHub Pages copy but not from the GHL domain.
 - Deleting an onboarding step that has progress rows assumes the FK cascades; untested
 - Pipeline tab hidden pending a rebuild
 - Ad approvals never tested end to end with a client actually approving; pending
+- **The `clients` table's policies are all `true` for any signed-in user** (found 2026-10-02):
+  SELECT, INSERT, UPDATE and DELETE, so a client can read every client's retainer and emails and
+  change or delete any client row. Same class as the 2026-09-10 fixes; needs its own careful pass
+  (app.js writes to `clients` from a few places, including the auto-overdue update on load).
   approvals aren't surfaced in the dashboard notification feed yet
 - The onboarding form chain has broken twice on email identity and hasn't been
   re-tested since the hidden-field fix

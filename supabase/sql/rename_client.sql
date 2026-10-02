@@ -135,6 +135,12 @@ begin
     update client_services            set client_name = new_name where client_name = old_name;
     -- Added 2026-09-15 with built-in onboarding questions (supabase/sql/onboarding_questions.sql):
     update onboarding_answers         set client_name = new_name where client_name = old_name;
+    -- Added 2026-10-01 with QuickBooks estimates (supabase/sql/deck_estimates.sql). Also update
+    -- the client's key in the deck-estimate function's DECK_ESTIMATE_HOOKS secret, or the
+    -- renamed client's Create button reports "not set up" until it is.
+    update deck_estimates             set client_name = new_name where client_name = old_name;
+    -- Added 2026-10-02 with the Roster page (supabase/sql/client_directory.sql). Run that first.
+    update client_profiles            set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users

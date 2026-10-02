@@ -2,6 +2,14 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-02",
+      "area": "Data",
+      "title": "Roster: every client and everyone you deal with there",
+      "what": "View all on the overview's Active roster opens the Roster: every client with filters for active, paused and archived, and by service, plus search across client names and the people on file (name, email or phone). Click a client for their full profile: the owner, sales reps, office, website person and anyone else, each with a tap-to-call number and email; business phone, website and address; contract and billing; services; connections; onboarding answers; and private notes. Admins only.",
+      "note": "Each person has a Check-in texts switch. It's on for everyone already listed, so nothing changes for the weekly reminder, and off by default for new people, so a website person or bookkeeper can be on file without being texted. People are now edited on the Roster profile; Edit client shows who's on file and links there. This also closes a gap where any signed-in user could read or change any client's contacts.",
+      "action": "Run supabase/sql/client_directory.sql, then re-run supabase/sql/rename_client.sql"
+    },
+    {
       "date": "2026-09-16",
       "area": "SEO",
       "title": "Content ideas",

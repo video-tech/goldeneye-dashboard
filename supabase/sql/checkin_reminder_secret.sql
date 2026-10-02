@@ -1,5 +1,10 @@
 -- Step 2 of securing Make scenario #5 ("txt reminder twice a day", 2026-09-15).
 --
+-- SUPERSEDED 2026-10-02: supabase/sql/client_directory.sql re-creates this function with one
+-- more condition (contacts with checkin_texts off are skipped). Don't re-run the function below,
+-- or website/office contacts would start getting check-in texts. The test block at the bottom is
+-- still fine to use.
+--
 -- Same function as before, with one change: the POST now carries `secret`, read from Supabase
 -- Vault (`make_onboarding_hook_secret`), exactly as trg_onboarding_handoff does for scenario #4.
 -- Everything else — who gets a reminder, the phone formatting, the per-client error handling —
