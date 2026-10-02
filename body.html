@@ -110,8 +110,14 @@
         .roster-seg:last-child { border-right: none; }
         .roster-seg.on { background: var(--goldWash); color: var(--gold); }
         .roster-chip { display: inline-block; padding: 2px 7px; border-radius: 2px; background: var(--inset); color: var(--t2); font-size: 11px; white-space: nowrap; }
-        #roster-drawer { max-width: 620px; }
-        .rd-section { padding: 20px 0; border-top: 1px solid var(--line); }
+        .roster-row.open { background: var(--goldWash); }
+        .roster-chev { font-size: 10px; color: var(--t3); transition: transform 0.2s; width: 10px; flex-shrink: 0; }
+        .roster-row.open .roster-chev { transform: rotate(90deg); color: var(--gold); }
+        /* The expanded profile sits inside the horizontally scrolling table, so it sticks to
+           the left edge and takes the visible width rather than the table's 900px. */
+        .roster-detail { position: sticky; left: 0; width: min(100%, calc(100vw - 48px)); box-sizing: border-box; padding: 4px 22px 22px; border-top: 1px solid var(--goldLine); background: var(--goldWash); }
+        .rd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 36px; }
+        .rd-section { padding: 20px 0; border-top: 1px solid var(--line); min-width: 0; }
         .rd-kv { display: grid; grid-template-columns: 140px minmax(0,1fr); gap: 6px 16px; font-size: 13px; }
         .rd-kv dt { color: var(--t3); }
         .rd-kv dd { color: var(--t1); margin: 0; overflow-wrap: anywhere; }
@@ -577,15 +583,11 @@
                     </div>
                 </div>
 
-                <!-- Roster: every client, filterable, with a full profile panel (roster-drawer).
+                <!-- Roster: every client, filterable, with a profile that opens under the row (rosterProfileHtml).
                      Admin only — contacts and private notes live here. Rendered by renderRoster()
                      in app.js from data fetchAllGlobalData already loads, plus client_profiles. -->
                 <div id="page-roster" class="p-4 md:p-8 space-y-6 hidden">
                     <div class="glass" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
-                        <div class="p-5" style="border-right:1px solid var(--line);">
-                            <div class="ge-label">Active MRR</div>
-                            <div class="ge-display ge-num" style="font-size:30px; margin-top:6px;" id="roster-stat-mrr">$0</div>
-                        </div>
                         <div class="p-5" style="border-right:1px solid var(--line);">
                             <div class="ge-label">Active</div>
                             <div class="ge-display ge-num" style="font-size:30px; margin-top:6px; color:var(--pos);" id="roster-stat-active">0</div>
@@ -612,7 +614,9 @@
                             </div>
                         </div>
                         <div style="overflow-x:auto;">
-                            <div style="min-width:900px; border:1px solid var(--line); border-radius:3px; overflow:hidden;">
+                            <!-- overflow:clip, not hidden: hidden would make this the scroll
+                                 container and stop the expanded profile sticking to the left. -->
+                            <div style="min-width:900px; border:1px solid var(--line); border-radius:3px; overflow:clip;">
                                 <div id="roster-head" class="ge-label roster-grid" style="padding:10px 16px;"></div>
                                 <div id="roster-list"></div>
                             </div>
@@ -628,7 +632,7 @@
                     <div class="glass" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
                         <div style="padding:18px 20px; border-left:1px solid var(--line);">
                             <div class="ge-label">Open</div>
-                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--t1);" id="stat-total">0</span><span class="text-xs" style="color:var(--t3);">all accounts</span></div>
+                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--t1);" id="stat-total">0</span><span class="text-xs" style="color:var(--t3);" id="stat-total-scope">all accounts</span></div>
                         </div>
                         <div style="padding:18px 20px; border-left:1px solid var(--line);">
                             <div class="ge-label">Late</div>
@@ -658,11 +662,18 @@
                                 <i class="fa-solid fa-search" style="position:absolute; left:11px; top:50%; transform:translateY(-50%); font-size:11px; color:var(--t3);"></i>
                                 <input type="text" id="task-search-filter" placeholder="Filter&hellip;" class="glass-input" style="padding-left:30px;" onkeyup="renderActiveTaskView()">
                             </div>
+                            <!-- You = assigned to whoever is signed in; Midas = our own internal
+                                 work (client Midas Media). The two selects narrow further and
+                                 compose with these and with the search box (taskMatchesFilters). -->
                             <div style="display:flex; border:1px solid var(--line); border-radius:3px; overflow:hidden;">
                                 <button onclick="setTaskOwnerFilter('all')" id="btn-owner-all" class="view-btn active">All</button>
+                                <button onclick="setTaskOwnerFilter('you')" id="btn-owner-you" class="view-btn" style="border-left:1px solid var(--line);">You</button>
                                 <button onclick="setTaskOwnerFilter('ours')" id="btn-owner-ours" class="view-btn" style="border-left:1px solid var(--line);">Ours</button>
                                 <button onclick="setTaskOwnerFilter('theirs')" id="btn-owner-theirs" class="view-btn" style="border-left:1px solid var(--line);">Client</button>
+                                <button onclick="setTaskOwnerFilter('midas')" id="btn-owner-midas" class="view-btn" style="border-left:1px solid var(--line);">Midas</button>
                             </div>
+                            <select id="task-person-filter" class="glass-input" style="width:auto; min-width:140px; padding-top:7px; padding-bottom:7px;" onchange="setTaskPersonFilter(this.value)" title="Show one person's tasks"></select>
+                            <select id="task-client-filter" class="glass-input" style="width:auto; min-width:160px; max-width:220px; padding-top:7px; padding-bottom:7px;" onchange="setTaskClientFilter(this.value)" title="Show one client's tasks"></select>
                             <!-- Informational, not a control — the board is always sorted by
                                  priority score (renderKanban), and a dropdown implying a change
                                  of sort here would be decoration with nothing behind it. -->
@@ -2629,18 +2640,6 @@
 
                 <div id="kb-video-grid" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
             </div>
-        <!-- Client profile from the Roster page. Body is rendered by openRosterDrawer() in app.js. -->
-        <div id="roster-drawer" class="side-drawer p-6">
-            <div class="flex justify-between items-start gap-4 mb-2">
-                <div style="min-width:0;">
-                    <div class="ge-label" id="rd-eyebrow">Client</div>
-                    <h2 class="ge-title" id="rd-name" style="font-size:22px; margin-top:6px; overflow-wrap:anywhere;">client.</h2>
-                </div>
-                <button type="button" onclick="closeAllDrawers()" class="p-2" style="color:var(--t3); font-size:20px;">✕</button>
-            </div>
-            <div id="rd-body" class="flex-1"></div>
-        </div>
-
         <div id="health-drawer" class="side-drawer p-6">
             <div class="flex justify-between items-center mb-6">
                 <h2 class="ge-title" style="font-size:17px; display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-heart-pulse" style="color:var(--pos);"></i>update account health.</h2>

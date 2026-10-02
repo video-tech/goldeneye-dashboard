@@ -1655,24 +1655,6 @@ real client data; see the Known gaps entry on that.
   `seranking-sync`'s sync, with no admin-side add/retire form yet, even though its RLS already
   allows admin writes. The changelog isn't in the weekly report or the client portal yet either.
 
-## Weekly check-in
-
-`weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
-tracked), `source`, `contact_name`.
-
-**Closes and revenue are entered by source (added 2026-09-14)**, in four rows: Google search /
-your website, Facebook / Instagram ads, Referral or repeat customer, Other / not sure
-(`CHECKIN_SOURCES` in app.js). The split is saved to `closes_by_source jsonb`
-(`supabase/sql/weekly_checkins_closes_by_source.sql`) as `{google: {closes, revenue}, ...}`, with
-only filled rows present. **`closes_count` / `revenue_total` are still written, as the row sums**,
-so every existing reader (reports, leaderboard, health, admin views) is unchanged. A total
-stays null when no row has a value, so "not reported" still differs from a reported 0. The
-`google` row is what the SEO tab's "Jobs closed from Google" reads. Don't rename the keys.
-- **Old check-ins:** editing one saved before sources existed prefills its totals under
-  *Other / not sure*, never Google.
-- **Text check-ins:** no breakdown (null). The SEO tab counts them as "source not given".
-- **Missing column:** if `closes_by_source` isn't in the database, the submit retries without
-  it, so a client's totals are never lost to a schema that's behind.
 ## Deck calculator → QuickBooks estimates (built 2026-10-01, NOT live yet)
 
 3Sixty's Deck Calculator tab gets a **Create QuickBooks estimate** panel: a rep builds the deck, enters
@@ -1728,9 +1710,14 @@ The client-facing plan (what 3Sixty must supply) is claude.ai/code/artifact/dc85
 ## Roster (built 2026-10-02)
 
 `page-roster`, opened by **View all** on the overview's Active roster. Admin only: `switchAppPage`
-sends anyone else to the overview, and `openRosterDrawer` refuses them. `renderRoster` (filters:
-status, service incl. "Base only", search over client and people) and the profile drawer
-`#roster-drawer` (`renderRosterDrawer`) live in app.js after the Roster comment block.
+sends anyone else to the overview, and `rosterToggle`/`openRosterProfile` refuse them.
+`renderRoster` (filters: status, service incl. "Base only", search over client and people; no MRR,
+by the user's choice) lives in app.js after the Roster comment block.
+- **A client's profile opens under its own row** (`rosterToggle`, one open at a time;
+  `rosterProfileHtml` builds it, `renderRosterDetail` redraws just it while editing). It sits in
+  the horizontally scrolling table, so `.roster-detail` is `position: sticky; left: 0` with the
+  visible width, and the table's wrapper is `overflow: clip`, not `hidden` (hidden would become
+  the scroll container and break the sticky). It replaced a side drawer on 2026-10-02.
 
 - **People are `client_contacts`**, the table the check-in reminder reads. `client_directory.sql`
   added `email`, `role` (owner/sales/office/website/marketing/other) and **`checkin_texts`**
@@ -1743,6 +1730,21 @@ status, service incl. "Base only", search over client and people) and the profil
   `client_name,phone` and falls back to `phone` (error 42P10) if the SQL hasn't run.
 - **People are edited only on the Roster.** Edit client shows a summary and links there. Its old
   editor kept only rows with a phone and deleted the rest, which would have wiped email-only people.
+## Tasks page filters (2026-10-02)
+
+- **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first
+  name appears in `assignee` (`myTaskName()`: `user_profiles.full_name`, then the Google name, then
+  the email). Assignees are free text and can list several people ("Tenny, Aidan"), so
+  `taskAssignees()` splits on commas, &, / and "and". Midas = tasks whose client is Midas Media.
+- **Person and client selects** narrow any tab. People: admins from `user_profiles`
+  (`globalTeamProfiles`) first, then every other assignee found on tasks ("KJ", "Media Buyer").
+- **`taskMatchesFilters()` is the one rule** for the board, the list, the stat strip (which ignores
+  the search box) and list-view select-all, which now selects only visible rows so a bulk delete
+  can't reach hidden tasks. Client onboarding pseudo-tasks show only under All and Client.
+- All three filters are remembered per browser (`ge-task-owner`, `ge-task-person`,
+  `ge-task-client`); a remembered client or person that no longer exists resets.
+- **Tests:** 29 jsdom checks (plus 4 mutations, 3 caught; the fourth was redundant code).
+
   The Roster saves by id: delete removed, update kept, insert new.
 - **`client_profiles`** (business phone, website, address, private notes) is **admin-only by RLS**
   and keyed on exact `clients.name`, so it's in `rename_client.sql`. Not `clients` columns: the
@@ -1751,7 +1753,7 @@ status, service incl. "Base only", search over client and people) and the profil
   (true)`, so any signed-in user could read, change or delete every client's contacts. Now admin
   full access, and client select/insert/update via `client_row_visible()` (the email fallback is
   what lets most clients save the team step). No client delete.
-- **Tests:** 62 jsdom checks on the real markup and app.js (filters, sorting, escaping, drawer,
+- **Tests:** 64 jsdom checks on the real markup and app.js (filters, sorting, escaping, profile,
   saving, validation, the 42P10 fallback, admin gating), 6 deliberate mutations all caught; 27
   PGlite checks on the SQL against the live policy/index shape, including RLS as a client signing
   in through the email fallback.
@@ -1774,6 +1776,24 @@ setup step is visible without reading a chat log.
 
 - **A file, not a table.** The entry ships and rolls back with its change, needs no RLS or migration,
   and stays readable in git. Nothing writes it from the app.
+## Weekly check-in
+
+`weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
+tracked), `source`, `contact_name`.
+
+**Closes and revenue are entered by source (added 2026-09-14)**, in four rows: Google search /
+your website, Facebook / Instagram ads, Referral or repeat customer, Other / not sure
+(`CHECKIN_SOURCES` in app.js). The split is saved to `closes_by_source jsonb`
+(`supabase/sql/weekly_checkins_closes_by_source.sql`) as `{google: {closes, revenue}, ...}`, with
+only filled rows present. **`closes_count` / `revenue_total` are still written, as the row sums**,
+so every existing reader (reports, leaderboard, health, admin views) is unchanged. A total
+stays null when no row has a value, so "not reported" still differs from a reported 0. The
+`google` row is what the SEO tab's "Jobs closed from Google" reads. Don't rename the keys.
+- **Old check-ins:** editing one saved before sources existed prefills its totals under
+  *Other / not sure*, never Google.
+- **Text check-ins:** no breakdown (null). The SEO tab counts them as "source not given".
+- **Missing column:** if `closes_by_source` isn't in the database, the submit retries without
+  it, so a client's totals are never lost to a schema that's behind.
 - **Write for the person using the dashboard**, not as a commit message. Say what they can now do,
   and what it fixed if that matters.
 - **The badge** on the tab counts entries dated after the last visit, kept in `localStorage`

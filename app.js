@@ -64,6 +64,8 @@
 
         let currentUserRole = 'pending'; 
         let currentUserName = 'User';
+        let currentUserFullName = '';   // user_profiles.full_name; decides "You" on the Tasks page
+        let globalTeamProfiles = [];    // admins and members, for the Tasks person filter
         let clientEmail = '';
         let globalAllowedClients = [];
 	let globalAuditsData = []; // Add this near line 656 with your other global variables
@@ -360,10 +362,11 @@
                     // invited client signed in and sat on the pending screen forever.
                     // The two lookups don't depend on each other, so they go together.
                     const [{ data: profile }, { data: preApproved }] = await Promise.all([
-                        supabaseClient.from('user_profiles').select('role').eq('email', clientEmail).single(),
+                        supabaseClient.from('user_profiles').select('role, full_name').eq('email', clientEmail).single(),
                         supabaseClient.from('pre_approved_users').select('role, client_access').eq('email', clientEmail).maybeSingle()
                     ]);
                     currentUserRole = profile?.role || 'pending';
+                    currentUserFullName = profile?.full_name || '';
                     geStartupMark('role checked');
 
                     if (preApproved && (currentUserRole === 'pending' || !profile)) {
@@ -1292,6 +1295,8 @@ function obTeamRowHtml(stepId, contact) {
                value="${escapeAttr(stripSlashEscapes(contact?.contact_name))}">
         <input type="tel" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-phone" placeholder="Mobile number"
                value="${escapeAttr(stripSlashEscapes(contact?.phone))}">
+        <input type="email" class="glass-input !py-2 flex-1 min-w-[160px] ob-team-email" placeholder="Email (optional)"
+               value="${escapeAttr(stripSlashEscapes(contact?.email))}">
         <button type="button" onclick="this.closest('.ob-team-row').remove()"
                 class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
             <i class="fa-solid fa-xmark"></i>
@@ -1349,9 +1354,10 @@ window.obSaveTeam = async function(stepId, justMe) {
         people = [...document.querySelectorAll(`#ob-team-rows-${stepId} .ob-team-row`)]
             .map(r => ({
                 contact_name: r.querySelector('.ob-team-name').value.trim(),
-                phone: r.querySelector('.ob-team-phone').value.trim()
+                phone: r.querySelector('.ob-team-phone').value.trim(),
+                email: (r.querySelector('.ob-team-email')?.value || '').trim().toLowerCase()
             }))
-            .filter(p => p.contact_name || p.phone);
+            .filter(p => p.contact_name || p.phone || p.email);
 
         if (!people.length) {
             show("Add at least one person, or choose “it's just me” below.");
@@ -1368,13 +1374,20 @@ window.obSaveTeam = async function(stepId, justMe) {
             show(`That number for ${badPhone.contact_name} doesn't look complete.`);
             return;
         }
+        const badEmail = people.find(p => p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email));
+        if (badEmail) {
+            show(`That email for ${badEmail.contact_name} doesn't look right.`);
+            return;
+        }
     }
 
     try {
+        // Email is always sent (prefilled above), so re-saving never blanks one we have
         const rows = people.filter(p => p.phone).map(p => ({
             client_name: currentActiveClient,
             contact_name: p.contact_name,
             phone: p.phone,
+            email: p.email || null,
             active: true
         }));
 
@@ -3467,7 +3480,13 @@ window.submitClientRequest = async function() {
         answersQ = answersQ.in('client_name', allowedClients);
     }
 
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ, servicesQ, clientServicesQ, answersQ, profilesQ ]);
+    // Who can be picked in the Tasks person filter. Staff only; a failed or empty read just
+    // leaves that list built from the assignees on the tasks themselves.
+    const teamQ = (currentUserRole === 'admin' || currentUserRole === 'member')
+        ? supabaseClient.from('user_profiles').select('email, full_name, role').in('role', ['admin', 'member'])
+        : Promise.resolve({ data: [] });
+
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ, servicesQ, clientServicesQ, answersQ, profilesQ, teamQ ]);
     geStartupMark('15 tables loaded');
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
@@ -3502,6 +3521,7 @@ window.submitClientRequest = async function() {
     // data, so this is simply empty and the roster says the details can't be saved yet.
     globalClientProfiles = results[15].status === 'fulfilled' ? (results[15].value.data || []) : [];
     clientProfilesReady = results[15].status === 'fulfilled' && !results[15].value.error;
+    globalTeamProfiles = results[16].status === 'fulfilled' ? (results[16].value.data || []) : [];
 
             if (allowedClients && currentUserRole !== 'admin') {
                 const normAllowed = allowedClients.map(a => normalize(a));
@@ -4008,7 +4028,7 @@ window.submitClientRequest = async function() {
         }
 
         // --- TASK MODULE ---
-        function initTasksPage() { selectedTaskIds.clear(); renderTaskSummary(); renderActiveTaskView(); initColumnSortable(); }
+        function initTasksPage() { selectedTaskIds.clear(); renderTaskFilterOptions(); renderTaskSummary(); renderActiveTaskView(); initColumnSortable(); }
         function switchTaskView(mode) {
             currentTaskView = mode; document.getElementById('btn-view-kanban').classList.toggle('active', mode === 'kanban'); document.getElementById('btn-view-table').classList.toggle('active', mode === 'table');
             if (mode === 'kanban') { document.getElementById('view-kanban').classList.remove('hidden'); document.getElementById('view-table').classList.add('hidden'); document.getElementById('btn-columns').classList.add('hidden'); document.getElementById('t-bulk-bar').classList.add('hidden'); } 
@@ -4022,11 +4042,13 @@ window.submitClientRequest = async function() {
         // created, including finished ones), and "Done this week" is real — completed AND
         // updated in the trailing 7 days — rather than the all-time completed count the
         // old "Completed" tile showed. Both are genuine computation changes, not paint.
+        // Counts follow the You/Ours/Client/Midas, person and client filters (not the
+        // search box), so picking "You" shows your own late and due-today numbers.
         function renderTaskSummary() {
             const today = new Date().toISOString().split('T')[0];
             const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
             let open=0, o=0, dt=0, ip=0, doneWeek=0;
-            globalTasksData.forEach(t => {
+            globalTasksData.filter(taskMatchesFilters).forEach(t => {
                 if (t.status !== 'Complete') {
                     open++;
                     if (t.status === 'In Progress') ip++;
@@ -4036,6 +4058,16 @@ window.submitClientRequest = async function() {
                 }
             });
             document.getElementById('stat-total').innerText = open;
+            const scopeEl = document.getElementById('stat-total-scope');
+            if (scopeEl) {
+                const personLabel = document.getElementById('task-person-filter')?.selectedOptions?.[0]?.textContent;
+                const parts = [
+                    { all: '', you: 'yours', ours: 'ours', theirs: 'client to do', midas: 'Midas internal' }[taskOwnerFilter],
+                    taskPersonFilter ? personLabel : '',
+                    taskClientFilter ? stripSlashEscapes(taskClientFilter) : '',
+                ].filter(Boolean);
+                scopeEl.innerText = parts.length ? parts.join(' · ') : 'all accounts';
+            }
             document.getElementById('stat-overdue').innerText = o;
             document.getElementById('stat-today').innerText = dt;
             document.getElementById('stat-progress').innerText = ip;
@@ -4050,18 +4082,105 @@ window.submitClientRequest = async function() {
 
         // Which side of the board you're looking at. Kept out of the search box so the two
         // filters compose — searching a client name while showing only what they owe us.
-        let taskOwnerFilter = 'all';
+        //   all    everything
+        //   you    assigned to whoever is signed in (their first name in the assignee)
+        //   ours   anything not assigned to the client
+        //   theirs assigned to the client
+        //   midas  our internal work: tasks filed under the Midas Media client
+        // The person and client selects narrow any of these further. All three are
+        // remembered per browser, so the board opens the way you left it.
+        const TASK_OWNER_MODES = ['all', 'you', 'ours', 'theirs', 'midas'];
+        const taskPref = (k, fallback) => { try { return localStorage.getItem(k) ?? fallback; } catch (e) { return fallback; } };
+        const saveTaskPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+        let taskOwnerFilter = TASK_OWNER_MODES.includes(taskPref('ge-task-owner', 'all')) ? taskPref('ge-task-owner', 'all') : 'all';
+        let taskPersonFilter = taskPref('ge-task-person', '');   // normalized name, '' = anyone
+        let taskClientFilter = taskPref('ge-task-client', '');   // exact client name, '' = all
 
-        const matchesTaskOwner = t =>
-            taskOwnerFilter === 'all' ||
-            (taskOwnerFilter === 'theirs' ? taskIsClients(t) : !taskIsClients(t));
+        // "Tenny, Aidan" is two people. Split on commas, ampersands, slashes and "and".
+        const taskAssignees = t => String(t.assignee || '')
+            .split(/\s*(?:,|&|\/|\band\b)\s*/i).map(s => normalize(s)).filter(Boolean);
 
-        window.setTaskOwnerFilter = function(mode) {
-            taskOwnerFilter = ['all', 'ours', 'theirs'].includes(mode) ? mode : 'all';
-            ['all', 'ours', 'theirs'].forEach(m => {
+        // The signed-in person's first name, as tasks are assigned by first name (a new
+        // task defaults to it). Profile name first, then the Google name, then the email.
+        function myTaskName() {
+            const full = (currentUserFullName || currentUserName || '').trim();
+            const first = full && full !== 'User' ? full.split(/\s+/)[0] : (clientEmail || '').split('@')[0];
+            return normalize(first || '');
+        }
+
+        function taskMatchesFilters(t) {
+            const mine = myTaskName();
+            const isMidas = normalize(t.client || '') === normalize('Midas Media');
+            if (taskOwnerFilter === 'you' && !(mine && taskAssignees(t).includes(mine))) return false;
+            if (taskOwnerFilter === 'ours' && taskIsClients(t)) return false;
+            if (taskOwnerFilter === 'theirs' && !taskIsClients(t)) return false;
+            if (taskOwnerFilter === 'midas' && !isMidas) return false;
+            if (taskPersonFilter && !taskAssignees(t).includes(taskPersonFilter)) return false;
+            if (taskClientFilter && normalize(t.client || '') !== normalize(taskClientFilter)) return false;
+            return true;
+        }
+
+        const taskTextMatch = (t, q) => !q || (t.title || '').toLowerCase().includes(q) || (t.client || '').toLowerCase().includes(q);
+
+        function syncTaskFilterButtons() {
+            TASK_OWNER_MODES.forEach(m => {
                 const b = document.getElementById(`btn-owner-${m}`);
                 if (b) b.classList.toggle('active', m === taskOwnerFilter);
             });
+        }
+
+        // Admins first (from user_profiles), then anyone else tasks are assigned to
+        // ("KJ", "Media Buyer"), so a name that isn't a login can still be picked.
+        function renderTaskFilterOptions() {
+            const personSel = document.getElementById('task-person-filter');
+            const clientSel = document.getElementById('task-client-filter');
+            if (personSel) {
+                const seen = new Map();
+                globalTeamProfiles.filter(p => p.role === 'admin' && p.full_name).forEach(p => {
+                    const first = p.full_name.trim().split(/\s+/)[0];
+                    if (first && !seen.has(normalize(first))) seen.set(normalize(first), { label: first, admin: true });
+                });
+                globalTasksData.forEach(t => String(t.assignee || '').split(/\s*(?:,|&|\/|\band\b)\s*/i).forEach(raw => {
+                    const label = raw.trim(), key = normalize(label);
+                    if (!key || key === 'client' || key === 'unassigned' || seen.has(key)) return;
+                    seen.set(key, { label, admin: false });
+                }));
+                const people = [...seen.entries()].sort((a, b) => (b[1].admin - a[1].admin) || a[1].label.localeCompare(b[1].label));
+                if (taskPersonFilter && !seen.has(taskPersonFilter)) taskPersonFilter = '';
+                personSel.innerHTML = `<option value="">Anyone</option>` + people.map(([key, p]) =>
+                    `<option value="${escapeAttr(key)}">${escapeAttr(stripSlashEscapes(p.label))}</option>`).join('');
+                personSel.value = taskPersonFilter;
+            }
+            if (clientSel) {
+                const names = new Map();
+                globalClientsData.forEach(c => names.set(normalize(c.name), { name: c.name, archived: (c.status || 'active') === 'archived' }));
+                globalTasksData.forEach(t => { if (t.client && !names.has(normalize(t.client))) names.set(normalize(t.client), { name: t.client, archived: false }); });
+                const list = [...names.values()].sort((a, b) => (a.archived - b.archived) || a.name.localeCompare(b.name));
+                if (taskClientFilter && !names.has(normalize(taskClientFilter))) taskClientFilter = '';
+                clientSel.innerHTML = `<option value="">All clients</option>` + list.map(c =>
+                    `<option value="${escapeAttr(c.name)}">${escapeAttr(stripSlashEscapes(c.name))}${c.archived ? ' (archived)' : ''}</option>`).join('');
+                clientSel.value = taskClientFilter;
+            }
+            syncTaskFilterButtons();
+        }
+
+        window.setTaskOwnerFilter = function(mode) {
+            taskOwnerFilter = TASK_OWNER_MODES.includes(mode) ? mode : 'all';
+            saveTaskPref('ge-task-owner', taskOwnerFilter);
+            syncTaskFilterButtons();
+            renderTaskSummary();
+            renderActiveTaskView();
+        };
+        window.setTaskPersonFilter = function(v) {
+            taskPersonFilter = v || '';
+            saveTaskPref('ge-task-person', taskPersonFilter);
+            renderTaskSummary();
+            renderActiveTaskView();
+        };
+        window.setTaskClientFilter = function(v) {
+            taskClientFilter = v || '';
+            saveTaskPref('ge-task-client', taskClientFilter);
+            renderTaskSummary();
             renderActiveTaskView();
         };
 
@@ -4110,14 +4229,12 @@ window.submitClientRequest = async function() {
 
         function renderKanban() {
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
-            let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
-            f = f.filter(matchesTaskOwner);
-            // Shown under All as well as Client — "All" meaning all but these was just
-            // confusing. Hidden under Ours, which is the point of that filter. Board only:
-            // the list view has checkboxes wired to real task ids, and these have none.
-            if (taskOwnerFilter !== "ours") {
-                f = f.concat(clientOnboardingPseudoTasks().filter(t =>
-                    (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q)));
+            let f = globalTasksData.filter(t => taskTextMatch(t, q) && taskMatchesFilters(t));
+            // The client's onboarding steps, shown under All and Client (and when "Client" is
+            // the picked person) — never under You, Ours or Midas, which are our own work.
+            // Board only: the list view has checkboxes wired to real task ids, and these have none.
+            if (taskOwnerFilter === 'all' || taskOwnerFilter === 'theirs') {
+                f = f.concat(clientOnboardingPseudoTasks().filter(t => taskTextMatch(t, q) && taskMatchesFilters(t)));
             }
             const cols = { 'Not Started': document.getElementById('col-todo'), 'In Progress': document.getElementById('col-prog'), 'Blocked': document.getElementById('col-rev'), 'Complete': document.getElementById('col-done') };
             const counts = { 'Not Started': 0, 'In Progress': 0, 'Blocked': 0, 'Complete': 0 };
@@ -4181,8 +4298,7 @@ window.submitClientRequest = async function() {
             activeCols.forEach(c => { const d=masterCols.find(x=>x.id===c); if(d) h+=`<th class="p-4 sortable" onclick="setTaskSort('${d.id}')">${d.label} ${getI(d.id)}</th>`; }); thead.innerHTML = h + `</tr>`;
 
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
-            let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
-            f = f.filter(matchesTaskOwner);
+            let f = globalTasksData.filter(t => taskTextMatch(t, q) && taskMatchesFilters(t));
             f.sort((a,b) => { let vA=a[currentTaskSort]||'', vB=b[currentTaskSort]||''; if(currentTaskSort==='score'){ if(taskPrioMode==='total'){vA=a.score;vB=b.score;} if(taskPrioMode==='dueDate'){vA=a.u;vB=b.u;} if(taskPrioMode==='et'){vA=a.e;vB=b.e;} } if(vA<vB) return taskSortDir==='asc'?-1:1; if(vA>vB) return taskSortDir==='asc'?1:-1; return 0; });
 
             const td = new Date().toISOString().split('T')[0]; let bH = ''; if(f.length===0) bH = `<tr><td colspan="10" class="p-8 text-center" style="color:var(--t3);">No tasks.</td></tr>`;
@@ -4206,7 +4322,14 @@ window.submitClientRequest = async function() {
         function setTaskSort(c){ if(currentTaskSort===c) taskSortDir=taskSortDir==='asc'?'desc':'asc'; else {currentTaskSort=c; taskSortDir=c==='score'?'desc':'asc';} renderTable(); }
         function setTaskPrio(m){ taskPrioMode=m; currentTaskSort='score'; taskSortDir='desc'; document.getElementById('prio-dropdown').classList.remove('show'); renderTable(); }
         function toggleTaskRow(cb, id){ if(cb.checked) selectedTaskIds.add(id); else selectedTaskIds.delete(id); renderTable(); }
-        function toggleAllTasks(cb){ if(cb.checked) globalTasksData.forEach(t=>selectedTaskIds.add(t.id)); else selectedTaskIds.clear(); renderTable(); }
+        // Only the rows on screen, so a bulk delete or status change can't reach tasks the
+        // filters or the search box are hiding.
+        function toggleAllTasks(cb){
+            const q = (document.getElementById('task-search-filter')?.value || '').toLowerCase();
+            if(cb.checked) globalTasksData.filter(t => taskTextMatch(t, q) && taskMatchesFilters(t)).forEach(t=>selectedTaskIds.add(t.id));
+            else selectedTaskIds.clear();
+            renderTable();
+        }
         function clearSelection(){ selectedTaskIds.clear(); renderTable(); }
         function updateTaskBulkBar(){ if(currentTaskView!=='table') return; const b=document.getElementById('t-bulk-bar'); if(selectedTaskIds.size>0){ document.getElementById('t-bulk-count').innerText=selectedTaskIds.size; b.classList.remove('hidden'); } else b.classList.add('hidden'); }
         async function deleteSelectedTasks(){ if(currentUserRole!=='admin') return alert("Admin only"); if(confirm(`Delete ${selectedTaskIds.size} task(s)?`)){ await supabaseClient.from('tasks').delete().in('id', Array.from(selectedTaskIds)); await fetchAllGlobalData(globalAllowedClients); initTasksPage(); } }
@@ -11866,10 +11989,6 @@ window.renderRoster = function() {
     const counts = { all: all.length, active: 0, paused: 0, archived: 0 };
     all.forEach(c => { const s = rosterStatusOf(c); if (counts[s] !== undefined) counts[s]++; });
 
-    // Same MRR rule as the overview: active clients, Midas itself left out
-    const mrr = all.filter(c => isActiveClient(c) && normalize(c.name) !== normalize('Midas Media'))
-                   .reduce((sum, c) => sum + parseFloat(c.monthly_retainer || 0), 0);
-    document.getElementById('roster-stat-mrr').innerText = '$' + mrr.toLocaleString();
     document.getElementById('roster-stat-active').innerText = counts.active;
     document.getElementById('roster-stat-paused').innerText = counts.paused;
     document.getElementById('roster-stat-archived').innerText = counts.archived;
@@ -11937,10 +12056,14 @@ window.renderRoster = function() {
         const months = c.months_remaining !== null && c.months_remaining !== undefined && c.contract_end_date
             ? `<div class="ge-label" style="margin-top:3px;">${c.months_remaining} mo left</div>` : '';
 
-        return `<div class="roster-grid roster-row" data-client="${escapeAttr(c.name)}" onclick="openRosterDrawer(this.dataset.client)">
-            <div style="min-width:0;">
-                <div style="font-size:13.5px; font-weight:500; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${rosterEsc(c.name)}</div>
-                <div style="font-size:12px; color:var(--t2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${primary ? rosterEsc(primary) : '<span style="color:var(--t3);">No contact on file</span>'}</div>
+        const isOpen = c.name === rosterOpenClient;
+        return `<div class="roster-grid roster-row${isOpen ? ' open' : ''}" data-client="${escapeAttr(c.name)}" onclick="rosterToggle(this.dataset.client)" aria-expanded="${isOpen}">
+            <div style="min-width:0; display:flex; align-items:center; gap:10px;">
+                <i class="fa-solid fa-chevron-right roster-chev"></i>
+                <div style="min-width:0;">
+                    <div style="font-size:13.5px; font-weight:500; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${rosterEsc(c.name)}</div>
+                    <div style="font-size:12px; color:var(--t2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${primary ? rosterEsc(primary) : '<span style="color:var(--t3);">No contact on file</span>'}</div>
+                </div>
             </div>
             <span class="ge-label" style="color:${ROSTER_STATUS_COLOR[status] || 'var(--t3)'};">${status}</span>
             <div style="display:flex; flex-wrap:wrap; gap:4px; min-width:0;">${svcHtml}</div>
@@ -11952,26 +12075,39 @@ window.renderRoster = function() {
             <span class="ge-num" style="text-align:right; color:var(--t1); font-size:14px;">${rosterMoney(c.monthly_retainer)}</span>
             <span class="ge-label" style="color:${payColor};">${payLabel}</span>
             <div class="text-xs ge-num" style="color:var(--t2);">${c.contract_end_date ? rosterDate(c.contract_end_date) : '—'}${months}</div>
-        </div>`;
+        </div>${isOpen ? `<div class="roster-detail" id="roster-detail">${rosterProfileHtml(c)}</div>` : ''}`;
     }).join('');
 
     document.getElementById('roster-empty').classList.toggle('hidden', rows.length > 0);
 };
 
-// ---- Profile panel ----
+// ---- Profile (opens under the client's row) ----
+// One client open at a time. Clicking the open row closes it; clicking another switches.
 
-window.openRosterDrawer = function(name) {
+window.rosterToggle = function(name) {
+    if (currentUserRole !== 'admin') return;
+    rosterOpenClient = rosterOpenClient === name ? null : name;
+    rosterEditing = null;
+    renderRoster();
+};
+
+// Opens a client's profile and brings it into view (from Edit client's "Manage people").
+window.openRosterProfile = function(name) {
     if (currentUserRole !== 'admin') return;
     rosterOpenClient = name;
     rosterEditing = null;
-    renderRosterDrawer();
-    const drawer = document.getElementById('roster-drawer');
-    drawer.scrollTop = 0;
-    document.getElementById('drawer-overlay').classList.add('show');
-    drawer.classList.add('open');
+    // A filter that hides this client would hide its profile too
+    const c = globalClientsData.find(x => x.name === name);
+    if (c && rosterState.status !== 'all' && rosterStatusOf(c) !== rosterState.status) rosterState.status = 'all';
+    rosterState.service = '';
+    rosterState.q = '';
+    const search = document.getElementById('roster-search');
+    if (search) search.value = '';
+    renderRoster();
+    document.querySelector('#roster-list .roster-row.open')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
 };
 
-window.rosterEdit = function(section) { rosterEditing = section; renderRosterDrawer(); };
+window.rosterEdit = function(section) { rosterEditing = section; renderRosterDetail(); };
 
 function rosterKv(pairs) {
     return `<dl class="rd-kv">${pairs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
@@ -12100,17 +12236,15 @@ function rosterAnswersHtml(c) {
     return `<div class="rd-section">${rosterSectionHead('onboarding answers.', null)}${rosterKv(items)}</div>`;
 }
 
-function renderRosterDrawer() {
-    const body = document.getElementById('rd-body');
+// Re-renders just the open profile, so editing doesn't redraw (and re-sort) the table.
+function renderRosterDetail() {
+    const el = document.getElementById('roster-detail');
     const c = globalClientsData.find(x => x.name === rosterOpenClient);
-    if (!body) return;
-    if (!c) { body.innerHTML = `<p class="text-sm" style="color:var(--t2);">That client couldn't be found. It may have been renamed.</p>`; return; }
+    if (el && c) el.innerHTML = rosterProfileHtml(c);
+    else renderRoster();
+}
 
-    const status = rosterStatusOf(c);
-    document.getElementById('rd-eyebrow').innerHTML =
-        `<span style="color:${ROSTER_STATUS_COLOR[status] || 'var(--t3)'};">${status}</span> · ${rosterEsc(c.current_stage || 'No stage')}`;
-    document.getElementById('rd-name').innerText = stripSlashEscapes(c.name) + '.';
-
+function rosterProfileHtml(c) {
     const prof = rosterProfileFor(c.name);
     const svcs = rosterServicesFor(c.name);
     const svcHtml = [`<span class="roster-chip">Base</span>`].concat(svcs.map(s =>
@@ -12119,15 +12253,26 @@ function renderRosterDrawer() {
     const set = (v) => v ? `<span class="ge-num">${rosterEsc(v)}</span>` : '<span style="color:var(--t3);">Not set</span>';
     const pay = { paid: 'Paid', overdue: 'Overdue' }[c.payment_status] || 'Unpaid';
 
-    body.innerHTML = `
-        <div class="flex flex-wrap gap-2 mt-3 mb-2">
-            <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="closeAllDrawers(); goToClient(this.dataset.client)">Open account</button>
+    // Two columns on a wide screen: who and where on the left (people, business, notes),
+    // the account itself on the right. They stack on a narrow one.
+    return `
+        <div class="flex flex-wrap gap-2" style="padding:16px 0 4px;">
+            <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="goToClient(this.dataset.client)">Open account</button>
             <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="rosterOpenEditClient(this.dataset.client)">Edit client</button>
         </div>
-
+        <div class="rd-grid">
+        <div>
         <div class="rd-section">${rosterEditing === 'people' ? rosterPeopleEdit(c) : rosterPeopleView(c)}</div>
         <div class="rd-section">${rosterEditing === 'business' ? rosterBusinessEdit(c, prof) : rosterBusinessView(c, prof)}</div>
-
+        <div class="rd-section">
+            ${rosterSectionHead('notes.', null)}
+            <p class="ge-label" style="margin-bottom:8px;">Only admins see this</p>
+            <textarea id="rd-notes" class="glass-input" rows="4" placeholder="Anything worth remembering about this client"${clientProfilesReady ? '' : ' disabled'}>${rosterEsc(prof?.notes)}</textarea>
+            <p id="rd-notes-msg" class="text-xs hidden mt-2"></p>
+            <button type="button" id="rd-notes-save" onclick="rosterSaveNotes()" class="btn-secondary btn text-xs mt-3"${clientProfilesReady ? '' : ' disabled'}>Save notes</button>
+        </div>
+        </div>
+        <div>
         <div class="rd-section">${rosterSectionHead('contract & billing.', null)}${rosterKv([
             ['Retainer', `<span class="ge-num">${rosterMoney(c.monthly_retainer)}</span> / mo`],
             ['Payment', pay + (c.last_payment_date ? ` · last paid ${rosterDate(c.last_payment_date)}` : '')],
@@ -12150,21 +12295,13 @@ function renderRosterDrawer() {
             ['SE Ranking', set(c.seranking_site_id)],
             ['Business Profile', set(c.seranking_local_id)],
         ])}</div>
-
-        <div class="rd-section">
-            ${rosterSectionHead('notes.', null)}
-            <p class="ge-label" style="margin-bottom:8px;">Only admins see this</p>
-            <textarea id="rd-notes" class="glass-input" rows="5" placeholder="Anything worth remembering about this client"${clientProfilesReady ? '' : ' disabled'}>${rosterEsc(prof?.notes)}</textarea>
-            <p id="rd-notes-msg" class="text-xs hidden mt-2"></p>
-            <button type="button" id="rd-notes-save" onclick="rosterSaveNotes()" class="btn-secondary btn text-xs mt-3"${clientProfilesReady ? '' : ' disabled'}>Save notes</button>
+        ${rosterAnswersHtml(c)}
         </div>
-
-        ${rosterAnswersHtml(c)}`;
+        </div>`;
 }
 
 // Edit client works on the selected account, so select this one first.
 window.rosterOpenEditClient = function(name) {
-    closeAllDrawers();
     cSelectedAccount = name;
     openEditClientModal();
 };
@@ -12174,7 +12311,7 @@ window.openRosterFromEditClient = function() {
     const name = document.getElementById('edit-client-original-name').value;
     document.getElementById('edit-client-modal').style.display = 'none';
     navTo('roster');
-    openRosterDrawer(name);
+    openRosterProfile(name);
 };
 
 function renderEditClientPeopleSummary(name) {
@@ -12259,7 +12396,7 @@ window.rosterSavePeople = async function() {
         await rosterReloadContacts();
         btn.disabled = false; btn.innerText = 'Save people';
     }
-    if (rosterEditing === null) { renderRosterDrawer(); renderRoster(); }
+    if (rosterEditing === null) renderRoster();
 };
 
 async function rosterUpsertProfile(fields) {
@@ -12282,7 +12419,7 @@ window.rosterSaveBusiness = async function() {
             address: document.getElementById('rd-b-address').value.trim() || null,
         });
         rosterEditing = null;
-        renderRosterDrawer();
+        renderRosterDetail();
     } catch (e) {
         errEl.innerText = rosterSaveError(e);
         errEl.classList.remove('hidden');

@@ -36,6 +36,11 @@ alter table public.client_contacts
   add column if not exists role text,
   add column if not exists checkin_texts boolean not null default true;
 
+-- phone was NOT NULL, which refused anyone on file by email only (a website person, an owner
+-- whose number we don't have). Missed on the first run, added 2026-10-02; the reminder already
+-- skips contacts without a number, and the unique index allows any number of nulls.
+alter table public.client_contacts alter column phone drop not null;
+
 alter table public.client_contacts drop constraint if exists client_contacts_role_check;
 alter table public.client_contacts add constraint client_contacts_role_check
   check (role is null or role in ('owner', 'sales', 'office', 'website', 'marketing', 'other'));

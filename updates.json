@@ -3,6 +3,13 @@
   "updates": [
     {
       "date": "2026-10-02",
+      "area": "Tasks",
+      "title": "Task filters: You, Midas, a person and a client",
+      "what": "The task page now has All, You, Ours, Client and Midas. You shows the tasks assigned to you (including ones shared with someone else), and Midas shows our own internal work. Two dropdowns narrow it further: pick a person to see their tasks, or a client to see theirs. The numbers across the top follow whatever you've picked, so You shows your own late and due-today counts. Your choice is remembered next time you open the page.",
+      "note": "Select-all in the list view now picks only the tasks on screen, so a bulk delete or status change can't touch tasks the filters are hiding. Also: the Roster opens a client's profile right under their row instead of a side panel, MRR is off the Roster, and the client portal's sales-team step asks for each person's email (optional)."
+    },
+    {
+      "date": "2026-10-02",
       "area": "Data",
       "title": "Roster: every client and everyone you deal with there",
       "what": "View all on the overview's Active roster opens the Roster: every client with filters for active, paused and archived, and by service, plus search across client names and the people on file (name, email or phone). Click a client for their full profile: the owner, sales reps, office, website person and anyone else, each with a tap-to-call number and email; business phone, website and address; contract and billing; services; connections; onboarding answers; and private notes. Admins only.",
