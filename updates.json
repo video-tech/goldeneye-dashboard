@@ -2,6 +2,14 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-05",
+      "area": "Reports",
+      "title": "Reports say what we changed in the ads and what it did",
+      "what": "Golden Eye now keeps each ad's daily spend and leads, and Meta's change history for every client's ad account, refreshed every morning. Generate Report uses them: changes made during the week (an ad set turned off, a budget raised, a new ad launched) go in with what the affected ads did before and after, or \"too early to tell\" when it's only been a day or two, plus how each ad did. Who made a change is never named in a report.",
+      "note": "Only admins can see the change log and per-ad numbers. The Roster now opens on Active clients.",
+      "action": "Run supabase/functions/meta-sync/schema.sql and re-run supabase/sql/rename_client.sql, set META_ACCESS_TOKEN, deploy meta-sync, then run its schedule.sql"
+    },
+    {
       "date": "2026-10-02",
       "area": "Tasks",
       "title": "Task filters: You, Midas, a person and a client",

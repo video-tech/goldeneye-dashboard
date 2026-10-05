@@ -141,6 +141,10 @@ begin
     update deck_estimates             set client_name = new_name where client_name = old_name;
     -- Added 2026-10-02 with the Roster page (supabase/sql/client_directory.sql). Run that first.
     update client_profiles            set client_name = new_name where client_name = old_name;
+    -- Added 2026-10-05 with meta-sync (supabase/functions/meta-sync/schema.sql). Run that first.
+    update meta_ad_daily              set client_name = new_name where client_name = old_name;
+    update meta_activity              set client_name = new_name where client_name = old_name;
+    update meta_sync_state            set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users

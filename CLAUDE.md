@@ -1711,7 +1711,7 @@ The client-facing plan (what 3Sixty must supply) is claude.ai/code/artifact/dc85
 
 `page-roster`, opened by **View all** on the overview's Active roster. Admin only: `switchAppPage`
 sends anyone else to the overview, and `rosterToggle`/`openRosterProfile` refuse them.
-`renderRoster` (filters: status, service incl. "Base only", search over client and people; no MRR,
+`renderRoster` (filters: status, opening on Active, service incl. "Base only", search over client and people; no MRR,
 by the user's choice) lives in app.js after the Roster comment block.
 - **A client's profile opens under its own row** (`rosterToggle`, one open at a time;
   `rosterProfileHtml` builds it, `renderRosterDetail` redraws just it while editing). It sits in
@@ -1725,11 +1725,48 @@ by the user's choice) lives in app.js after the Roster comment block.
   with it off, and `isCheckinContact()` in app.js applies the same rule to the portal team step,
   profile and reporter counts. The Roster's new-person rows default it off.
   `checkin_reminder_secret.sql` is superseded for the function; don't re-run its function body.
-- **Phone is unique per client** (`uniq_client_contacts_client_phone`), not table-wide, so one
-  website person can be listed at two clients. The portal team step upserts on
-  `client_name,phone` and falls back to `phone` (error 42P10) if the SQL hasn't run.
-- **People are edited only on the Roster.** Edit client shows a summary and links there. Its old
-  editor kept only rows with a phone and deleted the rest, which would have wiped email-only people.
+## Ad-level data and the change log: meta-sync (built 2026-10-05, NOT live until set up)
+
+`supabase/functions/meta-sync/` pulls, per non-archived client with an `ad_account_id`, Meta's
+per-ad daily insights (`level=ad`, `time_increment=1`) into `meta_ad_daily` and the account's
+change history (`/activities`) into `meta_activity`. `daily_reports` (Make) stays the source for
+account totals and the morning audit; this adds what it can't say: which ad, and what changed.
+- **Token:** `META_ACCESS_TOKEN`, a System User token with `ads_read` only, in Supabase secrets.
+  Never logged: Meta's paging links carry it, so every error passes through `scrubToken`. The Meta
+  token in Make is separate and untouched.
+- **Runs:** daily at 15:30 UTC (`schedule.sql`), the last 8 days each time, upserted, because Meta
+  keeps attributing leads to the click day for 7 days. Backfill (up to 180 days) and a token
+  check run from the SQL Editor with the cron secret (`schedule.sql` has both). Every mode only
+  reads Meta and writes these tables, which is why the cron secret may run all of them.
+  One client's error lands in `meta_sync_state.last_error`; a Meta rate limit (code 4/17/…) stops
+  the run and tomorrow re-pulls the window.
+- **Shared ad account:** Midas and Sunset share one; `pickAccounts` gives it to Sunset.
+- **Leads:** one figure per row (`lead`, else `onsite_conversion.lead_grouped`, else the pixel
+  lead), never summed across types. Not yet compared with `daily_reports` on real data: do that
+  after the first backfill.
+- **The change log has no id**, so `event_key` is an FNV-1a hash of account, time, type, object
+  and the kept details. Re-pulls upsert onto it.
+- **extra_data is scrubbed:** on real SimpliBlinds data Meta's own entries carried IP addresses,
+  machine cookies, SSL fingerprints and request ids. Only `type`, `old_value`, `new_value`,
+  `currency` and `campaign_id` (Meta's legacy name for the ad SET id) are kept, long strings cut.
+- **`category` / `significant`** (in `parse.ts`): budget, bid, targeting, creative, schedule,
+  created and rejections count; a status change counts only when it lands somewhere ("Active",
+  "Inactive"…), not "Pending Process", and Meta's own status flips count only for disapprovals.
+  Audiences, the image library and renames don't. Re-run a backfill to recompute after a rule change.
+- **Admin-only RLS** on all three tables, by the user's choice: the log names who made each change.
+  Clients see only what a report says. All three are in `rename_client.sql`.
+- **In the weekly report:** `buildReportAdActivityBlock` → `computeAdActivityFacts` (app.js) hands
+  the model the period's changes (one per object per kind per day, latest 8) with each one's effect
+  on the ads it covers (7 days before vs after, per-day spend and leads, "too early to tell" under 3
+  days of results, "spend stopped" when it went to zero, "since it started" for new ads), plus each
+  ad's spend, leads and cost per lead. Never a person's name: "we", or "Meta" for Meta's own
+  changes. Budget amounts are shown only when the entry says they're money (minor units / 100).
+  No rows, no block, and the report reads as before.
+- **Setup order:** `schema.sql` → `rename_client.sql` → set the token → deploy → `schedule.sql` →
+  check → backfill. app.js can ship before any of it.
+- **Tests:** 37 parser checks (real SimpliBlinds extra_data), 14 PGlite checks (schema, RLS,
+  rename), 22 jsdom checks on the report block (5 mutations, all caught), strict `tsc`.
+
 ## Tasks page filters (2026-10-02)
 
 - **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first
@@ -1745,6 +1782,11 @@ by the user's choice) lives in app.js after the Roster comment block.
   `ge-task-client`); a remembered client or person that no longer exists resets.
 - **Tests:** 29 jsdom checks (plus 4 mutations, 3 caught; the fourth was redundant code).
 
+- **Phone is unique per client** (`uniq_client_contacts_client_phone`), not table-wide, so one
+  website person can be listed at two clients. The portal team step upserts on
+  `client_name,phone` and falls back to `phone` (error 42P10) if the SQL hasn't run.
+- **People are edited only on the Roster.** Edit client shows a summary and links there. Its old
+  editor kept only rows with a phone and deleted the rest, which would have wiped email-only people.
   The Roster saves by id: delete removed, update kept, insert new.
 - **`client_profiles`** (business phone, website, address, private notes) is **admin-only by RLS**
   and keyed on exact `clients.name`, so it's in `rename_client.sql`. Not `clients` columns: the
@@ -1758,24 +1800,6 @@ by the user's choice) lives in app.js after the Roster comment block.
   PGlite checks on the SQL against the live policy/index shape, including RLS as a client signing
   in through the email fallback.
 
-- The check-in history shows "From Google" for weeks with a breakdown. 16 checks. Reporting week is the **completed** Mon–Sun.
-**One row per person** — several reps per client, totals sum them. Reports tab stays
-locked until the week's numbers are in. Reminder recipients come from `client_contacts`,
-which the `team` onboarding step writes to.
-
-## Settings → Updates (built 2026-09-15)
-
-A plain-English list of every change to Golden Eye, from **`updates.json` in the repo root**, served
-from GitHub Pages beside `app.js` and fetched with the same `?v=` cache-buster.
-
-**Add an entry in the same commit as the change it describes.** Newest first. Fields: `date`
-(YYYY-MM-DD), `area` (SEO / Reports / Onboarding / Tasks / Security / Data), `title`, `what`, and
-optionally `note` and `action`. **`action` means something must be run or deployed before it works**
-("Run supabase/sql/x.sql"), and it shows as an amber "Action needed" line — the one place a
-setup step is visible without reading a chat log.
-
-- **A file, not a table.** The entry ships and rolls back with its change, needs no RLS or migration,
-  and stays readable in git. Nothing writes it from the app.
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -1812,6 +1836,24 @@ stays null when no row has a value, so "not reported" still differs from a repor
   only correct inside inline `onclick`. Using it in `value="..."` added a backslash before
   every apostrophe on each save.
 
+- The check-in history shows "From Google" for weeks with a breakdown. 16 checks. Reporting week is the **completed** Mon–Sun.
+**One row per person** — several reps per client, totals sum them. Reports tab stays
+locked until the week's numbers are in. Reminder recipients come from `client_contacts`,
+which the `team` onboarding step writes to.
+
+## Settings → Updates (built 2026-09-15)
+
+A plain-English list of every change to Golden Eye, from **`updates.json` in the repo root**, served
+from GitHub Pages beside `app.js` and fetched with the same `?v=` cache-buster.
+
+**Add an entry in the same commit as the change it describes.** Newest first. Fields: `date`
+(YYYY-MM-DD), `area` (SEO / Reports / Onboarding / Tasks / Security / Data), `title`, `what`, and
+optionally `note` and `action`. **`action` means something must be run or deployed before it works**
+("Run supabase/sql/x.sql"), and it shows as an amber "Action needed" line — the one place a
+setup step is visible without reading a chat log.
+
+- **A file, not a table.** The entry ships and rolls back with its change, needs no RLS or migration,
+  and stays readable in git. Nothing writes it from the app.
 ## Gotchas that have each cost an hour
 
 - **PGRST204 "column not found"** — PostgREST caches the schema. After any `alter table`:

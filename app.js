@@ -5729,6 +5729,9 @@ Treat this period as a fresh starting point. State every number plainly as where
             // whose notes said 32 and 2.25K. No seo_daily rows means no SEO block at all, and SEO
             // then comes only from the notes.
             const seoBlock = await buildReportSeoBlock(cSelectedAccount, s, e);
+            // What changed in the ad account this period and what it did, from meta-sync. Empty
+            // until that's set up for this client, and the report reads as it always has.
+            const adActivityBlock = await buildReportAdActivityBlock(cSelectedAccount, s, e);
 
             // SEO gets its own required section whenever there's anything to say, decided here
             // rather than left to the model. On 2026-09-14 a report dropped SEO entirely even
@@ -5756,7 +5759,7 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             ${trendBlock}
 
-            ${workBlock}${seoBlock}
+            ${workBlock}${seoBlock}${adActivityBlock}
 
             MEDIA BUYER'S NOTES:
             "${n || 'No manual notes provided this week. Draw the highlights and action plan from the data above rather than waiting for more.'}"
@@ -5788,7 +5791,18 @@ Treat this period as a fresh starting point. State every number plainly as where
             - In "html_report", leave the ${WORKING_ON_MARKER} marker exactly where it is in the
               template. Don't write that section's content into the HTML yourself.
 
-            THE MEDIA BUYER'S NOTES WIN — follow this exactly:
+            ${adActivityBlock ? `AD CHANGES — only because the AD CHANGES AND RESULTS block appears above:
+            - Give the changes their own highlight (or two, if there were several): what we changed
+              and what it did, in plain words, using the effect figures exactly as given. "Too early
+              to tell" stays too early to tell; never guess an outcome.
+            - Say "we" for our changes and "Meta" for Meta's own. Never name a person.
+            - Never invent a reason for a change. Use a reason only if the notes give one.
+            - Ad names are internal labels. Describe an ad by what it is ("the candid photo ad"),
+              quoting a name only when nothing else identifies it.
+            - "EACH AD THIS PERIOD" is for pointing out the best and worst performers, not for listing
+              every ad.
+
+            ` : ''}THE MEDIA BUYER'S NOTES WIN — follow this exactly:
             - The notes are written by the person running the account, and they know things the data
               above doesn't. Every specific fact or number in the notes goes into the report,
               EXACTLY as written: counts, dollar amounts, clicks, impressions, AI mentions, anything.
@@ -6078,6 +6092,212 @@ Treat this period as a fresh starting point. State every number plainly as where
 
  // ---- Admin SEO tab (rebuilt 2026-09-11) ----
  // ---- The weekly report's Organic Search facts ----
+// ---- Ad changes and per-ad results for the weekly report (meta-sync) ----
+// meta_activity is Meta's change log and meta_ad_daily is spend and leads per ad per day, both
+// filled by the meta-sync function. This turns them into facts the report states: what changed in
+// the period, what the affected ads did before and after, and how each ad did. Code computes,
+// the model quotes, same as the SEO block and the morning audit.
+//
+// Never names who made a change: the report is for the client, so a change is something "we"
+// did, or Meta's system did. Returns '' when the client has no rows (not synced, no ads, or the
+// tables don't exist yet), and the report is written exactly as before.
+
+const AD_FACTS_MAX_CHANGES = 8;
+const AD_FACTS_MAX_ADS = 6;
+const AD_FACTS_WINDOW_DAYS = 7;     // before/after window around a change
+const AD_FACTS_MIN_AFTER_DAYS = 3;  // fewer days of results after a change = too early to tell
+
+function adFactsYmd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function adFactsDenverDay(iso) {
+    // The change's calendar day where the team works, so "Oct 1" means Oct 1 in Utah
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso)); }
+    catch (e) { return String(iso).slice(0, 10); }
+}
+function adFactsShortDate(ymd) {
+    const d = new Date(ymd + 'T12:00:00');
+    return isNaN(d) ? ymd : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+const adFactsMoney = (n) => '$' + (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const adFactsQuote = (s) => `"${stripSlashEscapes(String(s || 'unnamed')).replace(/"/g, "'")}"`;
+
+const AD_FACTS_LEVEL = { AD: 'ad', ADGROUP: 'ad set', AD_SET: 'ad set', ADSET: 'ad set', CAMPAIGN: 'campaign', CAMPAIGN_GROUP: 'campaign', ACCOUNT: 'account', AD_ACCOUNT: 'account' };
+
+// Budget amounts come in the currency's minor unit (cents). Shown only when the change says it's
+// money; otherwise the sentence just says the budget changed rather than print a wrong figure.
+function adFactsBudgetValue(v, extra) {
+    const money = /payment|budget|amount/i.test(String(extra?.type || '')) || !!extra?.currency;
+    if (!money) return null;
+    if (typeof v === 'number') return adFactsMoney(v / 100);
+    if (v && typeof v === 'object') {
+        const n = Object.values(v).find(x => typeof x === 'number');
+        if (typeof n === 'number') return adFactsMoney(n / 100);
+    }
+    return null;
+}
+
+function describeAdChange(a) {
+    const level = AD_FACTS_LEVEL[String(a.object_type || '').toUpperCase()] || 'item';
+    const what = `the ${level} ${adFactsQuote(a.object_name)}`;
+    const who = a.actor_is_meta ? "Meta's system" : 'we';
+    const x = a.extra || {};
+    const ov = typeof x.old_value === 'string' ? x.old_value : null;
+    const nv = typeof x.new_value === 'string' ? x.new_value : null;
+    switch (a.category) {
+        case 'status':
+            if (nv && /^active$/i.test(nv)) return `${who} turned on ${what}`;
+            if (nv && /inactive|paused|archived|deleted/i.test(nv)) return `${who} turned off ${what}`;
+            if (nv && /disapprov|reject|issues/i.test(nv)) return `Meta rejected ${what} (status: ${nv})`;
+            return `${who} changed the status of ${what}${ov && nv ? ` from ${ov} to ${nv}` : ''}`;
+        case 'budget': {
+            const from = adFactsBudgetValue(x.old_value, x), to = adFactsBudgetValue(x.new_value, x);
+            return from && to ? `${who} changed the budget on ${what} from ${from} to ${to}` : `${who} changed the budget on ${what}`;
+        }
+        case 'bid': return `${who} changed the bidding on ${what}`;
+        case 'targeting': return `${who} changed who sees ${what} (audience, placements or optimization)`;
+        case 'creative': return `${who} changed the creative on ${what}`;
+        case 'schedule': return `${who} changed the schedule of ${what}`;
+        case 'created': return `${who} created ${what}`;
+        case 'review_declined': return `Meta rejected ${what} in review`;
+        default: return `${who} changed ${what}`;
+    }
+}
+
+// The ads a change reaches: the ad itself, or every ad under the ad set or campaign it was made
+// on. In the change log "campaign_id" is Meta's legacy name for the ad set.
+function adsAffectedBy(a, adRows) {
+    const id = String(a.object_id || '');
+    const parent = a.extra && a.extra.campaign_id != null ? String(a.extra.campaign_id) : '';
+    const ids = new Set();
+    adRows.forEach(r => {
+        if (r.ad_id === id || r.adset_id === id || r.campaign_id === id) ids.add(r.ad_id);
+    });
+    if (!ids.size && parent) adRows.forEach(r => { if (r.adset_id === parent) ids.add(r.ad_id); });
+    return ids;
+}
+
+function sumAdRows(rows) {
+    const t = { spend: 0, leads: 0, days: new Set() };
+    rows.forEach(r => { t.spend += Number(r.spend) || 0; t.leads += Number(r.leads) || 0; if ((Number(r.spend) || 0) > 0) t.days.add(r.date); });
+    return t;
+}
+
+function adChangeEffect(a, adRows, lastDataDay) {
+    const affected = adsAffectedBy(a, adRows);
+    if (!affected.size) return 'no ad results to compare yet';
+    const day = adFactsDenverDay(a.event_time);
+    const addDays = (ymd, n) => { const d = new Date(ymd + 'T12:00:00'); d.setDate(d.getDate() + n); return adFactsYmd(d); };
+    const beforeFrom = addDays(day, -AD_FACTS_WINDOW_DAYS), afterTo = addDays(day, AD_FACTS_WINDOW_DAYS);
+    const mine = adRows.filter(r => affected.has(r.ad_id));
+    // The change day itself is split, so it belongs to neither side
+    const before = sumAdRows(mine.filter(r => r.date >= beforeFrom && r.date < day));
+    const afterRows = mine.filter(r => r.date > day && r.date <= afterTo);
+    const after = sumAdRows(afterRows);
+    // Days the sync actually has results for (any ad), so a per-day figure never divides by days
+    // that were never pulled
+    const covered = (from, to) => new Set(adRows.filter(r => r.date >= from && r.date <= to).map(r => r.date)).size;
+    const daysBefore = covered(beforeFrom, addDays(day, -1));
+    const daysAfter = covered(addDays(day, 1), afterTo);
+    const perDay = (t, n) => n > 0 ? t.spend / n : 0;
+    const side = (t, n) => {
+        const cpl = t.leads > 0 ? `, ${adFactsMoney(t.spend / t.leads)} per lead` : '';
+        return `${adFactsMoney(perDay(t, n))}/day, ${t.leads} lead${t.leads === 1 ? '' : 's'} over ${n} day${n === 1 ? '' : 's'}${cpl}`;
+    };
+    if (a.category === 'created') {
+        return daysAfter < AD_FACTS_MIN_AFTER_DAYS
+            ? 'too early to tell (it has only just started)'
+            : `since it started: ${side(after, daysAfter)}`;
+    }
+    if (daysBefore === 0) return daysAfter ? `after: ${side(after, daysAfter)} (no results from before the change to compare with)` : 'no ad results to compare yet';
+    if (daysAfter < AD_FACTS_MIN_AFTER_DAYS) {
+        return `too early to tell (only ${daysAfter} day${daysAfter === 1 ? '' : 's'} of results since); before the change: ${side(before, daysBefore)}`;
+    }
+    if (after.spend === 0 && before.spend > 0) return `spend stopped: ${side(before, daysBefore)} before, nothing spent in the ${daysAfter} days since`;
+    return `before: ${side(before, daysBefore)}; after: ${side(after, daysAfter)}`;
+}
+
+// Pure: activity rows + per-ad rows in, report text out. Tested on its own.
+function computeAdActivityFacts(activities, adRows, s, e) {
+    const start = adFactsYmd(s), end = adFactsYmd(e);
+    const lastDataDay = adRows.reduce((m, r) => (r.date > m ? r.date : m), '');
+
+    // One line per object per kind per day: an ad set toggled three times in an afternoon is one
+    // change, described by where it ended up.
+    const latest = new Map();
+    activities
+        .filter(a => a.significant)
+        .filter(a => { const d = adFactsDenverDay(a.event_time); return d >= start && d <= end; })
+        .sort((x, y) => String(x.event_time).localeCompare(String(y.event_time)))
+        .forEach(a => latest.set(`${a.object_id}|${a.category}|${adFactsDenverDay(a.event_time)}`, a));
+    let changes = [...latest.values()];
+    const totalChanges = changes.length;
+    changes = changes.slice(-AD_FACTS_MAX_CHANGES);
+
+    const inPeriod = adRows.filter(r => r.date >= start && r.date <= end);
+    const byAd = new Map();
+    inPeriod.forEach(r => {
+        const t = byAd.get(r.ad_id) || { name: r.ad_name, spend: 0, leads: 0 };
+        t.spend += Number(r.spend) || 0; t.leads += Number(r.leads) || 0; t.name = r.ad_name || t.name;
+        byAd.set(r.ad_id, t);
+    });
+    const ads = [...byAd.values()].filter(t => t.spend > 0).sort((a, b) => b.spend - a.spend);
+
+    if (!changes.length && !ads.length) return '';
+
+    let out = `\n\nAD CHANGES AND RESULTS (computed from Meta's change history and per-ad results; use these figures exactly, never calculate your own):`;
+    if (changes.length) {
+        out += `\nCHANGES MADE THIS PERIOD${totalChanges > changes.length ? ` (the latest ${changes.length} of ${totalChanges})` : ''}:`;
+        changes.forEach(a => {
+            out += `\n- ${adFactsShortDate(adFactsDenverDay(a.event_time))}: ${describeAdChange(a)}. Effect on the ads it covers: ${adChangeEffect(a, adRows, lastDataDay)}.`;
+        });
+    } else {
+        out += `\nCHANGES MADE THIS PERIOD: none in Meta's change history.`;
+    }
+    if (ads.length) {
+        out += `\nEACH AD THIS PERIOD (by spend):`;
+        ads.slice(0, AD_FACTS_MAX_ADS).forEach(t => {
+            out += `\n- ${adFactsQuote(t.name)}: ${adFactsMoney(t.spend)} spent, ${t.leads} lead${t.leads === 1 ? '' : 's'}${t.leads > 0 ? `, ${adFactsMoney(t.spend / t.leads)} per lead` : ''}`;
+        });
+        if (ads.length > AD_FACTS_MAX_ADS) out += `\n- …and ${ads.length - AD_FACTS_MAX_ADS} smaller ads`;
+    }
+    return out;
+}
+
+async function buildReportAdActivityBlock(clientName, s, e) {
+    try {
+        const client = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+        if (!client || !normalizeAccountId(client.ad_account_id)) return '';
+        // Results from a week before the period, for the "before" side of an early change
+        const from = new Date(s); from.setDate(from.getDate() - AD_FACTS_WINDOW_DAYS);
+        const until = new Date(e); until.setDate(until.getDate() + 1);
+        const [actRes, adRes] = await Promise.all([
+            supabaseClient.from('meta_activity')
+                .select('event_time, event_type, event_label, object_id, object_name, object_type, actor_is_meta, extra, category, significant')
+                .eq('client_name', client.name).eq('significant', true)
+                .gte('event_time', from.toISOString()).lt('event_time', until.toISOString())
+                .order('event_time').limit(500),
+            // Paged past PostgREST's 1000-row cap: a busy account runs dozens of ads a day
+            (async () => {
+                const rows = [];
+                for (let at = 0; at < 20000; at += 1000) {
+                    const { data, error } = await supabaseClient.from('meta_ad_daily')
+                        .select('date, ad_id, ad_name, adset_id, campaign_id, spend, leads')
+                        .eq('client_name', client.name).gte('date', adFactsYmd(from)).lte('date', adFactsYmd(e))
+                        .order('date').order('ad_id').range(at, at + 999);
+                    if (error) return { data: null, error };
+                    rows.push(...(data || []));
+                    if (!data || data.length < 1000) break;
+                }
+                return { data: rows, error: null };
+            })(),
+        ]);
+        if (actRes.error || adRes.error) return '';
+        return computeAdActivityFacts(actRes.data || [], adRes.data || [], s, e);
+    } catch (err) {
+        console.warn('Ad activity block skipped:', err?.message || err);
+        return '';
+    }
+}
+
 // Same figures the client's own Organic Search tab shows (seo_client_overview, seo_keyword_summary,
 // seo_almost_page_one, seo_changelog), so the report and the tab can never disagree. Everything is
 // computed here and handed to the model as text to quote: it never recalculates, the same rule the
@@ -11906,7 +12126,7 @@ const ROSTER_ROLES = [
 const rosterRoleLabel = (key) => ROSTER_ROLES.find(r => r.key === key)?.label || 'Contact';
 const rosterRoleRank = (key) => { const i = ROSTER_ROLES.findIndex(r => r.key === key); return i === -1 ? ROSTER_ROLES.length : i; };
 
-let rosterState = { status: 'all', service: '', q: '', sort: 'retainer', dir: -1 };
+let rosterState = { status: 'active', service: '', q: '', sort: 'retainer', dir: -1 };
 let rosterOpenClient = null;   // exact clients.name shown in the drawer
 let rosterEditing = null;      // 'people' | 'business' | null
 
