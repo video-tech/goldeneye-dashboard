@@ -44,6 +44,8 @@ begin
         join clients cl on lower(regexp_replace(cl.name, '[^a-zA-Z0-9]', '', 'g'))
                          = lower(regexp_replace(coalesce(k.client, ''), '[^a-zA-Z0-9]', '', 'g'))
         where coalesce(k.status, 'Not Started') <> 'Complete'
+          -- An archived task stays archived (supabase/sql/task_archive.sql, run that first)
+          and k.archived_at is null
     ),
     passing as (
         -- Each client's checks run once, however many of their tasks are waiting

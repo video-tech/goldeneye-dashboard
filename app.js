@@ -81,6 +81,7 @@
         let portalReports = [];
         let globalHealthData = {};
         let globalTasksData = [];
+        let globalArchivedTasks = [];   // tasks with archived_at set, shown only in the Archived view
         let globalAdsData = [];
         let globalCreativesData = [];
         let globalSeoData = [];
@@ -671,7 +672,8 @@
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
             allRawReports = rResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
 
-            globalTasksData = results[1].status === 'fulfilled' ? (results[1].value.data || []) : [];
+            // Archived tasks never reach the portal (supabase/sql/task_archive.sql)
+            globalTasksData = (results[1].status === 'fulfilled' ? (results[1].value.data || []) : []).filter(t => !t.archived_at);
             globalClientLeadsData = results[2].status === 'fulfilled' ? (results[2].value.data || []) : [];
             globalCreativesData = results[3].status === 'fulfilled' ? (results[3].value.data || []) : [];
             allRawSeo = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
@@ -3554,8 +3556,12 @@ window.submitClientRequest = async function() {
                 c.current_score = score || 0; return c;
             });
 
-            globalTasksData = fTasks;
-            globalTasksData.forEach(t => t.score = Math.round((((t.p||3)*0.4)+((t.u||3)*0.4)+((6-(t.e||3))*0.2))*20));
+            // Archived tasks are kept apart: every board, count, report and stage rule reads
+            // globalTasksData, so archiving behaves like deleting everywhere, but the row stays,
+            // which stops task generation recreating it (it dedupes against the database).
+            globalArchivedTasks = fTasks.filter(t => t.archived_at);
+            globalTasksData = fTasks.filter(t => !t.archived_at);
+            globalTasksData.concat(globalArchivedTasks).forEach(t => t.score = Math.round((((t.p||3)*0.4)+((t.u||3)*0.4)+((6-(t.e||3))*0.2))*20));
             
             globalAdsData = fAds.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
 
@@ -4028,9 +4034,9 @@ window.submitClientRequest = async function() {
         }
 
         // --- TASK MODULE ---
-        function initTasksPage() { selectedTaskIds.clear(); renderTaskFilterOptions(); renderTaskSummary(); renderActiveTaskView(); initColumnSortable(); }
+        function initTasksPage() { selectedTaskIds.clear(); taskDoneCap = TASK_DONE_CAP; updateTaskArchiveButton(); renderTaskFilterOptions(); renderTaskSummary(); renderActiveTaskView(); initColumnSortable(); }
         function switchTaskView(mode) {
-            currentTaskView = mode; document.getElementById('btn-view-kanban').classList.toggle('active', mode === 'kanban'); document.getElementById('btn-view-table').classList.toggle('active', mode === 'table');
+            currentTaskView = mode; if (mode === 'kanban' && taskArchiveView) { taskArchiveView = false; selectedTaskIds.clear(); document.getElementById('task-archive-banner')?.classList.add('hidden'); updateTaskArchiveButton(); } document.getElementById('btn-view-kanban').classList.toggle('active', mode === 'kanban'); document.getElementById('btn-view-table').classList.toggle('active', mode === 'table');
             if (mode === 'kanban') { document.getElementById('view-kanban').classList.remove('hidden'); document.getElementById('view-table').classList.add('hidden'); document.getElementById('btn-columns').classList.add('hidden'); document.getElementById('t-bulk-bar').classList.add('hidden'); } 
             else { document.getElementById('view-kanban').classList.add('hidden'); document.getElementById('view-table').classList.remove('hidden'); document.getElementById('btn-columns').classList.remove('hidden'); updateTaskBulkBar(); }
             renderActiveTaskView();
@@ -4227,6 +4233,13 @@ window.submitClientRequest = async function() {
             return out;
         }
 
+        // Done column paging (renderKanban). Reset to the first page whenever the page opens.
+        const TASK_DONE_CAP = 8;
+        const TASK_DONE_STEP = 20;
+        let taskDoneCap = TASK_DONE_CAP;
+        window.showMoreDoneTasks = function() { taskDoneCap += TASK_DONE_STEP; renderKanban(); };
+        window.showFewerDoneTasks = function() { taskDoneCap = TASK_DONE_CAP; renderKanban(); };
+
         function renderKanban() {
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
             let f = globalTasksData.filter(t => taskTextMatch(t, q) && taskMatchesFilters(t));
@@ -4239,6 +4252,13 @@ window.submitClientRequest = async function() {
             const cols = { 'Not Started': document.getElementById('col-todo'), 'In Progress': document.getElementById('col-prog'), 'Blocked': document.getElementById('col-rev'), 'Complete': document.getElementById('col-done') };
             const counts = { 'Not Started': 0, 'In Progress': 0, 'Blocked': 0, 'Complete': 0 };
             Object.values(cols).forEach(el => { if(el) el.innerHTML = ''; }); f.sort((a,b) => b.score - a.score);
+
+            // Done only grows, so it shows the most recently finished first and stops at
+            // taskDoneCap, with View more at the bottom. The column's count is still the total.
+            const isDone = t => (t.status || 'Not Started') === 'Complete';
+            const doneAll = f.filter(isDone).sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+            const doneHidden = Math.max(0, doneAll.length - taskDoneCap);
+            f = f.filter(t => !isDone(t)).concat(doneAll.slice(0, taskDoneCap));
 
             // Cards match the target design: mono client label (gold + " · client" suffix
             // when it's the client's own task — folds ownership into the label itself
@@ -4281,11 +4301,19 @@ window.submitClientRequest = async function() {
                             </div>
                         </div>`;
             });
+            counts['Complete'] = doneAll.length;
+            if (doneHidden > 0 && cols['Complete']) {
+                cols['Complete'].insertAdjacentHTML('beforeend', `<button type="button" class="kanban-more w-full ge-label" onclick="showMoreDoneTasks()"
+                    style="padding:10px; border:1px dashed var(--line); border-radius:3px; color:var(--gold); cursor:pointer;">View ${Math.min(doneHidden, TASK_DONE_STEP)} more <span style="color:var(--t3);">(${doneHidden} older)</span></button>`);
+            } else if (taskDoneCap > TASK_DONE_CAP && cols['Complete']) {
+                cols['Complete'].insertAdjacentHTML('beforeend', `<button type="button" class="kanban-more w-full ge-label" onclick="showFewerDoneTasks()"
+                    style="padding:10px; border:1px dashed var(--line); border-radius:3px; color:var(--t2); cursor:pointer;">Show less</button>`);
+            }
             document.getElementById('count-todo').innerText = counts['Not Started']; document.getElementById('count-prog').innerText = counts['In Progress']; document.getElementById('count-rev').innerText = counts['Blocked']; document.getElementById('count-done').innerText = counts['Complete'];
             
             sortableInstances.forEach(s=>s.destroy()); sortableInstances=[];
             document.querySelectorAll('#page-tasks .kanban-col').forEach(c => {
-                sortableInstances.push(new Sortable(c, { group:'kanban', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
+                sortableInstances.push(new Sortable(c, { group:'kanban', draggable:'.kanban-card', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
                     const id = e.item.getAttribute('data-id'); const nS = e.to.getAttribute('data-status'); const t = globalTasksData.find(x=>x.id==id);
                     if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); if(await queueLifecycle(autoAdvanceCompletedOnboarding)) renderKanban(); }
                 }}));
@@ -4298,22 +4326,22 @@ window.submitClientRequest = async function() {
             activeCols.forEach(c => { const d=masterCols.find(x=>x.id===c); if(d) h+=`<th class="p-4 sortable" onclick="setTaskSort('${d.id}')">${d.label} ${getI(d.id)}</th>`; }); thead.innerHTML = h + `</tr>`;
 
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
-            let f = globalTasksData.filter(t => taskTextMatch(t, q) && taskMatchesFilters(t));
+            let f = (taskArchiveView ? globalArchivedTasks : globalTasksData).filter(t => taskTextMatch(t, q) && taskMatchesFilters(t));
             f.sort((a,b) => { let vA=a[currentTaskSort]||'', vB=b[currentTaskSort]||''; if(currentTaskSort==='score'){ if(taskPrioMode==='total'){vA=a.score;vB=b.score;} if(taskPrioMode==='dueDate'){vA=a.u;vB=b.u;} if(taskPrioMode==='et'){vA=a.e;vB=b.e;} } if(vA<vB) return taskSortDir==='asc'?-1:1; if(vA>vB) return taskSortDir==='asc'?1:-1; return 0; });
 
-            const td = new Date().toISOString().split('T')[0]; let bH = ''; if(f.length===0) bH = `<tr><td colspan="10" class="p-8 text-center" style="color:var(--t3);">No tasks.</td></tr>`;
+            const td = new Date().toISOString().split('T')[0]; let bH = ''; if(f.length===0) bH = `<tr><td colspan="10" class="p-8 text-center" style="color:var(--t3);">${taskArchiveView ? 'No archived tasks.' : 'No tasks.'}</td></tr>`;
             f.forEach(t => {
                 let sColor = 'var(--t2)'; if(t.status==='In Progress') sColor='var(--warn)'; if(t.status==='Complete') sColor='var(--pos)'; if(t.status==='Blocked') sColor='var(--neg)';
                 let dI='', dColor='var(--t2)'; if(t.status!=='Complete'&&t.due){ if(t.due<td){dI='<i class="fa-solid fa-circle-exclamation mr-1" style="color:var(--neg);"></i>'; dColor='var(--neg)';} else if(t.due===td){dI='<i class="fa-solid fa-bell mr-1" style="color:var(--warn);"></i>'; dColor='var(--warn)';} }
-                let pC = t.score>75?'var(--neg)':(t.score>50?'var(--warn)':'var(--t3)'); const chk = selectedTaskIds.has(t.id)?'checked':'';
+                const openAttr = taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`; let pC = t.score>75?'var(--neg)':(t.score>50?'var(--warn)':'var(--t3)'); const chk = selectedTaskIds.has(t.id)?'checked':'';
 
                 bH += `<tr class="ge-table-row transition" style="border-bottom:1px solid var(--line);${chk?' background:var(--goldWash);':''}">
                     <td class="p-4"><input type="checkbox" class="row-checkbox" value="${t.id}" ${chk} onchange="toggleTaskRow(this, ${t.id})"></td>
-                    <td class="p-4 font-bold cursor-pointer transition" style="color:var(--t1);" onclick="openTaskDrawer(${t.id})"><span class="flex items-center gap-2 flex-wrap">${t.title || 'Untitled'}${clientTaskBadge(t)}</span></td>
-                    <td class="p-4 cursor-pointer" style="color:var(--gold);" onclick="goToClient('${escapeHTML(t.client)}')">${t.client || 'Unknown'}</td>
-                    <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-xs" style="color:var(--t1);">${t.score}</span></td>
-                    <td class="p-4 font-bold cursor-pointer" style="color:${dColor};" onclick="openTaskDrawer(${t.id})">${dI}${t.due||'-'}</td>
-                    <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><span class="ge-label" style="padding:3px 8px; border-radius:2px; border:1px solid var(--line); color:${sColor};">${t.status}</span></td>`;
+                    <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'} transition" style="color:var(--t1);"${taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`}><span class="flex items-center gap-2 flex-wrap">${escapeAttr(stripSlashEscapes(t.title || 'Untitled'))}${taskArchiveView ? `<span class="ge-label" style="padding:2px 6px; border-radius:2px; background:var(--inset);">Archived ${escapeAttr(new Date(t.archived_at).toLocaleDateString())}</span>` : clientTaskBadge(t)}</span></td>
+                    <td class="p-4 cursor-pointer" style="color:var(--gold);" onclick="goToClient('${escapeHTML(t.client)}')">${escapeAttr(stripSlashEscapes(t.client || 'Unknown'))}</td>
+                    <td class="p-4${taskArchiveView ? '' : ' cursor-pointer'}"${openAttr}><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-xs" style="color:var(--t1);">${t.score}</span></td>
+                    <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'}" style="color:${dColor};"${openAttr}>${dI}${t.due||'-'}</td>
+                    <td class="p-4${taskArchiveView ? '' : ' cursor-pointer'}"${openAttr}><span class="ge-label" style="padding:3px 8px; border-radius:2px; border:1px solid var(--line); color:${sColor};">${t.status}</span></td>`;
                 activeCols.forEach(c => { let v=t[c]||'-'; if(c==='assignee'&&t.assignee) v=`<div style="width:24px; height:24px; border-radius:2px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; color:var(--t2);">${t.assignee.substring(0,2).toUpperCase()}</div>`; if(c==='updated_at') v=new Date(v).toLocaleDateString(); if(c==='notes') v=`<span class="truncate block max-w-[150px] opacity-70 text-xs">${v}</span>`; bH+=`<td class="p-4" style="color:var(--t2);">${v}</td>`; }); bH += `</tr>`;
             });
             document.getElementById('t-table-body').innerHTML = bH; updateTaskBulkBar();
@@ -4326,13 +4354,92 @@ window.submitClientRequest = async function() {
         // filters or the search box are hiding.
         function toggleAllTasks(cb){
             const q = (document.getElementById('task-search-filter')?.value || '').toLowerCase();
-            if(cb.checked) globalTasksData.filter(t => taskTextMatch(t, q) && taskMatchesFilters(t)).forEach(t=>selectedTaskIds.add(t.id));
+            if(cb.checked) (taskArchiveView ? globalArchivedTasks : globalTasksData).filter(t => taskTextMatch(t, q) && taskMatchesFilters(t)).forEach(t=>selectedTaskIds.add(t.id));
             else selectedTaskIds.clear();
             renderTable();
         }
         function clearSelection(){ selectedTaskIds.clear(); renderTable(); }
-        function updateTaskBulkBar(){ if(currentTaskView!=='table') return; const b=document.getElementById('t-bulk-bar'); if(selectedTaskIds.size>0){ document.getElementById('t-bulk-count').innerText=selectedTaskIds.size; b.classList.remove('hidden'); } else b.classList.add('hidden'); }
-        async function deleteSelectedTasks(){ if(currentUserRole!=='admin') return alert("Admin only"); if(confirm(`Delete ${selectedTaskIds.size} task(s)?`)){ await supabaseClient.from('tasks').delete().in('id', Array.from(selectedTaskIds)); await fetchAllGlobalData(globalAllowedClients); initTasksPage(); } }
+        function updateTaskBulkBar(){
+            if(currentTaskView!=='table') return;
+            const b=document.getElementById('t-bulk-bar');
+            // Archived view: Restore and Delete forever. Otherwise: Change status and Archive.
+            ['t-bulk-status','t-bulk-archive'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', taskArchiveView));
+            ['t-bulk-restore','t-bulk-delete'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !taskArchiveView));
+            if(selectedTaskIds.size>0){ document.getElementById('t-bulk-count').innerText=selectedTaskIds.size; b.classList.remove('hidden'); } else b.classList.add('hidden');
+        }
+
+        // ---- Archive instead of delete (supabase/sql/task_archive.sql) ----
+        // An archived task keeps its row with archived_at set. fetchAllGlobalData keeps those apart
+        // in globalArchivedTasks, so every board, count, report and stage rule ignores them as if
+        // deleted, while task generation (which dedupes against the database) still sees the title
+        // and doesn't recreate it. Delete forever is only offered from the Archived view.
+        let taskArchiveView = false;
+
+        function archiveSaveError(error) {
+            const msg = `${error?.message || ''} ${error?.details || ''}`;
+            return (error?.code === 'PGRST204' || /archived_at/.test(msg))
+                ? 'Run supabase/sql/task_archive.sql in the SQL Editor first, then try again.'
+                : (error?.message || String(error));
+        }
+
+        async function setTasksArchived(ids, archived) {
+            const payload = archived
+                ? { archived_at: new Date().toISOString(), archived_by: clientEmail || null }
+                : { archived_at: null, archived_by: null };
+            const { error } = await supabaseClient.from('tasks').update(payload).in('id', ids);
+            if (error) { alert("Couldn't " + (archived ? 'archive' : 'restore') + ': ' + archiveSaveError(error)); return false; }
+            return true;
+        }
+
+        async function refreshAfterTaskChange() {
+            await fetchAllGlobalData(globalAllowedClients);
+            if (!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage();
+            if (!document.getElementById('page-clients').classList.contains('hidden') && typeof renderClientTasks === 'function') renderClientTasks();
+            if (!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
+        }
+
+        async function archiveSelectedTasks(){
+            if (currentUserRole !== 'admin') return alert('Admin only');
+            const ids = Array.from(selectedTaskIds);
+            if (!ids.length || !confirm(`Archive ${ids.length} task(s)? They leave the board but can be restored from Archived.`)) return;
+            if (await setTasksArchived(ids, true)) { selectedTaskIds.clear(); await refreshAfterTaskChange(); }
+        }
+
+        async function restoreSelectedTasks(){
+            if (currentUserRole !== 'admin') return alert('Admin only');
+            const ids = Array.from(selectedTaskIds);
+            if (!ids.length) return;
+            if (await setTasksArchived(ids, false)) { selectedTaskIds.clear(); await refreshAfterTaskChange(); }
+        }
+
+        async function deleteArchivedForever(){
+            if (currentUserRole !== 'admin') return alert('Admin only');
+            // Only ever archived rows, whatever is selected
+            const ids = Array.from(selectedTaskIds).filter(id => globalArchivedTasks.some(t => t.id === id));
+            if (!ids.length || !confirm(`Permanently delete ${ids.length} archived task(s)? This can't be undone, and a deleted onboarding or checklist task can be generated again.`)) return;
+            const { error } = await supabaseClient.from('tasks').delete().in('id', ids);
+            if (error) return alert("Couldn't delete: " + error.message);
+            selectedTaskIds.clear();
+            await refreshAfterTaskChange();
+        }
+
+        // The Archived view is the list view showing archived tasks (filters and search still apply).
+        window.setTaskArchiveView = function(on) {
+            taskArchiveView = !!on;
+            selectedTaskIds.clear();
+            document.getElementById('task-archive-banner')?.classList.toggle('hidden', !taskArchiveView);
+            if (taskArchiveView && currentTaskView !== 'table') switchTaskView('table');
+            else renderActiveTaskView();
+            updateTaskArchiveButton();
+        };
+
+        function updateTaskArchiveButton() {
+            const btn = document.getElementById('btn-task-archived');
+            if (!btn) return;
+            btn.classList.toggle('hidden', currentUserRole !== 'admin' || taskArchiveView);
+            const n = document.getElementById('task-archived-count');
+            if (n) n.innerText = globalArchivedTasks.length ? `(${globalArchivedTasks.length})` : '';
+        }
         async function updateSelectedStatus(){ const s=prompt("Update status to (Not Started, In Progress, Blocked, Complete):","Complete"); if(s){ await supabaseClient.from('tasks').update({status:s}).in('id', Array.from(selectedTaskIds)); await fetchAllGlobalData(globalAllowedClients); initTasksPage(); } }
 
         function openColumnDrawer() {
@@ -4435,7 +4542,8 @@ window.submitClientRequest = async function() {
             if(!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
         }
         
-        async function deleteTask(){ if(!activeEditId||currentUserRole!=='admin') return; if(confirm("Delete task?")){ await supabaseClient.from('tasks').delete().eq('id',activeEditId); closeAllDrawers(); await fetchAllGlobalData(globalAllowedClients); if(!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage(); if(!document.getElementById('page-clients').classList.contains('hidden')) renderClientTasks(); if(!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();} }
+        // Archive, not delete: the task leaves every board but can be restored from Archived
+        async function archiveTask(){ if(!activeEditId||currentUserRole!=='admin') return; if(!confirm("Archive this task? It leaves the board and can be restored from Archived.")) return; if(await setTasksArchived([activeEditId], true)){ closeAllDrawers(); await refreshAfterTaskChange(); } }
 
         function initClientsPage() {
             // Paused clients are always listed so their history stays reachable.

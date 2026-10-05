@@ -59,12 +59,13 @@ async function loadTasks(db: any) {
     // this mirrors, so this does too.
     // Tasks hidden from the client (tasks.client_visible = false, supabase/sql/task_client_visibility.sql)
     // are left out too: this summary is shown in the client's own portal.
+    // So are archived tasks (supabase/sql/task_archive.sql, which must run before this deploys).
     const { data, error } = await db
         .from("tasks")
-        .select("client, title, status, type, due, updated_at, client_visible")
+        .select("client, title, status, type, due, updated_at, client_visible, archived_at")
         .neq("type", "Client Request");
     if (error) throw new Error(`tasks: ${error.message}`);
-    return (data ?? []).filter((t: any) => t.client_visible !== false);
+    return (data ?? []).filter((t: any) => t.client_visible !== false && !t.archived_at);
 }
 
 function buildLists(tasks: any[], clientName: string, cutoffDay: number) {

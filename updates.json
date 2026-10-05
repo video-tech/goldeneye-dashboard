@@ -3,6 +3,14 @@
   "updates": [
     {
       "date": "2026-10-05",
+      "area": "Tasks",
+      "title": "Archive tasks instead of deleting them, and a shorter Done column",
+      "what": "The task drawer's Delete button is now Archive, and the list view's bulk Delete is Archive too. An archived task leaves every board, count, report and the client's portal, but nothing is lost: open Tasks → Archived to restore it, or delete it for good from there. The Done column now shows the 8 most recently finished tasks, with View more at the bottom, instead of growing forever.",
+      "note": "Archiving also stops an onboarding or checklist task from being created again, which deleting didn't.",
+      "action": "Run supabase/sql/task_archive.sql, then re-run supabase/sql/auto_check_reconcile.sql, then deploy client-summary"
+    },
+    {
+      "date": "2026-10-05",
       "area": "Reports",
       "title": "Reports say what we changed in the ads and what it did",
       "what": "Golden Eye now keeps each ad's daily spend and leads, and Meta's change history for every client's ad account, refreshed every morning. Generate Report uses them: changes made during the week (an ad set turned off, a budget raised, a new ad launched) go in with what the affected ads did before and after, or \"too early to tell\" when it's only been a day or two, plus how each ad did. Who made a change is never named in a report.",

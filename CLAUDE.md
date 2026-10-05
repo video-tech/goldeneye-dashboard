@@ -1707,24 +1707,6 @@ The client-facing plan (what 3Sixty must supply) is claude.ai/code/artifact/dc85
   an end-to-end run of the real snippet posting its deck to a parent page, with the public GHL build
   confirmed to post height only.
 
-## Roster (built 2026-10-02)
-
-`page-roster`, opened by **View all** on the overview's Active roster. Admin only: `switchAppPage`
-sends anyone else to the overview, and `rosterToggle`/`openRosterProfile` refuse them.
-`renderRoster` (filters: status, opening on Active, service incl. "Base only", search over client and people; no MRR,
-by the user's choice) lives in app.js after the Roster comment block.
-- **A client's profile opens under its own row** (`rosterToggle`, one open at a time;
-  `rosterProfileHtml` builds it, `renderRosterDetail` redraws just it while editing). It sits in
-  the horizontally scrolling table, so `.roster-detail` is `position: sticky; left: 0` with the
-  visible width, and the table's wrapper is `overflow: clip`, not `hidden` (hidden would become
-  the scroll container and break the sticky). It replaced a side drawer on 2026-10-02.
-
-- **People are `client_contacts`**, the table the check-in reminder reads. `client_directory.sql`
-  added `email`, `role` (owner/sales/office/website/marketing/other) and **`checkin_texts`**
-  (default true, so existing rows kept texting). `send_weekly_checkin_reminders()` now skips rows
-  with it off, and `isCheckinContact()` in app.js applies the same rule to the portal team step,
-  profile and reporter counts. The Roster's new-person rows default it off.
-  `checkin_reminder_secret.sql` is superseded for the function; don't re-run its function body.
 ## Ad-level data and the change log: meta-sync (built 2026-10-05, NOT live until set up)
 
 `supabase/functions/meta-sync/` pulls, per non-archived client with an `ad_account_id`, Meta's
@@ -1798,8 +1780,42 @@ account totals and the morning audit; this adds what it can't say: which ad, and
 - **Tests:** 64 jsdom checks on the real markup and app.js (filters, sorting, escaping, profile,
   saving, validation, the 42P10 fallback, admin gating), 6 deliberate mutations all caught; 27
   PGlite checks on the SQL against the live policy/index shape, including RLS as a client signing
+- **Done column paging (2026-10-05):** newest-finished first, 8 cards, then "View N more" in steps
+  of 20 (`TASK_DONE_CAP`, `TASK_DONE_STEP`); the column count stays the total. Sortable only drags
+  `.kanban-card`, so the button can't be dragged into a column.
+- **Archive instead of delete (2026-10-05), `supabase/sql/task_archive.sql`:** `tasks.archived_at`
+  / `archived_by`. `fetchAllGlobalData` (and the portal load) splits archived rows into
+  `globalArchivedTasks`, so every board, count, report, the portal and the stage-advance rule
+  ignore them as if deleted. **The row is kept on purpose:** task generation dedupes on title
+  against the database, so an archived onboarding or checklist task isn't recreated, where a
+  deleted one would be. `reconcile_auto_checks()` skips archived rows (re-run
+  `auto_check_reconcile.sql`), and `client-summary` leaves them out (deploy after the SQL).
+  Tasks → **Archived** is the list view of archived rows (filters still apply) with Restore and
+  Delete forever; delete forever only ever touches archived ids. Admin only, like delete was.
+  Client RLS doesn't filter archived rows: the portal hides them in app.js, and they were readable
+  by that client before archiving anyway.
+- **List view escapes task titles and client names now.** It printed them raw, and Client Request
+  titles are typed by clients, so one could run script on our dashboard. The board already escaped.
   in through the email fallback.
 
+## Roster (built 2026-10-02)
+
+`page-roster`, opened by **View all** on the overview's Active roster. Admin only: `switchAppPage`
+sends anyone else to the overview, and `rosterToggle`/`openRosterProfile` refuse them.
+`renderRoster` (filters: status, opening on Active, service incl. "Base only", search over client and people; no MRR,
+by the user's choice) lives in app.js after the Roster comment block.
+- **A client's profile opens under its own row** (`rosterToggle`, one open at a time;
+  `rosterProfileHtml` builds it, `renderRosterDetail` redraws just it while editing). It sits in
+  the horizontally scrolling table, so `.roster-detail` is `position: sticky; left: 0` with the
+  visible width, and the table's wrapper is `overflow: clip`, not `hidden` (hidden would become
+  the scroll container and break the sticky). It replaced a side drawer on 2026-10-02.
+
+- **People are `client_contacts`**, the table the check-in reminder reads. `client_directory.sql`
+  added `email`, `role` (owner/sales/office/website/marketing/other) and **`checkin_texts`**
+  (default true, so existing rows kept texting). `send_weekly_checkin_reminders()` now skips rows
+  with it off, and `isCheckinContact()` in app.js applies the same rule to the portal team step,
+  profile and reporter counts. The Roster's new-person rows default it off.
+  `checkin_reminder_secret.sql` is superseded for the function; don't re-run its function body.
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -1818,24 +1834,6 @@ stays null when no row has a value, so "not reported" still differs from a repor
 - **Text check-ins:** no breakdown (null). The SEO tab counts them as "source not given".
 - **Missing column:** if `closes_by_source` isn't in the database, the submit retries without
   it, so a client's totals are never lost to a schema that's behind.
-- **Write for the person using the dashboard**, not as a commit message. Say what they can now do,
-  and what it fixed if that matters.
-- **The badge** on the tab counts entries dated after the last visit, kept in `localStorage`
-  (`ge-updates-seen`) per browser, and clears when the list is opened. `renderGoldenEye()` refreshes it.
-- **Everything is escaped** (`escapeAttr`) — the file is trusted, but it renders into the dashboard.
-- **Tests:** 12 jsdom checks, including that the real `updates.json` parses and is in date order.
-
-## Conventions
-
-- Client names are compared **normalized** (lowercased, non-alphanumerics stripped) almost
-  everywhere, because Meta renames ad accounts freely. A few spots still match exactly —
-  that mismatch has caused silent misses.
-- A task belongs to the client when its **assignee is "Client"**.
-- Task generation dedupes on title within client+stage, so re-running is always safe.
-- `escapeAttr` for HTML attributes and text; `escapeHTML` is a *JS-string* escaper and is
-  only correct inside inline `onclick`. Using it in `value="..."` added a backslash before
-  every apostrophe on each save.
-
 - The check-in history shows "From Google" for weeks with a breakdown. 16 checks. Reporting week is the **completed** Mon–Sun.
 **One row per person** — several reps per client, totals sum them. Reports tab stays
 locked until the week's numbers are in. Reminder recipients come from `client_contacts`,
@@ -1872,6 +1870,24 @@ setup step is visible without reading a chat log.
   Resume on modules that write.
 - **Make webhooks cache their data structure.** New payload fields need "Redetermine data
   structure" + a re-send.
+- **Write for the person using the dashboard**, not as a commit message. Say what they can now do,
+  and what it fixed if that matters.
+- **The badge** on the tab counts entries dated after the last visit, kept in `localStorage`
+  (`ge-updates-seen`) per browser, and clears when the list is opened. `renderGoldenEye()` refreshes it.
+- **Everything is escaped** (`escapeAttr`) — the file is trusted, but it renders into the dashboard.
+- **Tests:** 12 jsdom checks, including that the real `updates.json` parses and is in date order.
+
+## Conventions
+
+- Client names are compared **normalized** (lowercased, non-alphanumerics stripped) almost
+  everywhere, because Meta renames ad accounts freely. A few spots still match exactly —
+  that mismatch has caused silent misses.
+- A task belongs to the client when its **assignee is "Client"**.
+- Task generation dedupes on title within client+stage, so re-running is always safe.
+- `escapeAttr` for HTML attributes and text; `escapeHTML` is a *JS-string* escaper and is
+  only correct inside inline `onclick`. Using it in `value="..."` added a backslash before
+  every apostrophe on each save.
+
 - **Supabase Search Rows defaults to a limit of 10.** Cross that many clients and the rest
   silently get nothing.
 - **pg_cron runs in UTC** — reminder times shift an hour at daylight saving.

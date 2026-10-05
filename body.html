@@ -684,12 +684,18 @@
                                 <button onclick="switchTaskView('kanban')" id="btn-view-kanban" class="view-btn active"><i class="fa-solid fa-table-columns mr-2"></i>Board</button>
                                 <button onclick="switchTaskView('table')" id="btn-view-table" class="view-btn" style="border-left:1px solid var(--line);"><i class="fa-solid fa-list mr-2"></i>List</button>
                             </div>
+                            <button id="btn-task-archived" onclick="setTaskArchiveView(true)" class="hidden ge-label" style="color:var(--t2); cursor:pointer;" title="Tasks you archived; restore or delete them here"><i class="fa-solid fa-box-archive mr-1"></i>Archived <span id="task-archived-count"></span></button>
                             <button id="btn-columns" onclick="openColumnDrawer()" class="glass-pill hidden !py-1.5 !px-3 !text-xs" title="Choose which columns the list shows"><i class="fa-solid fa-table-columns"></i> Columns</button>
                             <button onclick="openTaskDrawer('new')" class="btn-primary btn text-sm whitespace-nowrap"><i class="fa-solid fa-plus mr-2"></i> New task</button>
                         </div>
                     </div>
 
-                    <div id="t-bulk-bar" class="p-4 flex justify-between items-center hidden" style="background:var(--goldWash); border:1px solid var(--goldLine); border-radius:3px;"><div class="flex items-center gap-4"><span class="text-sm font-bold" style="color:var(--gold);"><span id="t-bulk-count">0</span> Selected</span><button onclick="updateSelectedStatus()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button onclick="deleteSelectedTasks()" class="text-xs font-bold" style="color:var(--neg);"><i class="fa-solid fa-trash mr-1"></i> Delete</button></div><button onclick="clearSelection()" class="text-xs" style="color:var(--t2);"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
+                    <div id="task-archive-banner" class="hidden flex flex-wrap items-center justify-between gap-3 p-4" style="background:var(--inset); border:1px solid var(--line); border-radius:3px;">
+                        <span class="text-sm" style="color:var(--t2);"><i class="fa-solid fa-box-archive mr-2" style="color:var(--gold);"></i>Archived tasks. They're off every board, report and count. Select some to restore them or delete them for good.</span>
+                        <button onclick="setTaskArchiveView(false)" class="ge-label" style="color:var(--gold); cursor:pointer;">&larr; Back to tasks</button>
+                    </div>
+
+                    <div id="t-bulk-bar" class="p-4 flex justify-between items-center hidden" style="background:var(--goldWash); border:1px solid var(--goldLine); border-radius:3px;"><div class="flex items-center gap-4"><span class="text-sm font-bold" style="color:var(--gold);"><span id="t-bulk-count">0</span> Selected</span><button id="t-bulk-status" onclick="updateSelectedStatus()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button id="t-bulk-archive" onclick="archiveSelectedTasks()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-box-archive mr-1"></i> Archive</button><button id="t-bulk-restore" onclick="restoreSelectedTasks()" class="text-xs font-bold hidden" style="color:var(--pos);"><i class="fa-solid fa-rotate-left mr-1"></i> Restore</button><button id="t-bulk-delete" onclick="deleteArchivedForever()" class="text-xs font-bold hidden" style="color:var(--neg);"><i class="fa-solid fa-trash mr-1"></i> Delete forever</button></div><button onclick="clearSelection()" class="text-xs" style="color:var(--t2);"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
 
                     <div id="view-kanban" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; align-items:start;">
                         <div style="display:flex; flex-direction:column; gap:12px;">
@@ -2773,7 +2779,7 @@
             </div>
             <div class="p-6 flex flex-col gap-3" style="border-top:1px solid var(--line); background:var(--inset);">
                 <button type="submit" id="t-save-btn" class="btn-primary btn text-sm w-full">Save task</button>
-                <button type="button" id="t-delete-btn" onclick="deleteTask()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--neg); color:var(--neg);">Delete task</button>
+                <button type="button" id="t-delete-btn" onclick="archiveTask()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--line); color:var(--t2);"><i class="fa-solid fa-box-archive mr-2"></i>Archive task</button>
             </div>
         </form>
 
