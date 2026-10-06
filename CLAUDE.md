@@ -1864,6 +1864,22 @@ themselves and log the answers on the Roster. `supabase/sql/staff_checkins.sql`:
   Onboarding with nothing for last week). The sidebar badge counts Missing.
 - **Tests:** 53 jsdom checks (8 mutations, all caught), the Roster's 74, 20 PGlite checks on the SQL.
 
+## The easter egg (built 2026-10-06)
+
+One click on the logo (sidebar or phone header) goes to the overview. **Seven clicks within 2.5 s,
+admins only**, load `egg.js` from the same place as app.js (`GE_ASSET_BASE`, read from
+`document.currentScript` at startup) and open it. Nothing is fetched until then.
+- **The code:** `ZLCLYUHFH` is SEVERNAYA moved 7 letters forward. Hints after 2 and 4 wrong tries.
+- **The game:** one 24×24 level, a canvas raycaster at 320×200. Objectives: 3 check-ins, 8 of 11
+  "CPL spikes", then the exit. Keyboard and mouse (pointer lock; arrow keys still turn if a frame
+  refuses it). Touch-only devices are told it needs a keyboard.
+- **Original work only:** art is drawn from strings and canvas shapes, sounds are WebAudio. No film or
+  game names in the art, no music, no copied assets.
+- **Leaderboard:** `egg_runs` (`supabase/sql/egg_runs.sql`), admins read and insert as themselves, no
+  updates, 10 s minimum time. The end screen shows each person's best.
+- **Local preview only:** `window.__geEggDebug` exists only on localhost, for driving the game in tests.
+- **Tests:** map connectivity and cipher in node, 9 PGlite checks on the SQL, a full run in the browser.
+
 ## Settings → Updates (built 2026-09-15)
 
 A plain-English list of every change to Golden Eye, from **`updates.json` in the repo root**, served

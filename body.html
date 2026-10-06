@@ -392,7 +392,7 @@
         <div id="admin-dashboard-container" class="hidden flex h-screen w-full relative z-10">
             
             <nav class="w-64 m-4 mr-0 hidden md:flex flex-col sticky top-4 h-[calc(100vh-2rem)] shrink-0" style="background:var(--panel); border:1px solid var(--line); border-radius:3px;">
-                <div style="padding:20px 20px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px;">
+                <div id="ge-logo" onclick="geLogoClick()" title="Overview" style="padding:20px 20px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; cursor:pointer; user-select:none;">
                     <img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" style="height:26px;" alt="Midas Media">
                     <div>
                         <div class="ge-title" style="font-size:20px;">golden eye.</div>
@@ -436,7 +436,7 @@
 
             <main class="flex-1 flex flex-col h-screen overflow-y-auto relative pb-20 md:pb-0">
                 <header class="md:hidden flex justify-between items-center p-4 border-b border-white/10 glass m-4 mb-0 shrink-0">
-                    <div class="flex items-center shrink-0"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-7" alt="Golden Eye"></div>
+                    <div class="flex items-center shrink-0" onclick="geLogoClick()" style="cursor:pointer; user-select:none;"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-7" alt="Golden Eye"></div>
                     <!-- Every sidebar destination, or the pages missing here are simply
                          unreachable on a phone. Scrolls sideways rather than wrapping,
                          so the header stays one row however many there are. -->

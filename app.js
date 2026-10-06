@@ -1,6 +1,9 @@
         // ================= GLOBAL STATE =================
         const wrapper = document.getElementById('midas-master');
         const supabaseClient = window.supabase.createClient(wrapper.dataset.supaUrl, wrapper.dataset.supaKey);
+        // Where app.js was served from (GitHub Pages, or a local preview), for files fetched
+        // later on demand. Read now: document.currentScript is only set while this first runs.
+        const GE_ASSET_BASE = (document.currentScript?.src || '').replace(/\/app\.js(\?.*)?$/, '') || 'https://video-tech.github.io/goldeneye-dashboard';
 
         // Startup timings, printed once as a table in the console (look for [STARTUP]).
         // Times are ms since the page began loading, so the first row shows how long the
@@ -12321,6 +12324,45 @@ function rosterPrimaryName(c) {
 // notes, connections or editing people. Contacts are readable to them by RLS; client_profiles
 // (notes) is admin-only, so it never even loads for them.
 function rosterAllowed() { return currentUserRole === 'admin' || currentUserRole === 'member'; }
+
+// ---- The logo ----
+// One click goes to the overview. Seven quick clicks (admins only) open the easter egg:
+// egg.js, fetched only then, asks for a code and runs a small first-person mission.
+// Best times go in egg_runs (supabase/sql/egg_runs.sql).
+let geLogoClicks = [];
+window.geLogoClick = function() {
+    const now = Date.now();
+    geLogoClicks = geLogoClicks.filter(t => now - t < 2500);
+    geLogoClicks.push(now);
+    if (geLogoClicks.length === 1) navTo('goldeneye');
+    if (geLogoClicks.length >= 7 && currentUserRole === 'admin') {
+        geLogoClicks = [];
+        openGeEgg();
+    }
+};
+
+function geEggOptions() {
+    return {
+        playerEmail: clientEmail,
+        loadScores: () => supabaseClient.from('egg_runs')
+            .select('player_email, player_name, time_ms, kills, accuracy, created_at')
+            .order('time_ms', { ascending: true }).limit(300),
+        saveScore: (run) => supabaseClient.from('egg_runs').insert([{
+            ...run,
+            player_email: clientEmail,
+            player_name: (currentUserFullName || (currentUserName !== 'User' ? currentUserName : '') || String(clientEmail || '').split('@')[0]).trim().split(/\s+/)[0],
+        }]),
+    };
+}
+
+function openGeEgg() {
+    if (window.GEEgg) { window.GEEgg.start(geEggOptions()); return; }
+    const s = document.createElement('script');
+    s.src = `${GE_ASSET_BASE}/egg.js?v=${Date.now()}`;
+    s.onload = () => window.GEEgg && window.GEEgg.start(geEggOptions());
+    s.onerror = () => console.error('Golden Eye: could not load egg.js from ' + s.src);
+    document.body.appendChild(s);
+}
 
 // The sidebar tab (and its phone icon) for admins and VAs, badged with how many clients still
 // owe last week's numbers
