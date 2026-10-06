@@ -280,6 +280,9 @@
         .ob-chip.ob-chip-web[aria-pressed="true"] { background: rgba(143,174,144,0.15); border-color: rgba(143,174,144,0.45); color: var(--pos); }
         .ob-chip.ob-chip-off { border-style: dashed; }
         .ob-chip:focus-visible { outline: 2px solid var(--goldSolid); outline-offset: 1px; }
+        /* Class, not inline style: an inline display:grid beat .hidden, so the Board never hid when List was picked */
+        .task-kanban-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 18px; align-items: start; }
+        .task-kanban-grid.hidden { display: none; }
         .view-btn { padding: 0.4rem 1rem; font-size: 0.8rem; font-weight: bold; border-radius: 2px; transition: 0.2s; color: var(--t2); }
         .view-btn.active { background: var(--inset); color: var(--t1); border: 1px solid var(--line); }
 
@@ -699,7 +702,7 @@
 
                     <div id="t-bulk-bar" class="p-4 flex justify-between items-center hidden" style="background:var(--goldWash); border:1px solid var(--goldLine); border-radius:3px;"><div class="flex items-center gap-4"><span class="text-sm font-bold" style="color:var(--gold);"><span id="t-bulk-count">0</span> Selected</span><button id="t-bulk-status" onclick="updateSelectedStatus()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button id="t-bulk-archive" onclick="archiveSelectedTasks()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-box-archive mr-1"></i> Archive</button><button id="t-bulk-restore" onclick="restoreSelectedTasks()" class="text-xs font-bold hidden" style="color:var(--pos);"><i class="fa-solid fa-rotate-left mr-1"></i> Restore</button><button id="t-bulk-delete" onclick="deleteArchivedForever()" class="text-xs font-bold hidden" style="color:var(--neg);"><i class="fa-solid fa-trash mr-1"></i> Delete forever</button></div><button onclick="clearSelection()" class="text-xs" style="color:var(--t2);"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
 
-                    <div id="view-kanban" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; align-items:start;">
+                    <div id="view-kanban" class="task-kanban-grid">
                         <div style="display:flex; flex-direction:column; gap:12px;">
                             <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--t3);"></span><span class="ge-label" style="font-size:10px;">To do</span><span class="ge-num text-xs" style="margin-left:auto; color:var(--t3);" id="count-todo">0</span></div>
                             <div class="kanban-col space-y-2.5" data-status="Not Started" id="col-todo" style="min-height:180px;"></div>
@@ -713,7 +716,7 @@
                             <div class="kanban-col space-y-2.5" data-status="Blocked" id="col-rev" style="min-height:180px;"></div>
                         </div>
                         <div style="display:flex; flex-direction:column; gap:12px;">
-                            <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--pos);"></span><span class="ge-label" style="font-size:10px;">Done</span><span class="ge-num text-xs" style="margin-left:auto; color:var(--t3);" id="count-done">0</span></div>
+                            <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--pos);"></span><span class="ge-label" style="font-size:10px;">Done</span><button type="button" id="btn-archive-done" onclick="archiveDoneTasks()" class="hidden ge-label" style="margin-left:auto; color:var(--t2); cursor:pointer; font-size:10px;" title="Archive every finished task shown by the current filters"><i class="fa-solid fa-box-archive mr-1"></i>Archive done</button><span class="ge-num text-xs" style="color:var(--t3);" id="count-done">0</span></div>
                             <div class="kanban-col space-y-2.5" data-status="Complete" id="col-done" style="min-height:180px;"></div>
                         </div>
                     </div>

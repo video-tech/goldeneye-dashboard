@@ -4345,6 +4345,8 @@ window.submitClientRequest = async function() {
                         </div>`;
             });
             counts['Complete'] = doneAll.length;
+            const archBtn = document.getElementById('btn-archive-done');
+            if (archBtn) { const n = doneAll.filter(t => !t.__onboardingStep).length; archBtn.classList.toggle('hidden', currentUserRole !== 'admin' || !n); }
             if (doneHidden > 0 && cols['Complete']) {
                 cols['Complete'].insertAdjacentHTML('beforeend', `<button type="button" class="kanban-more w-full ge-label" onclick="showMoreDoneTasks()"
                     style="padding:10px; border:1px dashed var(--line); border-radius:3px; color:var(--gold); cursor:pointer;">View ${Math.min(doneHidden, TASK_DONE_STEP)} more <span style="color:var(--t3);">(${doneHidden} older)</span></button>`);
@@ -4446,6 +4448,16 @@ window.submitClientRequest = async function() {
             const ids = Array.from(selectedTaskIds);
             if (!ids.length || !confirm(`Archive ${ids.length} task(s)? They leave the board but can be restored from Archived.`)) return;
             if (await setTasksArchived(ids, true)) { selectedTaskIds.clear(); await refreshAfterTaskChange(); }
+        }
+
+        // Board counterpart of the list's bulk Archive: every finished task the current filters and
+        // search show (including ones behind "View more"), never the onboarding pseudo-cards.
+        async function archiveDoneTasks(){
+            if (currentUserRole !== 'admin') return alert('Admin only');
+            const q = (document.getElementById('task-search-filter')?.value || '').toLowerCase();
+            const ids = globalTasksData.filter(t => (t.status || 'Not Started') === 'Complete' && taskTextMatch(t, q) && taskMatchesFilters(t)).map(t => t.id);
+            if (!ids.length || !confirm(`Archive ${ids.length} finished task(s)? They leave the board but can be restored from Archived.`)) return;
+            if (await setTasksArchived(ids, true)) await refreshAfterTaskChange();
         }
 
         async function restoreSelectedTasks(){
