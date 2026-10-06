@@ -3,6 +3,12 @@
   "updates": [
     {
       "date": "2026-10-06",
+      "area": "Tasks",
+      "title": "Board and List are different again, and the Board can archive",
+      "what": "Clicking List used to leave the Board showing, so the two looked the same and the List's checkboxes and Archive button were easy to miss. List now replaces the Board. The Board's Done column also has an Archive done button that archives every finished task the current filters show."
+    },
+    {
+      "date": "2026-10-06",
       "area": "Data",
       "title": "Classified",
       "what": "Something is hidden in Golden Eye. Agents only. Clicking the logo once now takes you to the overview.",
