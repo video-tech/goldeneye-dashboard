@@ -453,6 +453,7 @@
                         // drawn again only if it actually changed something.
                         await fetchAllGlobalData(globalAllowedClients, { deferCatchUp: true });
                         geStartupMark('data loaded');
+                        updateRosterNav();
 
                         // Restore the last visited page from memory, or default to the goldeneye dashboard
                         const savedPage = localStorage.getItem('midas_current_page') || 'goldeneye';
@@ -2595,10 +2596,19 @@ function portalCheckinFor(client, week, who = clientEmail) {
         String(c.contact_name || '').trim().toLowerCase() === key) || null;
 }
 
+// Rows our team logged from the client's texts (Roster → Log check-in, source 'staff')
+function staffCheckinsFor(client, week) {
+    return globalCheckinsData.filter(c =>
+        normalize(c.client_name || '') === normalize(client || '') &&
+        c.week_start === week && c.source === 'staff');
+}
+
 function weeklyCheckinOutstanding() {
     // An admin viewing a client's portal must not file numbers as them
     if (currentUserRole === 'admin') return false;
-    return !portalCheckinFor(currentActiveClient, reportingWeekStart());
+    const week = reportingWeekStart();
+    // A week our team already logged is done: no popup, and the reports unlock
+    return !portalCheckinFor(currentActiveClient, week) && !staffCheckinsFor(currentActiveClient, week).length;
 }
 
 const money0 = n => '$' + Math.round(Number(n) || 0).toLocaleString();
@@ -2629,8 +2639,11 @@ window.updateCheckinSourceTotal = function(suffix) {
         : 'Leave blank if nothing closed. A zero week is fine, just enter 0.';
 };
 
-function weeklyCheckinFormHtml(suffix) {
-    const existing = portalCheckinFor(currentActiveClient, reportingWeekStart());
+// opts lets the Roster reuse the form for a VA's entry: its own row to prefill, its own save
+function weeklyCheckinFormHtml(suffix, opts = {}) {
+    const existing = 'existing' in opts ? opts.existing : portalCheckinFor(currentActiveClient, reportingWeekStart());
+    const submitCall = opts.submitCall || `submitWeeklyCheckin('${suffix}')`;
+    const submitLabel = opts.submitLabel || (existing ? 'Update this week' : 'Submit');
     const v = f => existing?.[f] ?? '';
 
     // Prefill each source row from a saved breakdown. A check-in saved before sources existed
@@ -2675,9 +2688,10 @@ function weeklyCheckinFormHtml(suffix) {
                 <p class="text-[11px] mb-2 -mt-1" style="color:var(--t3);">Someone who called, walked in or used your website, but told you they'd seen the ads. We can't track these automatically, so this is the only way they get counted.</p>
                 <input type="number" min="0" step="1" id="wc-indirect-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('indirect_leads'))}">
             </div>
+            ${opts.beforeSubmit || ''}
             <p id="wc-error-${suffix}" class="text-sm hidden" style="color:var(--neg);"></p>
-            <button id="wc-submit-${suffix}" onclick="submitWeeklyCheckin('${suffix}')" class="btn-primary btn text-sm w-full">
-                ${existing ? 'Update this week' : 'Submit'}
+            <button id="wc-submit-${suffix}" onclick="${submitCall}" class="btn-primary btn text-sm w-full">
+                ${submitLabel}
             </button>
         </div>`;
 }
@@ -2753,16 +2767,37 @@ window.openCpReport = function(id) {
 window.renderWeeklyCheckin = function() {
     const week = reportingWeekStart();
     const existing = portalCheckinFor(currentActiveClient, week);
+    // When our team logged this week from their texts, show that instead of a blank form:
+    // a second entry from the client would be added on top and double the week.
+    const logged = existing ? [] : staffCheckinsFor(currentActiveClient, week);
 
     const mount = document.getElementById('cp-checkin-form-mount');
-    if (mount) { mount.innerHTML = weeklyCheckinFormHtml('tab'); updateCheckinSourceTotal('tab'); }
+    if (mount) {
+        if (logged.length) {
+            const sum = f => logged.some(r => r[f] != null) ? logged.reduce((n, r) => n + (Number(r[f]) || 0), 0) : null;
+            const est = sum('estimates_count'), jobs = sum('closes_count'), rev = sum('revenue_total');
+            const parts = [
+                est != null ? `${est} estimate${est === 1 ? '' : 's'}` : '',
+                jobs != null ? `${jobs} job${jobs === 1 ? '' : 's'} closed` : '',
+                rev != null ? money0(rev) : ''
+            ].filter(Boolean);
+            mount.innerHTML = `<div class="text-sm p-4" style="background:var(--inset); border-radius:3px; color:var(--t2);">
+                <p style="color:var(--t1);"><i class="fa-solid fa-circle-check mr-2" style="color:var(--pos);"></i>${escapeAttr(parts.join(' · ') || 'Logged')}</p>
+                <p class="mt-2">If anything's off, just reply to our text and we'll fix it.</p></div>`;
+        } else {
+            mount.innerHTML = weeklyCheckinFormHtml('tab');
+            updateCheckinSourceTotal('tab');
+        }
+    }
 
     const head = document.getElementById('cp-checkin-heading');
     if (head) head.innerText = `Numbers for ${weekRangeLabel(week)}`;
 
     const sub = document.getElementById('cp-checkin-subhead');
     if (sub) {
-        sub.innerText = existing
+        sub.innerText = logged.length
+            ? 'Our team logged your numbers for this week from your texts.'
+            : existing
             ? "You've already sent your numbers for this week — change them below if anything's moved."
             : 'Takes about a minute, and only covers your own numbers. These build your revenue reporting and the network leaderboard.';
     }
@@ -2820,12 +2855,11 @@ window.renderWeeklyCheckin = function() {
     }).join('');
 };
 
-window.submitWeeklyCheckin = async function(suffix) {
-    if (previewBlocksWrite('submitting a check-in')) return;
-    const btn = document.getElementById(`wc-submit-${suffix}`);
-    const err = document.getElementById(`wc-error-${suffix}`);
+// Reads the check-in form with this suffix. Shared by the client's own check-in and the
+// Roster's "Log check-in", so both save exactly the same shape.
+function readCheckinForm(suffix) {
     const num = id => {
-        const raw = document.getElementById(`wc-${id}-${suffix}`).value.trim();
+        const raw = (document.getElementById(`wc-${id}-${suffix}`)?.value || '').trim();
         return raw === '' ? null : Number(raw);
     };
 
@@ -2854,17 +2888,22 @@ window.submitWeeklyCheckin = async function(suffix) {
         ...Object.values(bySource).flatMap(x => [x.closes, x.revenue])
     ].filter(v => v !== null);
 
+    if (!entered.length) return { error: 'Put a number in at least one box — a zero week is fine, just enter 0.' };
+    if (entered.some(v => !isFinite(v) || v < 0)) return { error: 'Those need to be positive numbers.' };
+    return { row, numbers };
+}
+
+window.submitWeeklyCheckin = async function(suffix) {
+    if (previewBlocksWrite('submitting a check-in')) return;
+    const btn = document.getElementById(`wc-submit-${suffix}`);
+    const err = document.getElementById(`wc-error-${suffix}`);
+
     const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
     if (err) err.classList.add('hidden');
 
-    if (!entered.length) {
-        show('Put a number in at least one box — a zero week is fine, just enter 0.');
-        return;
-    }
-    if (entered.some(v => !isFinite(v) || v < 0)) {
-        show('Those need to be positive numbers.');
-        return;
-    }
+    const form = readCheckinForm(suffix);
+    if (form.error) { show(form.error); return; }
+    const { row, numbers } = form;
 
     const original = btn.innerHTML;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
@@ -3726,9 +3765,9 @@ window.submitClientRequest = async function() {
 
         function navTo(page) { switchAppPage(page); }
         function switchAppPage(page) {
-            // The roster carries contacts and private notes, so it's admin only. A non-admin
-            // who lands on it (a page saved in localStorage) gets the overview instead.
-            if (page === 'roster' && currentUserRole !== 'admin') page = 'goldeneye';
+            // The roster is for admins and VAs (members), who see a trimmed version: people and
+            // check-ins only. Anyone else who lands on it (a saved page) gets the overview instead.
+            if (page === 'roster' && !rosterAllowed()) page = 'goldeneye';
 
             // Save the page choice to the browser's local memory
             localStorage.setItem('midas_current_page', page);
@@ -3955,7 +3994,8 @@ window.submitClientRequest = async function() {
             const rosterAdd = document.getElementById('btn-add-client-roster');
             if (rosterAdd) rosterAdd.classList.toggle('hidden', currentUserRole !== 'admin');
             const rosterAll = document.getElementById('btn-roster-view-all');
-            if (rosterAll) rosterAll.classList.toggle('hidden', currentUserRole !== 'admin');
+            if (rosterAll) rosterAll.classList.toggle('hidden', !rosterAllowed());
+            updateRosterNav();
 
             document.getElementById('dash-client-count').innerText = `${activeClients.length} Active`; let clientListHtml = '';
             // Div-grid rows matching the target design's fixed side columns, not a <table> —
@@ -12276,19 +12316,57 @@ function rosterPrimaryName(c) {
     return owner?.contact_name || c.contact_name || '';
 }
 
+// Admins and VAs (member logins). VAs see only their assigned clients (fetchAllGlobalData already
+// scopes the data), and in a client's profile only the people and the check-ins: no billing,
+// notes, connections or editing people. Contacts are readable to them by RLS; client_profiles
+// (notes) is admin-only, so it never even loads for them.
+function rosterAllowed() { return currentUserRole === 'admin' || currentUserRole === 'member'; }
+
+// The sidebar tab (and its phone icon) for admins and VAs, badged with how many clients still
+// owe last week's numbers
+function updateRosterNav() {
+    const ok = rosterAllowed();
+    ['nav-roster', 'm-nav-roster'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !ok));
+    const badge = document.getElementById('nav-badge-roster');
+    if (badge) {
+        const missing = ok ? (globalClientsData || []).filter(c => rosterCheckinStatus(c).state === 'missing').length : 0;
+        badge.innerText = missing ? String(missing) : '';
+        badge.title = missing ? `${missing} client${missing === 1 ? '' : 's'} still owe last week's numbers` : '';
+    }
+}
+const rosterIsAdmin = () => currentUserRole === 'admin';
+
+// `admin` columns are hidden from VAs. Widths become the row grid, so header and rows match.
 const ROSTER_COLUMNS = [
-    { key: 'name',     label: 'Client' },
-    { key: 'status',   label: 'Status' },
-    { key: null,       label: 'Services' },
-    { key: 'stage',    label: 'Stage' },
-    { key: 'health',   label: 'Health', right: true },
-    { key: 'retainer', label: 'Retainer', right: true },
-    { key: 'payment',  label: 'Payment' },
-    { key: 'end',      label: 'Contract end' },
+    { key: 'name',     label: 'Client',       w: 'minmax(0,1.6fr)' },
+    { key: 'status',   label: 'Status',       w: '92px' },
+    { key: null,       label: 'Services',     w: 'minmax(0,1.2fr)', admin: true },
+    { key: 'stage',    label: 'Stage',        w: '120px' },
+    { key: 'checkin',  label: 'Check-in',     w: '112px' },
+    { key: 'health',   label: 'Health',       w: '84px', right: true, admin: true },
+    { key: 'retainer', label: 'Retainer',     w: '96px', right: true, admin: true },
+    { key: 'payment',  label: 'Payment',      w: '84px', admin: true },
+    { key: 'end',      label: 'Contract end', w: '96px', admin: true },
 ];
+const rosterColumns = () => ROSTER_COLUMNS.filter(c => !c.admin || rosterIsAdmin());
+const rosterGridStyle = () => `grid-template-columns:${rosterColumns().map(c => c.w).join(' ')};`;
+
+// This reporting week's check-in, the one VAs collect by text. "Expected" is the same rule the
+// old reminder texts used: active clients past Onboarding.
+function rosterCheckinStatus(c) {
+    const week = reportingWeekStart();
+    const rows = checkinsForClient(c.name).filter(r => r.week_start === week);
+    if (rows.length) {
+        const byStaff = rows.some(r => r.source === 'staff');
+        return { state: 'in', label: byStaff ? 'Logged' : 'Client sent', rank: 2 };
+    }
+    const expected = isActiveClient(c) && (c.current_stage || 'Onboarding') !== 'Onboarding';
+    return expected ? { state: 'missing', label: 'Missing', rank: 0 } : { state: 'na', label: '—', rank: 3 };
+}
 
 function rosterSortValue(c, key) {
     switch (key) {
+        case 'checkin':  return rosterCheckinStatus(c).rank;
         case 'name':     return String(c.name || '').toLowerCase();
         case 'status':   return ['active', 'paused', 'archived'].indexOf(rosterStatusOf(c));
         case 'stage':    return String(c.current_stage || '').toLowerCase();
@@ -12359,7 +12437,9 @@ window.renderRoster = function() {
         return (va < vb ? -1 : va > vb ? 1 : 0) * dir || String(a.name).localeCompare(String(b.name));
     });
 
-    document.getElementById('roster-head').innerHTML = ROSTER_COLUMNS.map(col => {
+    const head = document.getElementById('roster-head');
+    head.setAttribute('style', `padding:10px 16px; ${rosterGridStyle()}`);
+    head.innerHTML = rosterColumns().map(col => {
         if (!col.key) return `<span>${col.label}</span>`;
         const arrow = sort === col.key ? (dir === 1 ? ' ↑' : ' ↓') : '';
         return `<span class="roster-sort" style="${col.right ? 'text-align:right;' : ''}${sort === col.key ? ' color:var(--gold);' : ''}" onclick="rosterSortBy('${col.key}')">${col.label}${arrow}</span>`;
@@ -12384,25 +12464,33 @@ window.renderRoster = function() {
         const months = c.months_remaining !== null && c.months_remaining !== undefined && c.contract_end_date
             ? `<div class="ge-label" style="margin-top:3px;">${c.months_remaining} mo left</div>` : '';
 
-        const isOpen = c.name === rosterOpenClient;
-        return `<div class="roster-grid roster-row${isOpen ? ' open' : ''}" data-client="${escapeAttr(c.name)}" onclick="rosterToggle(this.dataset.client)" aria-expanded="${isOpen}">
-            <div style="min-width:0; display:flex; align-items:center; gap:10px;">
+        const ck = rosterCheckinStatus(c);
+        const ckColor = { in: 'var(--pos)', missing: 'var(--warn)', na: 'var(--t3)' }[ck.state];
+
+        const cells = {
+            name: `<div style="min-width:0; display:flex; align-items:center; gap:10px;">
                 <i class="fa-solid fa-chevron-right roster-chev"></i>
                 <div style="min-width:0;">
                     <div style="font-size:13.5px; font-weight:500; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${rosterEsc(c.name)}</div>
                     <div style="font-size:12px; color:var(--t2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${primary ? rosterEsc(primary) : '<span style="color:var(--t3);">No contact on file</span>'}</div>
                 </div>
-            </div>
-            <span class="ge-label" style="color:${ROSTER_STATUS_COLOR[status] || 'var(--t3)'};">${status}</span>
-            <div style="display:flex; flex-wrap:wrap; gap:4px; min-width:0;">${svcHtml}</div>
-            <span class="text-sm" style="color:var(--t2);">${rosterEsc(c.current_stage || '—')}</span>
-            <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+            </div>`,
+            status: `<span class="ge-label" style="color:${ROSTER_STATUS_COLOR[status] || 'var(--t3)'};">${status}</span>`,
+            Services: `<div style="display:flex; flex-wrap:wrap; gap:4px; min-width:0;">${svcHtml}</div>`,
+            stage: `<span class="text-sm" style="color:var(--t2);">${rosterEsc(c.current_stage || '—')}</span>`,
+            checkin: `<span class="ge-label" data-checkin="${ck.state}" style="color:${ckColor};" title="Numbers for ${escapeAttr(weekRangeLabel(reportingWeekStart()))}">${ck.state === 'in' ? '<i class="fa-solid fa-check mr-1"></i>' : ''}${ck.label}</span>`,
+            health: `<div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
                 <div class="score-bar-bg" style="width:30px; height:3px;"><div class="score-bar-fill" style="width:${score}%; background:${sc};"></div></div>
                 <span class="ge-num text-xs" style="color:var(--t2); width:18px; text-align:right;">${score || '—'}</span>
-            </div>
-            <span class="ge-num" style="text-align:right; color:var(--t1); font-size:14px;">${rosterMoney(c.monthly_retainer)}</span>
-            <span class="ge-label" style="color:${payColor};">${payLabel}</span>
-            <div class="text-xs ge-num" style="color:var(--t2);">${c.contract_end_date ? rosterDate(c.contract_end_date) : '—'}${months}</div>
+            </div>`,
+            retainer: `<span class="ge-num" style="text-align:right; color:var(--t1); font-size:14px;">${rosterMoney(c.monthly_retainer)}</span>`,
+            payment: `<span class="ge-label" style="color:${payColor};">${payLabel}</span>`,
+            end: `<div class="text-xs ge-num" style="color:var(--t2);">${c.contract_end_date ? rosterDate(c.contract_end_date) : '—'}${months}</div>`,
+        };
+
+        const isOpen = c.name === rosterOpenClient;
+        return `<div class="roster-grid roster-row${isOpen ? ' open' : ''}" style="${rosterGridStyle()}" data-client="${escapeAttr(c.name)}" onclick="rosterToggle(this.dataset.client)" aria-expanded="${isOpen}">
+            ${rosterColumns().map(col => cells[col.key || col.label]).join('')}
         </div>${isOpen ? `<div class="roster-detail" id="roster-detail">${rosterProfileHtml(c)}</div>` : ''}`;
     }).join('');
 
@@ -12413,7 +12501,7 @@ window.renderRoster = function() {
 // One client open at a time. Clicking the open row closes it; clicking another switches.
 
 window.rosterToggle = function(name) {
-    if (currentUserRole !== 'admin') return;
+    if (!rosterAllowed()) return;
     rosterOpenClient = rosterOpenClient === name ? null : name;
     rosterEditing = null;
     renderRoster();
@@ -12421,7 +12509,7 @@ window.rosterToggle = function(name) {
 
 // Opens a client's profile and brings it into view (from Edit client's "Manage people").
 window.openRosterProfile = function(name) {
-    if (currentUserRole !== 'admin') return;
+    if (!rosterAllowed()) return;
     rosterOpenClient = name;
     rosterEditing = null;
     // A filter that hides this client would hide its profile too
@@ -12457,7 +12545,7 @@ function rosterPeopleView(c) {
         const phone = digits.length === 10 ? `<a href="tel:+1${digits}" style="color:var(--t1);">${rosterFmtPhone(p.phone)}</a>` : (p.phone ? rosterEsc(p.phone) : '');
         const email = p.email ? `<a href="mailto:${escapeAttr(p.email)}" style="color:var(--gold);">${rosterEsc(p.email)}</a>` : '';
         const texts = p.checkin_texts !== false && p.active !== false && digits.length === 10
-            ? `<span class="roster-chip" style="color:var(--gold);" title="Gets the weekly check-in text">Check-in texts</span>` : '';
+            ? `<span class="roster-chip" style="color:var(--gold);" title="Who our team texts for the weekly numbers">Check-in contact</span>` : '';
         const role = rosterRoleLabel(p.role);
         const roleLine = [role, p.title && String(p.title).trim().toLowerCase() !== role.toLowerCase() ? p.title : null]
             .filter(Boolean).map(rosterEsc).join(' · ');
@@ -12481,7 +12569,7 @@ function rosterPeopleView(c) {
                ${emails.length ? '<span style="color:var(--t3);"> (portal sign-in)</span>' : ''}
            </div>` : '';
 
-    return rosterSectionHead('people.', 'people')
+    return rosterSectionHead('people.', rosterIsAdmin() ? 'people' : null)
         + (rows || `<p class="text-sm" style="color:var(--t2);">No one on file yet. Add the owner, their sales reps, and anyone else you deal with.</p>`)
         + accountLine;
 }
@@ -12498,7 +12586,7 @@ function rosterPersonEditRow(p) {
         <input type="text" class="glass-input !py-1.5 rd-p-title" placeholder="Title (optional)" value="${rosterEsc(p?.title)}">
         <div class="flex items-center justify-between gap-2">
             <label class="flex items-center gap-2 text-xs" style="color:var(--t2); cursor:pointer;">
-                <input type="checkbox" class="rd-p-texts" style="accent-color:var(--goldSolid);"${texts ? ' checked' : ''}> Check-in texts
+                <input type="checkbox" class="rd-p-texts" style="accent-color:var(--goldSolid);"${texts ? ' checked' : ''}> Check-in contact
             </label>
             <button type="button" onclick="this.closest('.rd-edit-row').remove()" class="text-xs" style="color:var(--neg);">Remove</button>
         </div>
@@ -12515,7 +12603,7 @@ function rosterPeopleEdit(c) {
     return rosterSectionHead('people.', null) + `
         <div id="rd-people-edit" class="flex flex-col gap-3">${people.map(rosterPersonEditRow).join('')}</div>
         <button type="button" onclick="rosterAddPerson()" class="text-xs mt-3" style="color:var(--gold); font-weight:600;"><i class="fa-solid fa-plus mr-1"></i> Add person</button>
-        <p class="text-[11px] mt-2" style="color:var(--t3);">Check-in texts: they get the weekly check-in reminder, and need a mobile number. Leave it off for a website person or bookkeeper.</p>
+        <p class="text-[11px] mt-2" style="color:var(--t3);">Check-in contact: who our team texts for the weekly numbers. Needs a mobile number. Leave it off for a website person or bookkeeper.</p>
         <p id="rd-people-error" class="text-sm hidden mt-3" style="color:var(--neg);"></p>
         <div class="flex gap-2 mt-4">
             <button type="button" id="rd-people-save" onclick="rosterSavePeople()" class="btn-primary btn text-sm">Save people</button>
@@ -12564,6 +12652,199 @@ function rosterAnswersHtml(c) {
     return `<div class="rd-section">${rosterSectionHead('onboarding answers.', null)}${rosterKv(items)}</div>`;
 }
 
+// ---- Check-ins on the Roster (supabase/sql/staff_checkins.sql) ----
+// Clients aren't texted for their numbers any more. VAs text the client's check-in contact and
+// log the answer here, as a `staff` row: contact_name / contact_phone are who they texted,
+// entered_by is the VA, raw_reply is what the client said. One row per person per week, the same
+// shape as a client's own portal entry, so every total, the health score, the leaderboard and the
+// weekly report read it unchanged.
+
+let rosterCheckinWeek = null;     // week being logged (YYYY-MM-DD Monday)
+let rosterCheckinWho = '';        // contact id, or '__other'
+
+function rosterCheckinWeeks() {
+    const out = [];
+    const d = new Date();
+    for (let i = 1; i <= 4; i++) {
+        const x = new Date(d); x.setDate(x.getDate() - 7 * i);
+        out.push(weekStartMonday(x));
+    }
+    return out;
+}
+
+const rosterCheckinPeople = (c) => rosterContactsFor(c.name)
+    .filter(p => isCheckinContact(p))
+    .sort((a, b) => rosterRoleRank(a.role) - rosterRoleRank(b.role) || String(a.contact_name || '').localeCompare(String(b.contact_name || '')));
+
+function rosterCheckinWhoSel(c) {
+    const people = rosterCheckinPeople(c);
+    if (rosterCheckinWho === '__other') return { name: '', phone: '' };
+    const p = people.find(x => x.id === rosterCheckinWho) || people[0];
+    return p ? { name: p.contact_name || '', phone: normalizePhone(p.phone) || '' } : { name: '', phone: '' };
+}
+
+// The staff row for this person and week, if one was already logged (to edit, not duplicate).
+function rosterStaffRowFor(c, week, who) {
+    const digits = normalizePhone(who.phone);
+    return checkinsForClient(c.name).find(r => r.week_start === week && r.source === 'staff' && (
+        digits ? normalizePhone(r.contact_phone) === digits
+               : String(r.contact_name || '').trim().toLowerCase() === String(who.name || '').trim().toLowerCase())) || null;
+}
+
+function rosterCheckinRowLabel(r) {
+    const who = stripSlashEscapes(r.contact_name || (r.source === 'portal' ? 'Client' : 'Someone'));
+    const by = r.source === 'staff'
+        ? `logged by ${stripSlashEscapes(String(r.entered_by || 'our team').split('@')[0])}`
+        : r.source === 'portal' ? 'sent by the client' : `by ${r.source || 'text'}`;
+    return `${who}, ${by}`;
+}
+
+function rosterCheckinTotals(w) {
+    const parts = [];
+    if (w.reportedEstimates) parts.push(`${w.estimates_count} estimate${w.estimates_count === 1 ? '' : 's'}`);
+    if (w.reportedCloses) parts.push(`${w.closes_count} job${w.closes_count === 1 ? '' : 's'}`);
+    if (w.reportedRevenue) parts.push(money0(w.revenue_total));
+    return parts.length ? parts.join(' · ') : 'no numbers';
+}
+
+function rosterCheckinsHtml(c) {
+    if (rosterEditing === 'checkin') return rosterCheckinForm(c);
+    const thisWeek = reportingWeekStart();
+    const weeks = checkinsByWeek(c.name).filter(w => w.week_start !== 'Unknown').slice(0, 6);
+    const ck = rosterCheckinStatus(c);
+    const head = `<div class="flex justify-between items-center mb-4"><h3 class="ge-title" style="font-size:15px;">check-ins.</h3>
+        <button type="button" class="btn-primary btn text-xs" onclick="rosterStartCheckin()"><i class="fa-solid fa-plus mr-1"></i>Log check-in</button></div>`;
+    const banner = ck.state === 'missing'
+        ? `<p class="text-sm mb-3" style="color:var(--warn);"><i class="fa-solid fa-circle-exclamation mr-1"></i>Numbers for ${escapeAttr(weekRangeLabel(thisWeek))} aren't in yet.</p>` : '';
+    const list = weeks.length ? weeks.map(w => `
+        <div style="padding:10px 0; border-top:1px solid var(--line);">
+            <div class="flex justify-between gap-3 text-sm">
+                <span style="color:var(--t1);">${escapeAttr(weekRangeLabel(w.week_start))}</span>
+                <span class="ge-num" style="color:var(--t2);">${escapeAttr(rosterCheckinTotals(w))}</span>
+            </div>
+            <div class="text-xs mt-1" style="color:var(--t3);">${w.contributors.map(r => escapeAttr(rosterCheckinRowLabel(r))).join(' · ')}</div>
+        </div>`).join('')
+        : `<p class="text-sm" style="color:var(--t2);">No check-ins yet.</p>`;
+    return head + banner + list;
+}
+
+function rosterCheckinForm(c) {
+    const weeks = rosterCheckinWeeks();
+    if (!rosterCheckinWeek || !weeks.includes(rosterCheckinWeek)) rosterCheckinWeek = weeks[0];
+    const people = rosterCheckinPeople(c);
+    if (!rosterCheckinWho || (rosterCheckinWho !== '__other' && !people.some(p => p.id === rosterCheckinWho))) {
+        rosterCheckinWho = people[0]?.id || '__other';
+    }
+    const who = rosterCheckinWhoSel(c);
+    const existing = rosterCheckinWho === '__other' ? null : rosterStaffRowFor(c, rosterCheckinWeek, who);
+    const sameWeek = checkinsForClient(c.name).filter(r => r.week_start === rosterCheckinWeek && r !== existing);
+
+    const weekOpts = weeks.map(w => `<option value="${w}"${w === rosterCheckinWeek ? ' selected' : ''}>${escapeAttr(weekRangeLabel(w))}</option>`).join('');
+    const whoOpts = people.map(p => `<option value="${escapeAttr(p.id)}"${p.id === rosterCheckinWho ? ' selected' : ''}>${rosterEsc(p.contact_name || 'Unnamed')}${p.phone ? ' · ' + escapeAttr(rosterFmtPhone(p.phone)) : ''}</option>`).join('')
+        + `<option value="__other"${rosterCheckinWho === '__other' ? ' selected' : ''}>Someone else…</option>`;
+
+    const warn = sameWeek.length ? `<div class="text-xs p-3 mb-3" style="background:var(--inset); border-radius:3px; color:var(--t2);">
+            <i class="fa-solid fa-circle-info mr-1" style="color:var(--warn);"></i>Already in for this week: ${sameWeek.map(r => escapeAttr(rosterCheckinRowLabel(r))).join(' · ')}.
+            Each person's numbers are added together, so only log someone not listed here.</div>` : '';
+
+    return `<div class="flex justify-between items-center mb-4"><h3 class="ge-title" style="font-size:15px;">log check-in.</h3></div>
+        <div class="flex flex-col gap-3 mb-4">
+            <div><label class="modal-label">Week</label>
+                <select id="rd-ck-week" class="glass-input" onchange="rosterCheckinPick()">${weekOpts}</select></div>
+            <div><label class="modal-label">Who you texted</label>
+                <select id="rd-ck-who" class="glass-input" onchange="rosterCheckinPick()">${whoOpts}</select>
+                ${people.length ? '' : `<p class="text-[11px] mt-1" style="color:var(--t3);">No check-in contact on file. ${rosterIsAdmin() ? 'Add one under people.' : 'Ask an admin to add one.'}</p>`}</div>
+            ${rosterCheckinWho === '__other' ? `<div class="grid grid-cols-2 gap-2">
+                <input type="text" id="rd-ck-name" class="glass-input" placeholder="Name">
+                <input type="tel" id="rd-ck-phone" class="glass-input" placeholder="Mobile (optional)"></div>` : ''}
+        </div>
+        ${warn}
+        ${existing ? `<p class="text-xs mb-3" style="color:var(--t2);">You're editing what was logged for ${rosterEsc(who.name)} this week.</p>` : ''}
+        ${weeklyCheckinFormHtml('staff', { existing, submitCall: 'rosterSaveCheckin()', submitLabel: existing ? 'Save changes' : 'Log check-in',
+            beforeSubmit: `<div><label class="modal-label">What they said <span style="color:var(--t3);">(optional, the client can see this)</span></label>
+                <textarea id="rd-ck-reply" class="glass-input" rows="2" placeholder="Paste their text">${rosterEsc(existing?.raw_reply)}</textarea></div>` })}
+        <button type="button" onclick="rosterEdit(null)" class="btn-secondary btn text-sm w-full mt-3">Cancel</button>`;
+}
+
+window.rosterStartCheckin = function() {
+    rosterCheckinWeek = null;
+    rosterCheckinWho = '';
+    rosterEditing = 'checkin';
+    renderRosterDetail();
+    updateCheckinSourceTotal('staff');
+};
+
+window.rosterCheckinPick = function() {
+    rosterCheckinWeek = document.getElementById('rd-ck-week')?.value || rosterCheckinWeek;
+    rosterCheckinWho = document.getElementById('rd-ck-who')?.value || rosterCheckinWho;
+    renderRosterDetail();
+    updateCheckinSourceTotal('staff');
+};
+
+function rosterCheckinSaveError(error) {
+    const msg = `${error?.message || ''} ${error?.details || ''}`;
+    if (error?.code === '23505') return 'That person already has numbers logged for this week. Pick them in the list to edit what was logged.';
+    if (error?.code === 'PGRST204' || /entered_by/.test(msg)) return 'Run supabase/sql/staff_checkins.sql in the SQL Editor first, then try again.';
+    if (error?.code === '42501' || /row-level security/i.test(msg)) return "You can't log check-ins for this client. If they're yours, ask an admin to give you access in Settings → Users, or if someone else logged this person's numbers, only they or an admin can change them.";
+    return error?.message || String(error);
+}
+
+window.rosterSaveCheckin = async function() {
+    const c = globalClientsData.find(x => x.name === rosterOpenClient);
+    if (!c || !rosterAllowed()) return;
+    const err = document.getElementById('wc-error-staff');
+    const show = (m) => { if (err) { err.innerText = m; err.classList.remove('hidden'); } };
+    if (err) err.classList.add('hidden');
+
+    const form = readCheckinForm('staff');
+    if (form.error) return show(form.error);
+
+    let who = rosterCheckinWhoSel(c);
+    if (rosterCheckinWho === '__other') {
+        who = { name: (document.getElementById('rd-ck-name')?.value || '').trim(), phone: normalizePhone(document.getElementById('rd-ck-phone')?.value) };
+        if (!who.name) return show('Add the name of who you texted.');
+        if (who.phone && who.phone.length !== 10) return show("That mobile number doesn't look complete.");
+    }
+    if (!who.name && !who.phone) return show('Pick who you texted.');
+
+    const week = rosterCheckinWeek || reportingWeekStart();
+    const existing = rosterCheckinWho === '__other' ? null : rosterStaffRowFor(c, week, who);
+    const reply = (document.getElementById('rd-ck-reply')?.value || '').trim() || null;
+
+    const btn = document.getElementById('wc-submit-staff');
+    if (btn) { btn.disabled = true; btn.innerText = 'Saving…'; }
+    try {
+        const values = { ...form.row, raw_reply: reply };
+        let error;
+        if (existing?.id) {
+            // RLS refuses an update by matching nothing rather than with an error, so check a row came back
+            const res = await supabaseClient.from('weekly_checkins').update(values).eq('id', existing.id).select('id');
+            error = res.error || (!res.data?.length ? { code: '42501', message: 'not allowed' } : null);
+        } else {
+            ({ error } = await supabaseClient.from('weekly_checkins').insert([{
+                ...values,
+                client_name: c.name,
+                week_start: week,
+                source: 'staff',
+                contact_name: who.name || null,
+                contact_phone: who.phone || null,
+                entered_by: clientEmail || null,
+                // Typed from the client's answer, not parsed by a machine
+                parse_confidence: 'high',
+            }]));
+        }
+        if (error) throw error;
+        const { data } = await supabaseClient.from('weekly_checkins').select('*').order('week_start', { ascending: false });
+        if (data) globalCheckinsData = data;
+        rosterEditing = null;
+        renderRoster();
+        updateRosterNav();
+    } catch (e) {
+        show(rosterCheckinSaveError(e));
+        if (btn) { btn.disabled = false; btn.innerText = existing ? 'Save changes' : 'Log check-in'; }
+    }
+};
+
 // Re-renders just the open profile, so editing doesn't redraw (and re-sort) the table.
 function renderRosterDetail() {
     const el = document.getElementById('roster-detail');
@@ -12581,8 +12862,18 @@ function rosterProfileHtml(c) {
     const set = (v) => v ? `<span class="ge-num">${rosterEsc(v)}</span>` : '<span style="color:var(--t3);">Not set</span>';
     const pay = { paid: 'Paid', overdue: 'Overdue' }[c.payment_status] || 'Unpaid';
 
+    // A VA's view: who to text, and the check-ins. Nothing about billing, connections or notes.
+    if (!rosterIsAdmin()) {
+        return `
+        <div class="rd-grid">
+            <div><div class="rd-section">${rosterPeopleView(c)}</div></div>
+            <div><div class="rd-section">${rosterCheckinsHtml(c)}</div></div>
+        </div>`;
+    }
+
     // Two columns on a wide screen: who and where on the left (people, business, notes),
-    // the account itself on the right. They stack on a narrow one.
+    // the account itself on the right, check-ins first since they're weekly. They stack on a
+    // narrow one.
     return `
         <div class="flex flex-wrap gap-2" style="padding:16px 0 4px;">
             <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="goToClient(this.dataset.client)">Open account</button>
@@ -12601,6 +12892,7 @@ function rosterProfileHtml(c) {
         </div>
         </div>
         <div>
+        <div class="rd-section">${rosterCheckinsHtml(c)}</div>
         <div class="rd-section">${rosterSectionHead('contract & billing.', null)}${rosterKv([
             ['Retainer', `<span class="ge-num">${rosterMoney(c.monthly_retainer)}</span> / mo`],
             ['Payment', pay + (c.last_payment_date ? ` · last paid ${rosterDate(c.last_payment_date)}` : '')],
@@ -12649,7 +12941,7 @@ function renderEditClientPeopleSummary(name) {
     if (!people.length) { el.innerText = 'No one on file yet.'; return; }
     const texted = people.filter(p => p.checkin_texts !== false && p.active !== false && String(p.phone || '').replace(/\D/g, '').length >= 10).length;
     el.innerText = people.map(p => p.contact_name || p.email || p.phone).map(stripSlashEscapes).join(', ')
-        + ` · ${texted} ${texted === 1 ? 'gets' : 'get'} the check-in text`;
+        + ` · ${texted} check-in contact${texted === 1 ? '' : 's'}`;
 }
 
 // A save that fails because client_directory.sql hasn't run yet says so, rather than
@@ -12689,7 +12981,7 @@ window.rosterSavePeople = async function() {
         if (!p.phone && !p.email) return show(`Add a mobile number or an email for ${p.contact_name}.`);
         if (p.phone && p.phone.length !== 10) return show(`That number for ${p.contact_name} doesn't look complete.`);
         if (p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) return show(`That email for ${p.contact_name} doesn't look right.`);
-        if (p.checkin_texts && !p.phone) return show(`${p.contact_name} needs a mobile number to get check-in texts.`);
+        if (p.checkin_texts && !p.phone) return show(`${p.contact_name} needs a mobile number to be a check-in contact.`);
     }
     const phones = entered.map(p => p.phone).filter(Boolean);
     const dupe = phones.find((ph, i) => phones.indexOf(ph) !== i);

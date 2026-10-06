@@ -2,6 +2,14 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-06",
+      "area": "Data",
+      "title": "VAs log weekly check-ins on the Roster",
+      "what": "Clients no longer get automated texts asking for their weekly numbers. Our VAs text them instead and log the answers: Roster (now its own tab in the sidebar) → open a client → Log check-in. Pick the week and who you texted, type in their estimates, jobs and revenue by where the customer came from, and paste their reply if you like. The Roster has a Check-in column (Logged, Client sent or Missing), and the tab's badge counts clients still missing last week's numbers. When we've logged a client's week, their portal shows those numbers instead of asking again, and their reports unlock.",
+      "note": "Each check-in records which of us logged it. This also closes a gap where any signed-in user could read every client's check-in numbers, and fixes most clients being unable to save a check-in from their portal.",
+      "action": "Run supabase/sql/staff_checkins.sql"
+    },
+    {
       "date": "2026-10-05",
       "area": "Tasks",
       "title": "Archive tasks instead of deleting them, and a shorter Done column",

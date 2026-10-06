@@ -1839,6 +1839,31 @@ stays null when no row has a value, so "not reported" still differs from a repor
 locked until the week's numbers are in. Reminder recipients come from `client_contacts`,
 which the `team` onboarding step writes to.
 
+**VAs collect the numbers now, not automated texts (2026-10-06).** The `checkin-reminder-am/pm`
+cron jobs are switched off (scenario #5 no longer runs). VAs text each client's check-in contacts
+themselves and log the answers on the Roster. `supabase/sql/staff_checkins.sql`:
+- **Our VAs are admin logins** (decided 2026-10-06), so they see the full Roster. The `member`
+  path also works, for a VA ever limited to some clients (`user_client_access` rows): members get the Roster tab (sidebar + phone header) trimmed to people and check-ins: no billing,
+  health, notes, connections, and no editing people. Investors still get no Roster.
+- **Log check-in** (a client's Roster profile) saves `source = 'staff'`: `contact_name` /
+  `contact_phone` are who was texted, `entered_by` the VA, `raw_reply` what they said (optional,
+  client-visible). It reuses the portal form (`weeklyCheckinFormHtml(suffix, opts)`,
+  `readCheckinForm`), so totals and `closes_by_source` are identical. Picking a person who already
+  has a staff row that week edits it by id; others' entries for the week are listed as a warning,
+  because every row is added into the total.
+- **The portal treats a staff-logged week as done**: no popup, reports unlock, and the check-in tab
+  shows what was logged instead of a blank form (a client entry on top would double the week).
+- **RLS:** "Auth read checkins" was `using (true)`, so any signed-in user read every client's revenue.
+  Now reads go through `client_row_visible`; clients insert/update only their own `portal` rows
+  (and the email fallback finally lets most clients save them: the old policies used
+  `user_has_client_access()` alone); staff (`current_user_is_staff()`: admin or member) insert
+  `staff` rows as themselves for clients they can see and edit only their own; delete is admin only.
+  An update RLS refuses matches nothing rather than erroring, so `rosterSaveCheckin` checks a row
+  came back.
+- **Roster status column** (`rosterCheckinStatus`): Logged / Client sent / Missing (active and past
+  Onboarding with nothing for last week). The sidebar badge counts Missing.
+- **Tests:** 53 jsdom checks (8 mutations, all caught), the Roster's 74, 20 PGlite checks on the SQL.
+
 ## Settings → Updates (built 2026-09-15)
 
 A plain-English list of every change to Golden Eye, from **`updates.json` in the repo root**, served
