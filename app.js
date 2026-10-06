@@ -3802,7 +3802,7 @@ window.submitClientRequest = async function() {
     else if (page === 'clients') { document.getElementById('page-clients').classList.remove('hidden'); setTimeout(() => initClientsPage(), 50); }
     else if (page === 'sales') { if(salesPage) salesPage.classList.remove('hidden'); setTimeout(() => { if(typeof renderSalesBoard === 'function') renderSalesBoard(); if(typeof initSalesSortable === 'function') initSalesSortable(); }, 50); }
     else if (page === 'templates') { if(tplPage) tplPage.classList.remove('hidden'); }
-    else if (page === 'settings') { if(setPage) setPage.classList.remove('hidden'); setTimeout(() => { if(typeof initSettingsPage === 'function') initSettingsPage(); }, 50); }
+    else if (page === 'settings') { if(setPage) setPage.classList.remove('hidden'); setTimeout(() => { if(typeof switchSettingsView === 'function') switchSettingsView('users'); }, 50); }  // Users is the default tab, so load it now rather than on a click
     else if (page === 'creatives') { if(crPage) crPage.classList.remove('hidden'); setTimeout(() => { if(typeof renderAdminCreatives === 'function') renderAdminCreatives(); }, 50); } 
     
     // 👇 NEW LINES ADDED HERE: Trigger the audits page to show up 👇
