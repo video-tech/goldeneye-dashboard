@@ -2,6 +2,19 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-08",
+      "area": "Onboarding",
+      "title": "Archiving a finished handoff task no longer triggers a second \"onboarding complete\" alert",
+      "what": "Golden Eye treated an archived \"Onboarding complete\" task as if it had never been raised, so archiving it for a client still in Onboarding filed a fresh one and texted you again. Archived tasks now count as already done. The client's own text was never affected, since it only goes out when they finish a step."
+    },
+    {
+      "date": "2026-10-08",
+      "area": "Tasks",
+      "title": "Every admin can archive and edit tasks",
+      "what": "Only three named logins were allowed to change tasks, so for anyone else archiving, moving, editing or deleting a task could silently not save. Every admin can now manage tasks, and if a change is ever refused you now get a message instead of nothing.",
+      "action": "Run supabase/sql/tasks_admin_access.sql"
+    },
+    {
       "date": "2026-10-06",
       "area": "Tasks",
       "title": "Board and List are different again, and the Board can archive",

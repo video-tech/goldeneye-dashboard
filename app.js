@@ -2368,10 +2368,14 @@ async function raiseOnboardingAgencyTasks(clientName, stage) {
     }
 }
 
+// Archived tasks count as "already raised": archiving a finished handoff task must never read as
+// "never raised", or the next admin load files a new one and texts everyone again.
+const tasksIncludingArchived = () => globalTasksData.concat(globalArchivedTasks);
+
 function onboardingHandoffRaised(clientName) {
     const key = normalize(clientName || '');
     const title = OB_COMPLETE_TASK_TITLE.trim().toLowerCase();
-    return globalTasksData.some(t =>
+    return tasksIncludingArchived().some(t =>
         normalize(t.client || '') === key &&
         String(t.title || '').trim().toLowerCase() === title);
 }
@@ -4431,8 +4435,10 @@ window.submitClientRequest = async function() {
             const payload = archived
                 ? { archived_at: new Date().toISOString(), archived_by: clientEmail || null }
                 : { archived_at: null, archived_by: null };
-            const { error } = await supabaseClient.from('tasks').update(payload).in('id', ids);
+            const { data, error } = await supabaseClient.from('tasks').update(payload).in('id', ids).select('id');
             if (error) { alert("Couldn't " + (archived ? 'archive' : 'restore') + ': ' + archiveSaveError(error)); return false; }
+            // RLS refuses an update by matching nothing rather than with an error
+            if (!data?.length) { alert("Couldn't " + (archived ? 'archive' : 'restore') + ": your login isn't allowed to change tasks. Run supabase/sql/tasks_admin_access.sql in the SQL Editor."); return false; }
             return true;
         }
 
@@ -11920,7 +11926,7 @@ async function reconcileAddonOnboarding(c) {
     const finished = a.services.filter(s => s.service_key !== 'base' && s.status === 'onboarding' && s.complete);
     for (const s of finished) {
         const title = addonHandoffTitle(s.service_key);
-        const exists = globalTasksData.some(t => normalize(t.client || '') === normalize(c.name)
+        const exists = tasksIncludingArchived().some(t => normalize(t.client || '') === normalize(c.name)
             && String(t.title || '').trim().toLowerCase() === title.toLowerCase());
         if (!exists) {
             const row = { ...buildOnboardingHandoffTask(c.name), title,
@@ -11937,7 +11943,7 @@ async function reconcileAddonOnboarding(c) {
         console.log(`[LIFECYCLE ENGINE] ${c.name} finished ${s.service_key} onboarding — caught up on load.`);
     }
     // Only clients with an add-on handoff task get anything; dedupes, so safe every load
-    if (globalTasksData.some(t => normalize(t.client || '') === normalize(c.name) && / onboarding complete — ready to start$/i.test(String(t.title || '').trim()))) {
+    if (tasksIncludingArchived().some(t => normalize(t.client || '') === normalize(c.name) && / onboarding complete — ready to start$/i.test(String(t.title || '').trim()))) {
         await raiseOnboardingAgencyTasks(c.name, c.current_stage);
     }
 }
