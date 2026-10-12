@@ -2,6 +2,13 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-12",
+      "area": "SEO",
+      "title": "Client landing pages no longer count as Midas's own website leads",
+      "what": "Leads from client pages hosted on Midas's domain (Everoak, Astra) were being filed under Midas Media, so Midas's website leads looked like 43 when only 1 was. A client can now list which of its pages count as its own site, and Midas's list is its homepage and booking page. The mislabeled ones are removed. Other clients work as before.",
+      "action": "Run supabase/sql/lead_hosts.sql, then deploy ghl-lead-webhook"
+    },
+    {
       "date": "2026-10-08",
       "area": "Onboarding",
       "title": "Archiving a finished handoff task no longer triggers a second \"onboarding complete\" alert",

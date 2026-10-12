@@ -1034,6 +1034,15 @@ that folder, then `supabase/sql/rename_client.sql`, then deploy.
   midasmediafirm.com on 2026-09-11:** a real Google search, then the site, then Book, arrived
   tagged `utm_source=google&utm_medium=organic&src_restored=1`. A client without the snippet
   shows a high `self_referral` rate, which is the signal to install it.
+- **`clients.lead_hosts` (2026-10-12, `supabase/sql/lead_hosts.sql`) narrows "on the client's own site"
+  to an allow-list of hosts.** Midas's domain also hosts client landing pages
+  (`everoakcabinetry.midasmediafirm.com`, `astrarealestate.midasmediafirm.com`), and the domain
+  rule filed their paid leads under Midas Media: 42 of its 43 rows. Midas now lists
+  `midasmediafirm.com` and `goldeneye.midasmediafirm.com` (its booking host). Empty or null keeps the
+  whole-domain rule, so other clients are unchanged. **Run the SQL before deploying the function**; the
+  function falls back to asking without the column, but the list does nothing until it exists.
+  The SQL also deletes the 42 mislabeled rows. The log line now carries the GHL `location` id.
+  12 checks run the real `decide()`, including the column-missing fallback.
 - **Every new SEO client needs one real Google-search test lead** before their organic count is
   trusted, because each site's form or booking setup decides whether the source survives.
 - **Security.** `verify_jwt = false` for this one function, because GHL can't send the gateway
