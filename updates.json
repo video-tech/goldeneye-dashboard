@@ -12,7 +12,7 @@
       "date": "2026-10-13",
       "area": "Data",
       "title": "Ad history loads in pieces when Meta refuses a big request",
-      "what": "Meta sometimes answers a large request for one account with \"service temporarily unavailable\". The ad sync now falls back to loading that account in one-week pieces, retries each once, and says which pieces did not load.",
+      "what": "Meta sometimes answers a large request for one account with \"service temporarily unavailable\". The ad sync now falls back to loading that account in one-week pieces, retries each once, and says which pieces did not load. It also stops cleanly before its time limit and names what is left, and can be told to skip straight to pieces and leave out days that are already loaded.",
       "action": "Deploy meta-sync, then run the 90-day backfill again for Caliber Cabinets"
     },
     {

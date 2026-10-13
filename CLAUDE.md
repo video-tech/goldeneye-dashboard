@@ -1835,7 +1835,14 @@ account totals and the morning audit; this adds what it can't say: which ad, and
   piece that still fails is skipped and named in `meta_sync_state.last_error` as `partial: …`, the rest
   load, a rate limit stops everything at once, and nothing loading at all raises the last error as before.
   `chunks.test.mjs` (node with `--experimental-strip-types`) runs the real code against a fake Meta that
-  refuses anything over 8 days; 15 checks, 5 breakages caught.
+  refuses anything over 8 days; 24 checks, 9 breakages caught.
+  **Time:** Meta's refusal of the big request itself takes about a minute, and each piece about 14 seconds, so
+  a 90-day load of a refused account does not fit in one 150-second call (Caliber loaded back to Sep 1 and
+  was cut off). No piece starts past 135 seconds from the start of the request, and any left over are named
+  as "out of time" in the sync state instead of the call being killed. For such an account use
+  `{"mode":"backfill","days":90,"client":"<name>","chunked":true,"skip_days":42}`: `chunked` goes straight to
+  pieces, and `skip_days` leaves out the newest days already loaded. A run with `skip_days` does not touch
+  `last_window`, so the sync still reads as current to the audit's ADS OFF check.
 - **Meta's lead counts are not the daily pull's.** For the same week, Anxiety Solutions: Meta's own Ads
   Manager 37 leads, meta-sync 37, Make 15. Spend matches within 1%, and the other clients' leads line up
   (Sunset 59 vs 59). **GHL is the source of truth for leads and Make's feed was deliberately left alone**, so

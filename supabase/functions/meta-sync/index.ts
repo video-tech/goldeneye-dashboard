@@ -6,6 +6,9 @@
 // Modes (POST body):
 //   {}                                   daily: the last 8 days for every client. pg_cron, daily.
 //   { mode: "backfill", days: 90, client? }  Up to 180 days, one client or all.
+//   { mode: "backfill", days: 90, client, chunked: true, skip_days: 42 }
+//        For an account Meta refuses big requests for: straight to 7-day pieces (no doomed first
+//        attempt), leaving out the newest 42 days because they are already loaded.
 //   { mode: "check", client? }           Can the token read each client's ad account?
 //
 // Who may call: the x-cron-secret header (pg_cron, or a one-off call from the SQL Editor), or a
@@ -31,7 +34,7 @@ const TIME_BUDGET_MS = 120_000; // stop starting new clients past this; the gate
 // seen on Caliber Cabinets at 30 and 90 days while its 8-day daily pull worked), the same window is
 // pulled in pieces this long, each retried once.
 const CHUNK_DAYS = 7;
-const CHUNK_DEADLINE_MS = 135_000; // an account's pieces stop starting new ones past this
+const REQUEST_DEADLINE_MS = 135_000; // no new piece starts past this, measured from the start of the request (the gateway kills at 150s)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 class GraphError extends Error {
@@ -109,8 +112,10 @@ async function syncWindow(db: any, token: string, a: { ad_account_id: string; cl
 // The same window in short pieces. A piece that fails twice is skipped and named, and the rest still
 // load, so one bad week no longer costs the whole history. If nothing at all loads, the last error
 // is thrown so the caller reports it exactly as before. A rate limit stops everything at once.
-async function syncInChunks(db: any, token: string, a: { ad_account_id: string; client_name: string }, days: number, deadline: number) {
-    const windows = windowsInChunks(new Date(), days, CHUNK_DAYS);
+async function syncInChunks(db: any, token: string, a: { ad_account_id: string; client_name: string }, days: number, deadline: number, skipDays = 0) {
+    // skipDays leaves out the newest pieces, for a rerun that only needs the older history
+    const windows = windowsInChunks(new Date(), days, CHUNK_DAYS).slice(Math.ceil(Math.max(0, skipDays) / CHUNK_DAYS));
+    if (!windows.length) throw new Error(`nothing to load: skip_days (${skipDays}) covers all ${days} days`);
     let ad_rows = 0, changes = 0, significant = 0, loaded = 0;
     const failed: string[] = [];
     let lastErr: unknown = null;
@@ -138,14 +143,20 @@ async function syncInChunks(db: any, token: string, a: { ad_account_id: string; 
 }
 
 // One big request first, which is how every other account works. If Meta refuses it, fall back to pieces.
-async function syncAccount(db: any, token: string, a: { ad_account_id: string; client_name: string }, days: number) {
+async function syncAccount(
+    db: any, token: string, a: { ad_account_id: string; client_name: string }, days: number,
+    opts: { chunked?: boolean; skipDays?: number; deadline?: number } = {},
+) {
+    const deadline = opts.deadline ?? Date.now() + REQUEST_DEADLINE_MS;
+    // Asked for pieces outright (an account Meta is known to refuse big requests for): no first attempt
+    if (opts.chunked && days > CHUNK_DAYS) return await syncInChunks(db, token, a, days, deadline, opts.skipDays ?? 0);
     const { since, until } = windowEndingYesterday(new Date(), days);
     try {
         return await syncWindow(db, token, a, since, until);
     } catch (e) {
         if (days <= CHUNK_DAYS || (e instanceof GraphError && isRateLimit(e))) throw e;
         console.warn(`meta-sync ${a.client_name}: ${scrubToken(String((e as Error).message))}; retrying in ${CHUNK_DAYS}-day pieces`);
-        return await syncInChunks(db, token, a, days, Date.now() + CHUNK_DEADLINE_MS);
+        return await syncInChunks(db, token, a, days, deadline);
     }
 }
 
@@ -204,6 +215,8 @@ Deno.serve(async (req: Request) => {
 
         const accounts = await loadAccounts(db, body?.client);
         const started = Date.now();
+        const chunked = mode === "backfill" && body?.chunked === true;
+        const skipDays = mode === "backfill" ? Math.max(0, Math.floor(Number(body?.skip_days) || 0)) : 0;
         const results: any[] = [];
         for (const a of accounts) {
             if (Date.now() - started > TIME_BUDGET_MS) {
@@ -211,10 +224,10 @@ Deno.serve(async (req: Request) => {
                 continue;
             }
             try {
-                const r: any = await syncAccount(db, token, a, days);
+                const r: any = await syncAccount(db, token, a, days, { chunked, skipDays, deadline: started + REQUEST_DEADLINE_MS });
                 // A piece that could not load is named here, so it shows up in the sync state and not only a log
                 const partial = r.failed_windows?.length ? `partial: ${r.failed_windows.length} window(s) not loaded: ${r.failed_windows.join(", ")}`.slice(0, 500) : null;
-                await recordState(db, a.client_name, { ad_account_id: a.ad_account_id, last_run_at: new Date().toISOString(), last_error: partial, last_window: `${r.since}..${r.until}` });
+                await recordState(db, a.client_name, { ad_account_id: a.ad_account_id, last_run_at: new Date().toISOString(), last_error: partial, ...(skipDays > 0 ? {} : { last_window: `${r.since}..${r.until}` }) });
                 results.push({ client: a.client_name, ...r });
             } catch (e) {
                 const msg = scrubToken(String((e as Error).message));

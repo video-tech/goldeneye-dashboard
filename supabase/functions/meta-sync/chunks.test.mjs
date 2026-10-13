@@ -100,4 +100,38 @@ threw = null;
 try { await syncAccount(db, 'tok', acct, 90); } catch (e) { threw = e; }
 ok(threw && threw.code === 17 && calls.length === 1, 'a rate limit stops immediately instead of hammering Meta: ' + calls.length + ' call(s)');
 
+
+// ---- asking for pieces outright, skipping what is already loaded, and stopping in time ----
+rateLimit = false; alwaysFail = false; failWindows = null; // the checks above leave the fake Meta rate limited
+written.length = 0; calls = [];
+r = await syncAccount(db, 'tok', acct, 90, { chunked: true });
+ok(r.chunked === true && r.failed_windows.length === 0 && written.filter((x) => x.t === 'meta_ad_daily').length === 13, 'chunked: true loads all 13 pieces');
+const ninety = windowEndingYesterday(new Date(), 90);
+ok(!calls.some((c) => c.includes(ninety.since) && c.includes(ninety.until)), 'chunked: true never makes the doomed whole-window request first');
+
+written.length = 0;
+r = await syncAccount(db, 'tok', acct, 90, { chunked: true, skipDays: 42 });
+ok(written.filter((x) => x.t === 'meta_ad_daily').length === 7, 'skip 42 days leaves out the 6 newest pieces: ' + written.filter((x) => x.t === 'meta_ad_daily').length);
+const all = windowsInChunks(new Date(), 90, 7);
+ok(r.until === all[6].until && r.since === ninety.since, 'and the reported window is the older part only: ' + r.since + '..' + r.until);
+ok(!written.some((x) => x.t === 'meta_ad_daily' && x.date >= all[5].since), 'nothing newer than the skipped range was rewritten');
+let threw2 = null;
+try { await syncAccount(db, 'tok', acct, 90, { chunked: true, skipDays: 90 }); } catch (e) { threw2 = e; }
+ok(threw2 && /nothing to load/.test(threw2.message), 'skipping everything is an error, not a silent no-op');
+
+// the deadline: each Meta call costs 40 seconds on a fake clock, so the pieces run out of time part way
+const realNow = Date.now;
+let fake = realNow();
+Date.now = () => fake;
+const slowFetch = globalThis.fetch;
+globalThis.fetch = async (...args) => { fake += 40_000; return slowFetch(...args); };
+written.length = 0;
+r = await syncAccount(db, 'tok', acct, 90, { chunked: true, deadline: fake + 135_000 });
+Date.now = realNow;
+globalThis.fetch = slowFetch;
+const loadedPieces = written.filter((x) => x.t === 'meta_ad_daily').length;
+ok(loadedPieces >= 1 && loadedPieces < 13, 'out of time part way: some pieces load and the rest do not (' + loadedPieces + ' of 13)');
+ok(r.failed_windows.length === 13 - loadedPieces && r.failed_windows.every((w) => /out of time/.test(w)), 'the pieces left over are named as out of time, so a rerun knows what is missing');
+ok(r.failed_windows[0].startsWith(windowsInChunks(new Date(), 90, 7)[loadedPieces].since), 'and they are the older ones');
+
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
