@@ -3,6 +3,13 @@
   "updates": [
     {
       "date": "2026-10-13",
+      "area": "Data",
+      "title": "An activity panel on each client's Ads tab",
+      "what": "Below the charts, a client with synced ad data now shows what changed in their account (turned on or off, budget, targeting, creative, new ads), who did it, and what the affected ads did 7 days before and after. Next to it is every ad with its spend, share of spend, leads and cost per lead, with the CPL in red when it is at or over the client's target.",
+      "note": "Only admins see it. It follows the date range at the top, up to the last 120 days. Leads are Meta's own count, which can run higher than the daily pull for some clients."
+    },
+    {
+      "date": "2026-10-13",
       "area": "Onboarding",
       "title": "A journey bar on each client's Health tab",
       "what": "Between Weekly Check-ins and Onboarding there is now a bar showing how close the client is to their next stage. In Onboarding it counts the same steps as the Onboarding list below it. In every later stage it counts that stage's checklist tasks, and a full bar says the client is ready to move on. You still move them with Move Stage."

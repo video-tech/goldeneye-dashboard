@@ -4940,6 +4940,7 @@ function filterAdsData() {
                 if(document.getElementById('h-kpi-leads')) document.getElementById('h-kpi-leads').innerText = currentAdsStats.l.toLocaleString();
 
                 updateClientKpiDeltas(s, e);
+                renderAdActivityPanel(s, e);
 
                 const isL = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isL?'#64748b':'rgba(255,255,255,0.6)';
                 const wrapCsAds = getComputedStyle(document.getElementById('theme-wrapper'));
@@ -6377,10 +6378,11 @@ function adFactsBudgetValue(v, extra) {
     return null;
 }
 
-function describeAdChange(a) {
+function describeAdChange(a, actorLabel) {
     const level = AD_FACTS_LEVEL[String(a.object_type || '').toUpperCase()] || 'item';
     const what = `the ${level} ${adFactsQuote(a.object_name)}`;
-    const who = a.actor_is_meta ? "Meta's system" : 'we';
+    // The report says "we" (it goes to the client); the admin panel passes the person's name
+    const who = actorLabel || (a.actor_is_meta ? "Meta's system" : 'we');
     const x = a.extra || {};
     const ov = typeof x.old_value === 'string' ? x.old_value : null;
     const nv = typeof x.new_value === 'string' ? x.new_value : null;
@@ -6537,6 +6539,166 @@ async function buildReportAdActivityBlock(clientName, s, e) {
     } catch (err) {
         console.warn('Ad activity block skipped:', err?.message || err);
         return '';
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Activity panel on a client's Ads tab (admin only): what changed in the account, who did it and
+// what the ads did either side, plus every ad's share of spend. Reads the same tables and the same
+// describeAdChange / adChangeEffect the weekly report uses, so the two always tell the same story.
+// Unlike the report it names the person, since only admins see it.
+// ---------------------------------------------------------------------------------------------
+const AD_PANEL_MAX_DAYS = 120;      // "all time" is clamped: the ad tables are paged and a year is a lot of rows
+const AD_PANEL_SHOW_CHANGES = 12;
+const AD_PANEL_SHOW_ADS = 10;
+let adPanelToken = 0;
+let adPanelExpanded = { changes: false, ads: false };
+let adPanelLast = null;
+
+const AD_PANEL_CATEGORY = {
+    status: ['Status', '--warn'], budget: ['Budget', '--gold'], bid: ['Bidding', '--gold'], targeting: ['Targeting', '--t2'],
+    creative: ['Creative', '--t2'], schedule: ['Schedule', '--t2'], created: ['New', '--pos'], review_declined: ['Rejected', '--neg']
+};
+
+// One entry per object per kind per day, latest wins, newest first: an ad set toggled three times in
+// an afternoon is one change, described by where it ended up. Same rule as the report.
+function adPanelChanges(acts, startYmd, endYmd) {
+    const latest = new Map();
+    acts.filter(a => a.significant)
+        .filter(a => { const d = adFactsDenverDay(a.event_time); return d >= startYmd && d <= endYmd; })
+        .sort((x, y) => String(x.event_time).localeCompare(String(y.event_time)))
+        .forEach(a => latest.set(`${a.object_id}|${a.category}|${adFactsDenverDay(a.event_time)}`, a));
+    return [...latest.values()].reverse();
+}
+
+// Per ad across the window: spend, leads, share of the account's spend. Ads with no spend are left out.
+function adPanelAds(adRows, startYmd, endYmd) {
+    const by = new Map();
+    adRows.filter(r => r.date >= startYmd && r.date <= endYmd).forEach(r => {
+        const t = by.get(r.ad_id) || { id: r.ad_id, name: r.ad_name, adset: r.adset_name, spend: 0, leads: 0 };
+        t.spend += Number(r.spend) || 0; t.leads += Number(r.leads) || 0;
+        t.name = r.ad_name || t.name; t.adset = r.adset_name || t.adset;
+        by.set(r.ad_id, t);
+    });
+    const ads = [...by.values()].filter(t => t.spend > 0).sort((a, b) => b.spend - a.spend);
+    const total = ads.reduce((n, t) => n + t.spend, 0);
+    ads.forEach(t => { t.share = total > 0 ? t.spend / total : 0; t.cpl = t.leads > 0 ? t.spend / t.leads : null; });
+    return { ads, total };
+}
+
+async function loadAdPanelData(client, from, e) {
+    const until = new Date(e); until.setDate(until.getDate() + 1);
+    const [actRes, adRes] = await Promise.all([
+        supabaseClient.from('meta_activity')
+            .select('event_time, event_type, event_label, object_id, object_name, object_type, actor_name, actor_is_meta, extra, category, significant')
+            .eq('client_name', client.name).eq('significant', true)
+            .gte('event_time', from.toISOString()).lt('event_time', until.toISOString())
+            .order('event_time').limit(1000),
+        (async () => {
+            const rows = [];
+            for (let at = 0; at < 30000; at += 1000) {
+                const { data, error } = await supabaseClient.from('meta_ad_daily')
+                    .select('date, ad_id, ad_name, adset_id, adset_name, campaign_id, spend, leads')
+                    .eq('client_name', client.name).gte('date', adFactsYmd(from)).lte('date', adFactsYmd(e))
+                    .order('date').order('ad_id').range(at, at + 999);
+                if (error) return { data: null, error };
+                rows.push(...(data || []));
+                if (!data || data.length < 1000) break;
+            }
+            return { data: rows, error: null };
+        })(),
+    ]);
+    if (actRes.error || adRes.error) throw (actRes.error || adRes.error);
+    return { acts: actRes.data || [], adRows: adRes.data || [] };
+}
+
+function adPanelHtml(model) {
+    const { changes, ads, total, adRows, target, clamped, startYmd, endYmd } = model;
+    const lastDataDay = adRows.reduce((m, r) => (r.date > m ? r.date : m), '');
+    const money = n => adFactsMoney(n);
+    const shownC = adPanelExpanded.changes ? changes : changes.slice(0, AD_PANEL_SHOW_CHANGES);
+    const shownA = adPanelExpanded.ads ? ads : ads.slice(0, AD_PANEL_SHOW_ADS);
+    const note = clamped ? `<p class="text-xs" style="color:var(--t3); margin-top:8px;">Showing the last ${AD_PANEL_MAX_DAYS} days.</p>` : '';
+    const moreBtn = (which, count, limit) => count > limit
+        ? `<button type="button" onclick="adPanelToggle('${which}')" class="text-xs" style="margin-top:8px; background:none; border:none; color:var(--gold); cursor:pointer; padding:0; text-align:left;">${adPanelExpanded[which] ? 'Show fewer' : 'Show all ' + count}</button>` : '';
+
+    const changeRows = shownC.map(a => {
+        const who = a.actor_is_meta ? "Meta's system" : (a.actor_name || 'Someone');
+        const [label, color] = AD_PANEL_CATEGORY[a.category] || ['Change', '--t2'];
+        let effect = adChangeEffect(a, adRows, lastDataDay);
+        if (effect === 'no ad results to compare yet') effect = '';
+        const text = describeAdChange(a, who);
+        return `<div style="display:grid; grid-template-columns:54px minmax(0,1fr); gap:12px; padding:12px 0; border-top:1px solid var(--line);">
+            <div class="text-xs ge-num" style="color:var(--t3); padding-top:2px;">${escapeAttr(adFactsShortDate(adFactsDenverDay(a.event_time)))}</div>
+            <div style="min-width:0;">
+                <div style="font-size:13px; color:var(--t1); line-height:1.45;"><span class="ge-label" style="color:var(${color}); margin-right:8px;">${label}</span>${escapeAttr(text)}</div>
+                ${effect ? `<div class="text-xs" style="margin-top:3px; color:var(--t3); line-height:1.45;">${escapeAttr(effect)}</div>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+
+    const adRowsHtml = shownA.map(t => {
+        const over = !!target && (t.cpl !== null ? t.cpl >= target : t.spend >= target);
+        return `<tr style="border-top:1px solid var(--line);">
+            <td class="py-2.5 pr-3" style="min-width:0; max-width:210px;"><div class="truncate" style="font-size:13px; color:var(--t1);" title="${escapeAttr(stripSlashEscapes(t.name || ''))}">${escapeAttr(stripSlashEscapes(t.name || 'unnamed'))}</div>
+                <div class="truncate text-xs" style="color:var(--t3);">${escapeAttr(stripSlashEscapes(t.adset || ''))}</div></td>
+            <td class="py-2.5 pr-3" style="width:120px;"><div class="text-xs ge-num" style="color:var(--t2);">${money(t.spend)} · ${Math.round(t.share * 100)}%</div>
+                <div style="height:4px; border-radius:2px; background:var(--inset); margin-top:4px;"><div style="height:100%; width:${Math.max(2, Math.round(t.share * 100))}%; background:var(--goldSolid); border-radius:2px;"></div></div></td>
+            <td class="py-2.5 pr-3 text-right ge-num" style="color:var(--pos);">${t.leads}</td>
+            <td class="py-2.5 text-right ge-num" style="color:var(${over ? '--neg' : '--t2'});">${t.cpl !== null ? money(t.cpl) : '—'}</td>
+        </tr>`;
+    }).join('');
+
+    return `<div class="glass p-6 flex flex-col">
+            <div class="flex items-baseline justify-between"><h3 class="ge-title" style="font-size:18px;">activity.</h3>
+                <span class="text-xs" style="color:var(--t3);">${changes.length} change${changes.length === 1 ? '' : 's'} · ${escapeAttr(adFactsShortDate(startYmd))} – ${escapeAttr(adFactsShortDate(endYmd))}</span></div>
+            <p class="text-xs" style="margin-top:5px; color:var(--t2);">From Meta's change history. Before and after compares the ads each change reaches, 7 days either side.</p>
+            <div style="margin-top:10px;">${changeRows || '<p class="text-xs italic py-4" style="color:var(--t3);">No changes in Meta\'s history for this period.</p>'}</div>${moreBtn('changes', changes.length, AD_PANEL_SHOW_CHANGES)}${note}
+        </div>
+        <div class="glass p-6 flex flex-col">
+            <div class="flex items-baseline justify-between"><h3 class="ge-title" style="font-size:18px;">ads.</h3>
+                <span class="text-xs ge-num" style="color:var(--t3);">${money(total)} across ${ads.length} ad${ads.length === 1 ? '' : 's'}</span></div>
+            <p class="text-xs" style="margin-top:5px; color:var(--t2);">Share of spend and Meta's own lead count${target ? `. CPL in red is at or over the ${money(target)} target.` : '. Set a target CPL in Edit Client to flag ads.'}</p>
+            <div class="overflow-x-auto" style="margin-top:10px;"><table class="w-full text-left text-sm">
+                <thead><tr><th class="ge-label pb-2 font-normal">Ad</th><th class="ge-label pb-2 font-normal">Spend · share</th><th class="ge-label pb-2 font-normal text-right">Leads</th><th class="ge-label pb-2 font-normal text-right">CPL</th></tr></thead>
+                <tbody>${adRowsHtml || '<tr><td colspan="4" class="py-4 text-xs italic" style="color:var(--t3);">No ad spend in this period.</td></tr>'}</tbody></table></div>${moreBtn('ads', ads.length, AD_PANEL_SHOW_ADS)}
+        </div>`;
+}
+
+window.adPanelToggle = function (which) {
+    adPanelExpanded[which] = !adPanelExpanded[which];
+    const el = document.getElementById('ad-activity-panel');
+    if (el && adPanelLast) el.innerHTML = adPanelHtml(adPanelLast);
+};
+
+async function renderAdActivityPanel(s, e) {
+    const el = document.getElementById('ad-activity-panel');
+    if (!el) return;
+    const token = ++adPanelToken;
+    const hide = () => { el.classList.add('hidden'); el.innerHTML = ''; adPanelLast = null; };
+    if (currentUserRole !== 'admin' || cSelectedAccount === 'ALL') return hide();
+    const client = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+    if (!client || !normalizeAccountId(client.ad_account_id)) return hide();
+    try {
+        let start = new Date(s), clamped = false;
+        const floor = new Date(e); floor.setDate(floor.getDate() - AD_PANEL_MAX_DAYS);
+        if (start < floor) { start = floor; clamped = true; }
+        start.setHours(0, 0, 0, 0);
+        const from = new Date(start); from.setDate(from.getDate() - AD_FACTS_WINDOW_DAYS);
+        const { acts, adRows } = await loadAdPanelData(client, from, e);
+        if (token !== adPanelToken) return;   // a newer render superseded this one
+        const startYmd = adFactsYmd(start), endYmd = adFactsYmd(e);
+        const { ads, total } = adPanelAds(adRows, startYmd, endYmd);
+        const changes = adPanelChanges(acts, startYmd, endYmd);
+        // Nothing synced for this client (not connected yet): no panel rather than an empty one
+        if (!acts.length && !adRows.length) return hide();
+        const target = client.target_cpl ? parseFloat(client.target_cpl) : null;
+        adPanelExpanded = { changes: false, ads: false };
+        adPanelLast = { changes, ads, total, adRows, target, clamped, startYmd, endYmd };
+        el.innerHTML = adPanelHtml(adPanelLast);
+        el.classList.remove('hidden');
+    } catch (err) {
+        if (token === adPanelToken) { console.warn('Activity panel skipped:', err?.message || err); hide(); }
     }
 }
 

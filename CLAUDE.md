@@ -1867,6 +1867,18 @@ account totals and the morning audit; this adds what it can't say: which ad, and
 - The database reads the saved assignee, so app.js refuses while the drawer has an unsaved change.
 - **Tests:** 23 PGlite checks (one mutation caught), 7 handler checks.
 
+## Activity panel on the Ads tab (built 2026-10-13)
+
+`#ad-activity-panel` under the charts, admin only, drawn by `renderAdActivityPanel(s, e)` after the KPI strip.
+- **Two halves:** the change timeline (`meta_activity`, significant rows only, one per object per kind per day, newest
+  first) and the ads table (`meta_ad_daily`: spend, share of spend, Meta leads, CPL). CPL is red at or over `target_cpl`,
+  the same 1x rule as the audit; an ad with spend and no leads counts when its spend alone reaches the target.
+- **Same wording as the weekly report** through `describeAdChange` / `adChangeEffect`. The panel passes the person's name
+  (`actorLabel`); the report never does and still says "we". No SQL, no deploy.
+- **Hidden** for All, non-admins, a client with no ad account, nothing synced, or a failed query. A render token drops
+  stale responses. The range is clamped to 120 days; ad rows are paged past the 1000-row cap.
+- **Tests:** 20 checks (one mutation caught) plus a check that the report's wording is unchanged.
+
 ## Tasks page filters (2026-10-02)
 
 - **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first
