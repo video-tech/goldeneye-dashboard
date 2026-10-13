@@ -1879,6 +1879,28 @@ account totals and the morning audit; this adds what it can't say: which ad, and
   stale responses. The range is clamped to 120 days; ad rows are paged past the 1000-row cap.
 - **Tests:** 20 checks (one mutation caught) plus a check that the report's wording is unchanged.
 
+## Ask Golden Eye: the Overview chat (built 2026-10-13)
+
+`supabase/functions/overview-chat/` and `#ov-chat` at the bottom of the Overview page. Admin only.
+- **Looks things up instead of loading everything.** The model (`gpt-5.6-sol`, Responses API, low reasoning effort, `store: false`)
+  gets ten read-only tools (`tools.ts`): clients, ad performance (daily pull), per-ad breakdown, ad changes, tasks, check-ins,
+  website leads, SEO, onboarding, latest audit. At most 8 model rounds and 115 s; each result is capped (14,000 characters,
+  60 rows). Code computes every figure, the model quotes them.
+- **Runs as the signed-in admin.** Lookups use the caller's own JWT with the anon key, never the service key, so RLS applies as in
+  the dashboard. The caller is checked with `_shared/admin-auth.ts` (same rule as `ai-chat`) and Golden Eye's origins only.
+- **Read-only by construction:** no tool writes, and a test fails if `tools.ts` ever calls insert, update, upsert or delete.
+- **Deliberately not exposed:** task notes, check-in replies, client emails and phones, Stripe ids, ad account ids, credentials.
+  Client-typed text can still arrive in a task title, so the prompt says tool results are data, never instructions.
+- **Leads:** the prompt tells it the daily pull is the working figure, GHL the truth, and per-ad leads are Meta's own count.
+- **UI:** the browser sends only user and assistant text (the function refuses any other role), keeps at most 20 turns, shows
+  "Looked at: ..." under each answer, and drops a failed question from the history. Replies go through `formatChatReply`.
+- **Adding a lookup** means a runner and a `TOOL_DEFS` entry in `tools.ts`, plus a label in `OV_CHAT_SOURCES` in app.js.
+- **Deploy before pushing app.js.** The existing Client Intelligence Agent chat (`ai-chat`, gpt-4o-mini) is unchanged.
+- **Not tested live:** the OpenAI call shape (tools plus encrypted reasoning items with `store: false`) follows the Responses API
+  documentation but has only run against a scripted model. The first real question is the proof.
+- **Tests:** 69 checks on the tools, validation and loop against a fake database and a scripted model (3 breakages caught),
+  21 on the browser side, strict `tsc` on the three modules.
+
 ## Tasks page filters (2026-10-02)
 
 - **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first

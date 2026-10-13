@@ -3926,11 +3926,123 @@ window.submitClientRequest = async function() {
         }
 
         // --- GOLDEN EYE (DASHBOARD) RENDERING ---
+
+// ============================================================================
+// Ask Golden Eye: the chat on the Overview page (supabase/functions/overview-chat)
+// ============================================================================
+// The browser sends only the conversation's text. The function runs read-only lookups as the signed-in
+// admin and returns the answer plus the names of what it looked at. Nothing here writes anything.
+const OV_CHAT_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/overview-chat";
+const OV_CHAT_MAX_TURNS = 20;   // the function's limit; a longer chat asks for a fresh start
+const OV_CHAT_SUGGESTIONS = [
+    'Who needs attention this week?',
+    'Which ads are over their target CPL?',
+    'What tasks are overdue, and who owns them?',
+    "Compare this week's leads with last week for every client"
+];
+const OV_CHAT_SOURCES = {
+    list_clients: 'clients', ad_performance: 'ad performance', ad_breakdown: 'individual ads', ad_changes: 'ad changes',
+    tasks: 'tasks', checkins: 'check-ins', leads: 'website leads', seo_overview: 'SEO', onboarding: 'onboarding', latest_audit: 'the morning audit'
+};
+let ovChatTurns = [];
+let ovChatBusy = false;
+
+async function callOverviewChat(messages) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired. Sign in again.');
+    const res = await fetch(OV_CHAT_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ messages })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+        const e = data.error;
+        throw new Error((e && (e.message || (typeof e === 'string' ? e : ''))) || `the chat service returned ${res.status}`);
+    }
+    return data;
+}
+
+function ovChatBubble(role, html, extra = '') {
+    const box = document.getElementById('ov-chat-msgs');
+    if (!box) return null;
+    const me = role === 'user';
+    const el = document.createElement('div');
+    el.style.cssText = `align-self:${me ? 'flex-end' : 'flex-start'}; max-width:${me ? '80%' : '92%'}; padding:10px 14px; border-radius:3px; font-size:13.5px; line-height:1.55; ${me ? 'background:var(--goldWash); border:1px solid var(--goldLine); color:var(--t1);' : 'background:var(--inset); border:1px solid var(--line); color:var(--t1);'}${extra}`;
+    el.innerHTML = html;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return el;
+}
+
+function ovChatRenderSuggestions() {
+    const el = document.getElementById('ov-chat-suggest');
+    if (!el) return;
+    el.innerHTML = ovChatTurns.length ? '' : OV_CHAT_SUGGESTIONS.map((q, i) =>
+        `<button type="button" onclick="ovChatSend(OV_CHAT_SUGGESTIONS[${i}])" class="text-xs" style="padding:5px 11px; border-radius:2px; background:var(--inset); border:1px solid var(--line); color:var(--t2); cursor:pointer;">${escapeAttr(q)}</button>`).join('');
+    const reset = document.getElementById('ov-chat-reset');
+    if (reset) reset.classList.toggle('hidden', !ovChatTurns.length);
+}
+
+window.ovChatReset = function () {
+    if (ovChatBusy) return;
+    ovChatTurns = [];
+    const box = document.getElementById('ov-chat-msgs'); if (box) box.innerHTML = '';
+    ovChatRenderSuggestions();
+};
+
+window.ovChatSubmit = function (e) {
+    e.preventDefault();
+    const input = document.getElementById('ov-chat-input');
+    const text = (input.value || '').trim();
+    if (text) { input.value = ""; window.ovChatSend(text); }
+};
+
+window.ovChatSend = async function (text) {
+    text = String(text || '').trim();
+    if (!text || ovChatBusy || currentUserRole !== 'admin') return;
+    if (ovChatTurns.length + 1 > OV_CHAT_MAX_TURNS) return alert('This chat has got long. Press New chat to start a fresh one.');
+    ovChatBusy = true;
+    const send = document.getElementById('ov-chat-send'); if (send) send.disabled = true;
+    ovChatTurns.push({ role: 'user', content: text });
+    ovChatRenderSuggestions();
+    ovChatBubble('user', escapeAttr(text));
+    const thinking = ovChatBubble('assistant', 'Looking that up&hellip;', 'color:var(--t3);');
+    try {
+        const data = await callOverviewChat(ovChatTurns);
+        const reply = String(data.reply || '').trim();
+        ovChatTurns.push({ role: 'assistant', content: reply });
+        const looked = (data.looked_at || []).map(n => OV_CHAT_SOURCES[n] || null).filter(Boolean);
+        thinking.style.color = 'var(--t1)';
+        thinking.innerHTML = formatChatReply(reply) + (looked.length
+            ? `<div class="text-xs" style="margin-top:8px; color:var(--t3);">Looked at: ${escapeAttr(looked.join(', '))}</div>` : '');
+    } catch (err) {
+        // A failed question is dropped from the history, so a retry does not send it twice
+        ovChatTurns.pop();
+        thinking.style.color = 'var(--neg)';
+        thinking.innerHTML = escapeAttr('Could not answer: ' + (err.message || err));
+    } finally {
+        ovChatBusy = false;
+        if (send) send.disabled = false;
+        const box = document.getElementById('ov-chat-msgs'); if (box) box.scrollTop = box.scrollHeight;
+        ovChatRenderSuggestions();
+    }
+};
+
+function showOverviewChat() {
+    const el = document.getElementById('ov-chat');
+    if (!el) return;
+    const isAdmin = currentUserRole === 'admin';
+    el.classList.toggle('hidden', !isAdmin);
+    if (isAdmin) ovChatRenderSuggestions();
+}
+
         function renderGoldenEye() {
             // Check for a cached audit first thing!
             checkSavedAudit();
             // Puts the count of unread changes on Settings → Updates
             if (typeof checkUpdatesBadge === 'function') checkUpdatesBadge();
+            showOverviewChat();
 
             const isLight = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isLight ? '#64748b' : 'rgba(255,255,255,0.6)';
 

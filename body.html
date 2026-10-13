@@ -586,6 +586,24 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Ask Golden Eye: a chat that looks things up in the live data (overview-chat function).
+                         Admin only, shown by renderGoldenEye. Read-only: it can answer, never change anything. -->
+                    <div id="ov-chat" class="glass p-6 hidden" style="margin-top:24px;">
+                        <div class="flex flex-wrap items-baseline justify-between gap-2">
+                            <div>
+                                <h3 class="ge-title" style="font-size:18px;">ask golden eye.</h3>
+                                <p class="text-xs" style="margin-top:5px; color:var(--t2);">Ask about any client, ads, tasks, check-ins, SEO or onboarding. It looks the numbers up live and cannot change anything.</p>
+                            </div>
+                            <button type="button" id="ov-chat-reset" onclick="ovChatReset()" class="ge-label hidden" style="color:var(--gold); cursor:pointer; background:none; border:none;">New chat</button>
+                        </div>
+                        <div id="ov-chat-msgs" class="flex flex-col gap-3 overflow-y-auto" style="margin-top:14px; max-height:440px;"></div>
+                        <div id="ov-chat-suggest" class="flex flex-wrap gap-2" style="margin-top:12px;"></div>
+                        <form onsubmit="ovChatSubmit(event)" class="flex gap-2" style="margin-top:14px;">
+                            <input type="text" id="ov-chat-input" class="glass-input flex-1" maxlength="1000" autocomplete="off" placeholder="Which clients are over their target CPL this week?">
+                            <button type="submit" id="ov-chat-send" class="btn-primary btn text-sm shrink-0">Ask</button>
+                        </form>
+                    </div>
                 </div>
 
                 <!-- Roster: every client, filterable, with a profile that opens under the row (rosterProfileHtml).

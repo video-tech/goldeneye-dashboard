@@ -4,6 +4,14 @@
     {
       "date": "2026-10-13",
       "area": "Data",
+      "title": "Ask Golden Eye: a chat on the Overview page",
+      "what": "Ask anything about your clients in plain English, such as which ads are over their target CPL, what is overdue and who owns it, or how a client did against last week. It looks the numbers up live in ads, tasks, check-ins, website leads, SEO, onboarding and the morning audit, and shows which of those it used. It can only read, never change anything, and only admins see it.",
+      "note": "It does not see task notes or check-in replies. Each question uses the same OpenAI model as the morning audit, so a heavy question costs a little more than the old client chat.",
+      "action": "Deploy the function first: supabase functions deploy overview-chat --project-ref hugnttsqucetldllfgoi"
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Data",
       "title": "An activity panel on each client's Ads tab",
       "what": "Below the charts, a client with synced ad data now shows what changed in their account (turned on or off, budget, targeting, creative, new ads), who did it, and what the affected ads did 7 days before and after. Next to it is every ad with its spend, share of spend, leads and cost per lead, with the CPL in red when it is at or over the client's target.",
       "note": "Only admins see it. It follows the date range at the top, up to the last 120 days. Leads are Meta's own count, which can run higher than the daily pull for some clients."
