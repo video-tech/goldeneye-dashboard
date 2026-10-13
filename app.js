@@ -4553,20 +4553,40 @@ window.submitClientRequest = async function() {
 
     if(id==='new'){ 
         activeEditId=null;
-        document.getElementById('t-drawer-headline').innerText="New task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
+        document.getElementById('t-drawer-headline').innerText="New task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-notify-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
         if (clientToSet) checkTaskClientBox(clientToSet);
     } else { 
         const t=globalTasksData.find(x=>x.id===id);
         if(!t) return; activeEditId=t.id; document.getElementById('t-drawer-headline').innerText="Edit task"; document.getElementById('t-title').value=t.title; 
         if(t.client) checkTaskClientBox(t.client);
         document.getElementById('t-stage').value=t.stage||'Onboarding'; document.getElementById('t-assignee').value=t.assignee||''; document.getElementById('t-type').value=t.type||'One-off'; document.getElementById('t-due').value=t.due||'';
-        document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden');
+        document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden'); document.getElementById('t-notify-btn').classList.remove('hidden');
         document.getElementById('t-hidden').checked = t.client_visible === false;
     }
     updateTaskClientDisplay();
     updateTaskScore(); document.getElementById('drawer-overlay').classList.add('show'); f.classList.add('open');
 }
         
+        // Texts whoever the task is assigned to (task_notify.sql). The database reads the assignee, so
+        // an unsaved change in the drawer would text the OLD person: stop and say to save first.
+        async function notifyTaskAssignee() {
+            const t = globalTasksData.find(x => x.id === activeEditId);
+            if (!t) return;
+            const shown = (document.getElementById('t-assignee').value || '').trim();
+            if (shown !== (t.assignee || '').trim()) return alert('The assignee was changed but not saved. Save the task first, then text them.');
+            if (!shown) return alert('This task has no assignee to text.');
+            if (!confirm(`Text ${shown} about "${t.title}"?`)) return;
+            const b = document.getElementById('t-notify-btn'); const label = b.innerHTML;
+            b.disabled = true; b.innerText = 'Sending...';
+            try {
+                const { data, error } = await supabaseClient.rpc('notify_task_assignee', { p_task_id: t.id });
+                if (error) alert(/notify_task_assignee/.test(error.message || '') && /not find|does not exist/i.test(error.message || '')
+                    ? 'Texting needs supabase/sql/task_notify.sql to be run first.' : 'Could not send: ' + error.message);
+                else if (!data || !data.ok) alert('Not sent: ' + ((data && data.reason) || 'unknown reason'));
+                else alert('Texted ' + data.texted.join(' and ') + '.' + (data.missing && data.missing.length ? ' No number on file for ' + data.missing.join(', ') + '.' : ''));
+            } finally { b.disabled = false; b.innerHTML = label; }
+        }
+
         function updateTaskScore(){ const p=parseInt(document.getElementById('t-p').value); const u=parseInt(document.getElementById('t-u').value); const e=parseInt(document.getElementById('t-e').value); document.getElementById('val-p').innerText=p; document.getElementById('val-u').innerText=u; document.getElementById('val-e').innerText=e; const s=Math.round(((p*0.4)+(u*0.4)+((6-e)*0.2))*20); const el=document.getElementById('t-calc-score'); el.innerText=s; el.style.color = `var(${s>75?'--neg':(s>50?'--warn':'--t1')})`; }
         
         async function saveTask(e){ 

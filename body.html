@@ -2784,6 +2784,7 @@
             </div>
             <div class="p-6 flex flex-col gap-3" style="border-top:1px solid var(--line); background:var(--inset);">
                 <button type="submit" id="t-save-btn" class="btn-primary btn text-sm w-full">Save task</button>
+                <button type="button" id="t-notify-btn" onclick="notifyTaskAssignee()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--goldLine); color:var(--gold);"><i class="fa-solid fa-message mr-2"></i>Text the assignee</button>
                 <button type="button" id="t-delete-btn" onclick="archiveTask()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--line); color:var(--t2);"><i class="fa-solid fa-box-archive mr-2"></i>Archive task</button>
             </div>
         </form>

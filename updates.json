@@ -3,6 +3,14 @@
   "updates": [
     {
       "date": "2026-10-13",
+      "area": "Tasks",
+      "title": "Text whoever a task is assigned to",
+      "what": "Open a task and press Text the assignee to send them a one-line text with the task, client and due date. It works for Aidan and Tenny now; \"Tenny, Aidan\" texts both. Someone with no number on file (KJ, the account manager) is named in the reply instead of failing.",
+      "note": "KJ's number (Philippines, +63) is included, so he can be texted too. The account manager still needs a number.",
+      "action": "Run supabase/sql/task_notify.sql in the SQL Editor."
+    },
+    {
+      "date": "2026-10-13",
       "area": "Reports",
       "title": "The morning audit says when ads are off, not that the data is broken",
       "what": "A client whose ads were switched off used to be reported as \"the daily pull looks broken\", because the daily pull writes nothing for days with no spend. The audit now asks Meta: if it confirms there has been no spend for the last few days, the card says the ads have been off since that day and asks you to confirm it is intended. Real data problems are still reported as before.",

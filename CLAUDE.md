@@ -1852,6 +1852,21 @@ account totals and the morning audit; this adds what it can't say: which ad, and
 - **Tests:** 37 parser checks (real SimpliBlinds extra_data), 14 PGlite checks (schema, RLS,
   rename), 22 jsdom checks on the report block (5 mutations, all caught), strict `tsc`.
 
+## Text the assignee (built 2026-10-13)
+
+"Text the assignee" in the task drawer (existing tasks only) texts whoever a task is assigned to.
+`supabase/sql/task_notify.sql` adds `notify_task_assignee(task_id)` and `team_contacts` (name, phone).
+- **No Make change:** it posts to scenario #6's hook with `event: client_request`, `kind: task_nudge`, a
+  one-person recipients list and the Vault secret, so route 1 sends it like any admin alert.
+- **Who it reaches:** `team_contacts` first, then `admin_alert_recipients` (active only), by full or first
+  name. "Tenny, Aidan" / "&" / "and" texts both. "Client", blank and unknown names come back as "no number
+  on file", never an error. **KJ is seeded in `team_contacts`** (+63, Philippines: a number typed with a leading `+` keeps its
+  country code, anything else is treated as US). The account manager still needs a row (example at the bottom of the SQL file).
+- **Message:** one line, no quotes or backslashes (Make's raw-text module), title + client + due date.
+  Notes are never sent. Admin only (checked inside the function); anon has no EXECUTE.
+- The database reads the saved assignee, so app.js refuses while the drawer has an unsaved change.
+- **Tests:** 23 PGlite checks (one mutation caught), 7 handler checks.
+
 ## Tasks page filters (2026-10-02)
 
 - **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first
