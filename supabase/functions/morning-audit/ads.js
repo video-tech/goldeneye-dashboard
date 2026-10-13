@@ -35,6 +35,51 @@ export const AD_ALERT_CONFIG = {
     staleAfterDays: 2,
 };
 
+// "Ads are off" versus "the pull is broken". The daily pull (Make) writes no row for a day with no
+// spend, so a client whose ads were switched off looks exactly like a broken pull: the audit used to
+// say DATA STALE and send someone to check Make. meta-sync can tell them apart, because it asks Meta
+// every day and records that it did: if it ran recently without error for this client and Meta shows
+// no spend for several days, the ads are off and the data is fine.
+export const ADS_OFF_CONFIG = {
+    // No spend on this many of the window's last days
+    offAfterDays: 3,
+    // meta-sync must have run for the client within this long
+    syncFreshMs: 48 * 3600 * 1000,
+};
+
+const isoOf = (day) => new Date(day * 86400000).toISOString().slice(0, 10);
+
+// signals: the audit's per-client signals (changed in place). adRows: meta_ad_daily rows.
+// syncState: meta_sync_state rows. Returns the names it changed.
+export function applyAdsOff(signals, adRows, syncState, now = new Date(), cfg = ADS_OFF_CONFIG) {
+    const changed = [];
+    for (const s of signals || []) {
+        if (s.verdict !== "DATA_STALE" && s.verdict !== "DATA_GAPS") continue;
+        const st = (syncState || []).find((x) => x.client_name === s.name);
+        // meta-sync has to have looked, recently, and without an error: otherwise we cannot say
+        // anything about Meta, and the original verdict stands.
+        if (!st || !st.last_run_at || st.last_error) continue;
+        if (now.getTime() - Date.parse(st.last_run_at) > cfg.syncFreshMs) continue;
+        const syncedTo = toDay(String(st.last_window || "").split("..")[1]);
+        const to = toDay(s.window && s.window.recentTo);
+        if (syncedTo === null || to === null || syncedTo < to - 1) continue;
+
+        let last = null;
+        for (const r of adRows || []) {
+            if (r.client_name !== s.name || !(parseFloat(r.spend) > 0)) continue;
+            const d = toDay(r.date);
+            if (d !== null && (last === null || d > last)) last = d;
+        }
+        if (last !== null && to - last < cfg.offAfterDays) continue; // spent recently: ads are running
+
+        s.verdict = "ADS_OFF";
+        s.adsOffSince = last === null ? null : isoOf(last + 1);
+        s.notes = [last === null ? "Meta shows no spend in the last 45 days" : `Meta shows no spend since ${isoOf(last)}`];
+        changed.push(s.name);
+    }
+    return changed;
+}
+
 const toDay = (v) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v ?? ""));
     return m ? Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000) : null;

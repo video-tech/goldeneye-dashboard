@@ -721,6 +721,15 @@ Which individual ads are at or over their client's `target_cpl`, appended to the
 - **Read through the same lens as the rest of the audit:** one yardstick for the account and its ads.
 - **What the card says about clients it skipped:** no target CPL (named, so it nudges), no ad data
   synced yet, or data more than 2 days behind the audit window (meta-sync late).
+- **ADS OFF (`applyAdsOff`, same file).** Make writes no row for a day with no spend, so a client whose ads
+  are switched off looked exactly like a broken pull and was reported as "the daily pull looks broken".
+  A DATA STALE or DATA GAPS client becomes **ADS OFF** when meta-sync ran for it within 48 hours without
+  an error, covered the audit's window, and Meta shows no spend for the last 3 days of it. The note
+  gives the last day with spend, and the model is told to say the data is fine and ask the team to
+  confirm it is intended. Anything meta-sync could not check (an error, no recent run, no sync record)
+  keeps its old verdict, so a real broken pull is never hidden. Ads running with rows missing (Sunset's
+  4 of 7 days) stays DATA GAPS. ADS OFF is a calm marker, never a text, and the dashboard's
+  Intelligence card ignores it. First seen 2026-10-13: Alta Vista (ads off since Sep 29).
 - **No new texts.** The critical-alert text is unchanged. The chat's context (`mode: "context"`) also
   carries the flagged ads.
 - **Fails safe:** if `meta_ad_daily` is missing or unreadable the section is left out and the card is
@@ -729,8 +738,9 @@ Which individual ads are at or over their client's `target_cpl`, appended to the
   (the sync's stays view-only), a separate function that only sets an ad to paused, a per-client switch,
   a log of every pause, never an ad under about 4 days old or a client's last running ad, and a dry-run
   period first. The look-back found little to gain: about $870 in three months at 2×.
-- **Tests** (`ads.test.mjs`, run with node): 31 checks on the module and 12 deliberate breakages all
-  caught; the loader and its fallbacks run against a fake database; `index.ts` type-checks.
+- **Tests:** `ads.test.mjs` (node), 46 checks on the flags, the scaling, the rendering and ADS OFF, with 20
+  deliberate breakages all caught; `loader.test.mjs` (node with `--experimental-strip-types`) runs the real
+  loader against a fake database, including paging and its fallbacks; `index.ts` type-checks.
 
 ### Meta restates the past — checked, and it does not bite us
 
@@ -1805,6 +1815,31 @@ account totals and the morning audit; this adds what it can't say: which ad, and
   ad's spend, leads and cost per lead. Never a person's name: "we", or "Meta" for Meta's own
   changes. Budget amounts are shown only when the entry says they're money (minor units / 100).
   No rows, no block, and the report reads as before.
+- **Connecting a client (learned 2026-10-12, took most of a day).** The System User and the Meta app must
+  live in the **Midas Media LLC** Business (ID `1729931754111310`), the one that owns the agency's own ad
+  accounts. The first attempt was made with 3Sixty's Business selected in the picker, so the app and System
+  User were created there and only 3Sixty's account could be assigned. Now: the app is **Golden Eye
+  Internal** (`1081732768027916`, Marketing API use case, `ads_read`), assigned to the System User
+  `Golden Eye Sync` with Manage app (a second admin has to approve that), and the token never expires.
+  Each client then does two things: **their** Business shares the ad account with Midas Media LLC (Business
+  Settings → Users → Partners → Add → the ID above → the ad account, View performance only), and in
+  **Midas Media LLC** the account is assigned to `Golden Eye Sync` (Ad Accounts → the account → Add People →
+  System Users, View performance). "No permissions available" on Generate Token means the app is not
+  assigned to the System User or lacks the Marketing API. "Ad account owner has NOT grant ads_management or
+  ads_read" in a check means the sharing has not happened yet. Connected 2026-10-12: 3Sixty, PANDEN,
+  Caliber, Anxiety Solutions, Alta Vista, Sunset. Astra waits on its owner's approval; KLH and SimpliBlinds
+  are skipped on purpose. Check with `{"mode":"check"}` and read `net._http_response`.
+- **Meta sometimes refuses a big request** with `OAuthException 2: Service temporarily unavailable`
+  (Caliber Cabinets, at 30 and 90 days, while its 8-day daily pull worked). `syncAccount` now tries the
+  whole window first, and on a refusal pulls it in 7-day pieces (`windowsInChunks`), each retried once. A
+  piece that still fails is skipped and named in `meta_sync_state.last_error` as `partial: …`, the rest
+  load, a rate limit stops everything at once, and nothing loading at all raises the last error as before.
+  `chunks.test.mjs` (node with `--experimental-strip-types`) runs the real code against a fake Meta that
+  refuses anything over 8 days; 15 checks, 5 breakages caught.
+- **Meta's lead counts are not the daily pull's.** For the same week, Anxiety Solutions: Meta's own Ads
+  Manager 37 leads, meta-sync 37, Make 15. Spend matches within 1%, and the other clients' leads line up
+  (Sunset 59 vs 59). **GHL is the source of truth for leads and Make's feed was deliberately left alone**, so
+  anything that mixes the two scales Meta's per-ad leads to the account's daily-pull total (see per-ad flags).
 - **Setup order:** `schema.sql` → `rename_client.sql` → set the token → deploy → `schedule.sql` →
   check → backfill. app.js can ship before any of it.
 - **Tests:** 37 parser checks (real SimpliBlinds extra_data), 14 PGlite checks (schema, RLS,

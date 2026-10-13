@@ -2,6 +2,20 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-13",
+      "area": "Reports",
+      "title": "The morning audit says when ads are off, not that the data is broken",
+      "what": "A client whose ads were switched off used to be reported as \"the daily pull looks broken\", because the daily pull writes nothing for days with no spend. The audit now asks Meta: if it confirms there has been no spend for the last few days, the card says the ads have been off since that day and asks you to confirm it is intended. Real data problems are still reported as before.",
+      "action": "Deploy morning-audit"
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Data",
+      "title": "Ad history loads in pieces when Meta refuses a big request",
+      "what": "Meta sometimes answers a large request for one account with \"service temporarily unavailable\". The ad sync now falls back to loading that account in one-week pieces, retries each once, and says which pieces did not load.",
+      "action": "Deploy meta-sync, then run the 90-day backfill again for Caliber Cabinets"
+    },
+    {
       "date": "2026-10-12",
       "area": "Reports",
       "title": "The morning audit lists ads at or over target",

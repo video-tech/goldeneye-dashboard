@@ -1,5 +1,6 @@
 // Checks for the per-ad flags. Run: node supabase/functions/morning-audit/ads.test.mjs
-import { computeAdFlags, renderAdFlagsHtml, adFlagsContext, adsManagerUrl, AD_ALERT_CONFIG } from './ads.js';
+import { computeAdFlags, renderAdFlagsHtml, adFlagsContext, adsManagerUrl, applyAdsOff, AD_ALERT_CONFIG } from './ads.js';
+import { buildAuditContext } from './engine.js';
 
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) pass++; else { fail++; console.log('FAIL:', n); } };
@@ -85,5 +86,46 @@ const ctx = adFlagsContext(r);
 ok(/pricey ad/.test(ctx) && /zero leads ad/.test(ctx) && /no leads/.test(ctx), 'chat context lists the flagged ads');
 ok(adFlagsContext({ flags: [], checked: [], noTarget: [] }) === '', 'chat context empty when nothing was checked');
 ok(adsManagerUrl('act_123', '45') === 'https://www.facebook.com/adsmanager/manage/ads?act=123&selected_ad_ids=45' && adsManagerUrl(null, '1') === null, 'link builder strips act_ and refuses missing ids');
+
+
+// ---- ads off versus a broken pull ----
+const NOW = new Date('2026-10-13T16:00:00Z');
+const stale = (name, verdict = 'DATA_STALE') => ({ name, verdict, notes: ['last row is 2026-10-06, 6 days behind the rest of the agency'], window: { recentFrom: FROM, recentTo: TO, baselineFrom: '2026-09-07', baselineTo: '2026-10-04' }, recent: { spend: 0, leads: 0, cpl: null }, baseline: { cpl: null, leads: 0 }, targetCpl: null, flags: [] });
+const okSync = (client, extra = {}) => ({ client_name: client, last_run_at: '2026-10-13T15:30:00Z', last_error: null, last_window: '2026-10-05..2026-10-12', ...extra });
+const spendRow = (client, date, spend = 20) => ({ client_name: client, date, spend, leads: 0, ad_id: '1' });
+
+let sg = [stale('Off Co')];
+let changed = applyAdsOff(sg, [spendRow('Off Co', '2026-09-29')], [okSync('Off Co')], NOW);
+ok(changed.join() === 'Off Co' && sg[0].verdict === 'ADS_OFF', 'no spend since Sep 29, with a healthy sync: ADS_OFF');
+ok(sg[0].adsOffSince === '2026-09-30' && /no spend since 2026-09-29/.test(sg[0].notes[0]), 'the note names the last day with spend');
+sg = [stale('Gaps Co', 'DATA_GAPS')];
+ok(applyAdsOff(sg, [spendRow('Gaps Co', '2026-09-20')], [okSync('Gaps Co')], NOW).length === 1 && sg[0].verdict === 'ADS_OFF', 'DATA_GAPS converts too');
+sg = [stale('Never Co')];
+applyAdsOff(sg, [], [okSync('Never Co')], NOW);
+ok(sg[0].verdict === 'ADS_OFF' && /last 45 days/.test(sg[0].notes[0]) && sg[0].adsOffSince === null, 'no spend at all in the history: ADS_OFF, said as such');
+
+sg = [stale('X')]; applyAdsOff(sg, [spendRow('X', '2026-09-29')], [okSync('X', { last_error: 'OAuthException 200: not granted' })], NOW);
+ok(sg[0].verdict === 'DATA_STALE', 'meta-sync reported an error for the client: left as a data problem');
+sg = [stale('X')]; applyAdsOff(sg, [spendRow('X', '2026-09-29')], [okSync('X', { last_run_at: '2026-10-10T15:30:00Z' })], NOW);
+ok(sg[0].verdict === 'DATA_STALE', 'meta-sync has not run for 3 days: cannot vouch for Meta, left alone');
+sg = [stale('X')]; applyAdsOff(sg, [spendRow('X', '2026-09-29')], [], NOW);
+ok(sg[0].verdict === 'DATA_STALE', 'no sync record at all: left alone');
+sg = [stale('X')]; applyAdsOff(sg, [spendRow('X', '2026-09-29')], [okSync('X', { last_window: '2026-09-20..2026-10-01' })], NOW);
+ok(sg[0].verdict === 'DATA_STALE', 'sync window ends well before the audit window: left alone');
+sg = [stale('X')]; applyAdsOff(sg, [spendRow('X', '2026-10-10')], [okSync('X')], NOW);
+ok(sg[0].verdict === 'DATA_STALE', 'Meta shows spend a day ago: the ads are running, so it really is the pull');
+sg = [stale('X')]; applyAdsOff(sg, [spendRow('X', '2026-10-08')], [okSync('X')], NOW);
+ok(sg[0].verdict === 'ADS_OFF', 'exactly 3 days without spend counts as off');
+sg = [stale('X')]; applyAdsOff(sg, [spendRow('X', '2026-10-09')], [okSync('X')], NOW);
+ok(sg[0].verdict === 'DATA_STALE', 'only 2 days without spend does not');
+sg = [stale('X')]; applyAdsOff(sg, [{ client_name: 'X', date: '2026-10-11', spend: 0, ad_id: '1' }, spendRow('X', '2026-09-29')], [okSync('X')], NOW);
+ok(sg[0].verdict === 'ADS_OFF', 'a zero-spend row does not count as spend');
+sg = [{ ...stale('Crit'), verdict: 'CRITICAL' }, { ...stale('Watch'), verdict: 'WATCH' }, { ...stale('Stable'), verdict: 'STABLE' }];
+ok(applyAdsOff(sg, [], [okSync('Crit'), okSync('Watch'), okSync('Stable')], NOW).length === 0 && sg.map((x) => x.verdict).join() === 'CRITICAL,WATCH,STABLE', 'other verdicts are never touched');
+
+// what the model is told
+const md = buildAuditContext([{ ...stale('Off Co'), verdict: 'ADS_OFF', notes: ['Meta shows no spend since 2026-09-29'] }, stale('Broken Co')]);
+ok(/## ADS OFF — Meta confirms no spend/.test(md) && /Off Co — Meta shows no spend since 2026-09-29/.test(md), 'the audit context has an ADS OFF section with the note');
+ok(md.indexOf('## ADS OFF') < md.indexOf('## DATA STALE') && /Broken Co/.test(md), 'ADS OFF is listed before DATA STALE, which is still there for real problems');
 
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

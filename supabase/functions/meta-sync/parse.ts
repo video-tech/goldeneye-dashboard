@@ -221,6 +221,25 @@ export function windowEndingYesterday(now: Date, days: number): { since: string;
     return { since: ymd(since), until: ymd(until) };
 }
 
+// Windows that together cover the last `days` days ending yesterday, newest first, none longer
+// than `size`. Used when Meta refuses one big request ("service temporarily unavailable", code 2)
+// for an account with a lot of ads: the same data, asked for in pieces.
+export function windowsInChunks(now: Date, days: number, size: number): { since: string; until: string }[] {
+    const out: { since: string; until: string }[] = [];
+    let remaining = Math.max(0, Math.floor(days));
+    let offset = 0;
+    const step = Math.max(1, Math.floor(size));
+    while (remaining > 0) {
+        const n = Math.min(step, remaining);
+        const until = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - offset));
+        const since = new Date(until.getTime() - (n - 1) * 86400000);
+        out.push({ since: ymd(since), until: ymd(until) });
+        offset += n;
+        remaining -= n;
+    }
+    return out;
+}
+
 export const normalizeAccountId = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 const normalizeName = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 

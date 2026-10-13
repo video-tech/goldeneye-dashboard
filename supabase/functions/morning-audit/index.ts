@@ -20,7 +20,7 @@ import {
     resolveAuditAnchor,
     todayDayNumber,
 } from "./engine.js";
-import { adFlagsContext, computeAdFlags, renderAdFlagsHtml } from "./ads.js";
+import { adFlagsContext, applyAdsOff, computeAdFlags, renderAdFlagsHtml } from "./ads.js";
 
 // Enough history for the 28-day baseline plus the 7-day window, with room to spare so
 // a few missing days never shorten the baseline.
@@ -83,14 +83,17 @@ async function loadAdRows(db: any, names: string[]) {
     return { rows, cutoff };
 }
 
-// Which individual ads are at or over their client's target CPL. Decided in code (ads.js), then
-// appended to the saved card; the model never sees an ad name or an ad figure.
-async function adFlagsFor(db: any, signals: any[]) {
-    const withTarget = signals.filter((s) => parseFloat(s.targetCpl) > 0);
-    if (!withTarget.length) return computeAdFlags(signals, []);
-    const loaded = await loadAdRows(db, withTarget.map((s) => s.name));
+// Everything meta-sync knows that the audit uses: per-ad rows (for the ads section, and to tell "ads
+// are off" from "the pull is broken") and each client's sync state. Wanted for clients with a target
+// CPL and for any whose daily-pull data looks missing. Null when meta-sync's tables cannot be read.
+async function loadAdData(db: any, signals: any[]) {
+    const wanted = signals.filter((s) => parseFloat(s.targetCpl) > 0 || s.verdict === "DATA_STALE" || s.verdict === "DATA_GAPS");
+    if (!wanted.length) return { rows: [] as any[], cutoff: undefined as string | undefined, syncState: [] as any[] };
+    const loaded = await loadAdRows(db, wanted.map((s) => s.name));
     if (!loaded) return null;
-    return computeAdFlags(signals, loaded.rows, undefined, loaded.cutoff);
+    const { data: syncState, error } = await db.from("meta_sync_state").select("client_name, last_run_at, last_error, last_window");
+    if (error) console.error("meta_sync_state not read:", error);
+    return { rows: loaded.rows, cutoff: loaded.cutoff as string | undefined, syncState: error ? [] : (syncState ?? []) };
 }
 
 const PROMPT_INSTRUCTIONS = `
@@ -118,24 +121,28 @@ like \`\`\`html. Just return the raw HTML string.
 Write one short paragraph per client worth mentioning — no grid, no boxes, no columns.
 Order them by urgency: CRITICAL and SPEND STOPPED first, then WATCH, then SCALE
 CANDIDATES and any IMPROVING client whose gain came with more budget rather than better
-efficiency. Skip a client entirely if their verdict is STABLE or INSUFFICIENT_VOLUME with
+efficiency, then ADS OFF, then DATA STALE / DATA GAPS. Skip a client entirely if their verdict is STABLE or INSUFFICIENT_VOLUME with
 nothing notable to say — a quiet client gets no paragraph, not a filler sentence.
 
 Every paragraph opens with one marker line naming the client, colored and iconed for its
-verdict — exactly one of these four, matched to the client's own heading, never invented
+verdict — exactly one of these five, matched to the client's own heading, never invented
 or mixed:
 
 <p><i class="fa-solid fa-fire" style="color:var(--neg);"></i> <strong style="color:var(--neg);">[Client name]</strong> — [sentence]</p>       for CRITICAL / SPEND STOPPED
 <p><i class="fa-solid fa-eye" style="color:var(--warn);"></i> <strong style="color:var(--warn);">[Client name]</strong> — [sentence]</p>       for WATCH
 <p><i class="fa-solid fa-arrow-trend-up" style="color:var(--pos);"></i> <strong style="color:var(--pos);">[Client name]</strong> — [sentence]</p>   for SCALE CANDIDATE / IMPROVING-on-more-budget
 <p><i class="fa-solid fa-plug-circle-exclamation" style="color:var(--t3);"></i> <strong style="color:var(--t3);">[Client name]</strong> — [sentence]</p>  for DATA STALE / DATA GAPS
+<p><i class="fa-solid fa-circle-pause" style="color:var(--t3);"></i> <strong style="color:var(--t3);">[Client name]</strong> — [sentence]</p>  for ADS OFF
 
 After the marker, write one to two plain sentences: what happened, in real numbers, and
 the first thing to check. Lead with the biggest spender within each verdict group. For a
 WATCH client whose note says CTR is falling, lead with that and say the creative needs
 looking at — that is an early warning worth acting on while CPL still looks fine. For a
 DATA STALE / DATA GAPS client, say plainly that the pull looks broken and the numbers
-cannot be trusted yet, rather than describing it as a performance problem.
+cannot be trusted yet, rather than describing it as a performance problem. For an ADS OFF
+client the opposite is true: say in one sentence that their ads have not spent since the day
+the note gives, that Meta confirms it, that nothing is wrong with the data, and that the team
+should confirm it is intended. Never call it a broken pull.
 
 A quiet morning is a real and good result. If nothing needs a paragraph, write a single
 plain line saying so — "Nothing critical today." — with no icon and no color. Never
@@ -335,11 +342,17 @@ Deno.serve(async (req: Request) => {
         }
 
         const signals = await loadSignals(db);
-        const context = buildAuditContext(signals);
-        const adResult = await adFlagsFor(db, signals).catch((err) => {
-            console.error("adFlagsFor failed:", err);
+        const adData = await loadAdData(db, signals).catch((err) => {
+            console.error("loadAdData failed:", err);
             return null;
         });
+        // Where the daily pull has no rows for a client, ask meta-sync whether their ads are simply
+        // off. If Meta confirms it, the verdict becomes ADS OFF instead of "the pull looks broken".
+        if (adData) applyAdsOff(signals, adData.rows, adData.syncState);
+        const context = buildAuditContext(signals);
+        // Which individual ads are at or over their client's target CPL. Decided in code (ads.js), then
+        // appended to the saved card; the model never sees an ad name or an ad figure.
+        const adResult = adData ? computeAdFlags(signals, adData.rows, undefined, adData.cutoff) : null;
 
         // The dashboard's AI chat wants the matrix without spending a model call on it. It also
         // gets the flagged ads, which the card's model deliberately does not.

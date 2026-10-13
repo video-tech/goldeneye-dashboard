@@ -444,7 +444,7 @@ function computeClientSignal(client, rows, anchor, cfg) {
 
 
 const VERDICT_ORDER = ['CRITICAL', 'SPEND_STOPPED', 'WATCH', 'SCALE_CANDIDATE', 'IMPROVING',
-                       'DATA_STALE', 'DATA_GAPS', 'STABLE', 'INSUFFICIENT_VOLUME', 'NO_SPEND'];
+                       'ADS_OFF', 'DATA_STALE', 'DATA_GAPS', 'STABLE', 'INSUFFICIENT_VOLUME', 'NO_SPEND'];
 
 // Spelled out for the model, so it never has to infer what a label means.
 const VERDICT_LABEL = {
@@ -453,6 +453,7 @@ const VERDICT_LABEL = {
     WATCH:               'WATCH — either drifting the wrong way while still inside normal variance, or CPL is holding but the creative signal underneath it is not. The second kind is an early warning: act before it reaches CPL',
     SCALE_CANDIDATE:     'SCALE CANDIDATES — cheaper leads without extra budget, so the efficiency gain is real',
     IMPROVING:           'IMPROVING — cheaper leads, but the budget moved too much to call it efficiency. Read the note: either spend rose (so this is volume, not a better account) or spend was cut (so the cut itself probably bought the cheaper leads)',
+    ADS_OFF:             'ADS OFF — Meta confirms no spend for several days, so this is neither a broken pull nor a performance problem. The note gives the last day with spend. Say so in one sentence and ask the team to confirm it is intended',
     DATA_STALE:          'DATA STALE — no recent rows. Check the Make daily pull before reading anything into these',
     DATA_GAPS:           'DATA GAPS — too many missing days to judge. Check the Make daily pull',
     STABLE:              'STABLE — inside normal variance, nothing to do',
@@ -460,7 +461,7 @@ const VERDICT_LABEL = {
     NO_SPEND:            'NO SPEND — nothing running in either window'
 };
 
-const NO_VERDICT = ['DATA_STALE', 'DATA_GAPS', 'STABLE', 'INSUFFICIENT_VOLUME', 'NO_SPEND'];
+const NO_VERDICT = ['ADS_OFF', 'DATA_STALE', 'DATA_GAPS', 'STABLE', 'INSUFFICIENT_VOLUME', 'NO_SPEND'];
 
 const fmtMoney = (v) => (v === null || v === undefined) ? 'n/a' : `$${Number(v).toFixed(0)}`;
 const fmtNum   = (v, dp = 1) => (v === null || v === undefined) ? 'n/a' : Number(v).toFixed(dp);
