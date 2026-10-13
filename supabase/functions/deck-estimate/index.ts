@@ -33,9 +33,15 @@
 //   created_by    the rep's sign-in email
 //   customer      {first_name, last_name, email, phone|null, address|null, city|null, postal_code|null}
 //   line_items    [{kind, description, qty, unit, rate, amount}], in display order
-//                 kind: decking | footings | railing | steps | waterproofing | demo | adjustment | addon_tbd
+//                 kind: decking | footings | railing | steps | waterproofing | demo | addon | custom |
+//                       adjustment | addon_tbd
 //                 Map kind -> a QuickBooks Product/Service (3Sixty picks these; see the client plan).
-//                 Only "adjustment" is negative. "addon_tbd" lines are $0, "quoted at consultation".
+//                 "addon" is a priced add-on (soffit and gutters, underside paint). "custom" is a
+//                 line the rep named and priced; its description is their own words, and it can be
+//                 negative (a discount). "adjustment" is the only other negative line.
+//                 "addon_tbd" lines are $0, "quoted at consultation".
+//                 3Sixty's own QuickBooks estimates use lump-sum lines (Deck build, Railing, Deck
+//                 Demo, Deck stairs, Discount), so the scenario may group these rather than map 1:1.
 //                 They sum exactly to `total`.
 //   total         the top of the calculator's range, which the estimate carries
 //   price_low     the bottom of the range, for the memo if wanted

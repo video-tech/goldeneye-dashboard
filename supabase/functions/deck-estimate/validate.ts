@@ -3,14 +3,20 @@
 //
 // The browser builds this request, so nothing in it is trusted: every field is type-checked,
 // length-capped and re-derived where it can be. The line items must add up to the total they
-// claim, each line's qty x rate must equal its amount, and only the adjustment line may be
-// negative. A rep could still type a different estimate straight into QuickBooks, so this isn't
+// claim, each line's qty x rate must equal its amount, and only the adjustment line and a rep's
+// own custom lines (a discount is one) may be negative. A rep could still type a different
+// estimate straight into QuickBooks, so this isn't
 // guarding the price; it guards the shape, so Make and QuickBooks only ever see well-formed data
 // and a malformed request fails here with a readable reason instead of halfway through Make.
 
+// "addon" is a priced add-on (soffit and gutters, underside paint); "addon_tbd" is one quoted at
+// consultation, always $0; "custom" is a line a rep named and priced in the portal calculator.
 export const LINE_KINDS = [
-    "decking", "footings", "railing", "steps", "waterproofing", "demo", "adjustment", "addon_tbd",
+    "decking", "footings", "railing", "steps", "waterproofing", "demo", "addon", "custom",
+    "adjustment", "addon_tbd",
 ] as const;
+// The only kinds allowed below zero: the calculator's own adjustment, and a rep's discount.
+const MAY_BE_NEGATIVE = ["adjustment", "custom"];
 const UNITS = ["sqft", "ea", "lf", "job"];
 
 export type LineItem = {
@@ -92,7 +98,9 @@ export function validateEstimate(input: unknown): Validated {
             if (qty === null || rate === null || amount === null) return;
             if (Math.abs(cents(qty * rate) - amount) > 0.011) errors.push(`${at}: quantity x rate doesn't equal its amount.`);
             if (kind === "adjustment") adjustments++;
-            else if (amount < 0 || rate < 0) errors.push(`${at}: only the adjustment line may be negative.`);
+            if (!MAY_BE_NEGATIVE.includes(kind) && (amount < 0 || rate < 0)) {
+                errors.push(`${at}: only the adjustment and custom lines may be negative.`);
+            }
             if (kind === "addon_tbd" && amount !== 0) errors.push(`${at}: an add-on quoted at consultation must be $0.`);
             lines.push({ kind, description, qty, unit, rate, amount: cents(amount) });
         });
