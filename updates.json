@@ -3,6 +3,12 @@
   "updates": [
     {
       "date": "2026-10-13",
+      "area": "Onboarding",
+      "title": "A journey bar on each client's Health tab",
+      "what": "Between Weekly Check-ins and Onboarding there is now a bar showing how close the client is to their next stage. In Onboarding it counts the same steps as the Onboarding list below it. In every later stage it counts that stage's checklist tasks, and a full bar says the client is ready to move on. You still move them with Move Stage."
+    },
+    {
+      "date": "2026-10-13",
       "area": "Tasks",
       "title": "Text whoever a task is assigned to",
       "what": "Open a task and press Text the assignee to send them a one-line text with the task, client and due date. It works for Aidan and Tenny now; \"Tenny, Aidan\" texts both. Someone with no number on file (KJ, the account manager) is named in the reply instead of failing.",

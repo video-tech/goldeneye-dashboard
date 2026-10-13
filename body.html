@@ -959,6 +959,18 @@
                                 <div id="c-checkins-list" class="overflow-x-auto"></div>
                             </div>
 
+                            <div id="c-stage-box" class="glass p-6 flex flex-col hidden" style="border-left:4px solid var(--goldSolid);">
+                                <div class="flex flex-wrap justify-between items-baseline gap-2 mb-4">
+                                    <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-route mr-2" style="color:var(--gold);"></i> Journey</h3>
+                                    <span id="c-stage-summary" class="text-xs" style="color:var(--t2);"></span>
+                                </div>
+                                <div id="c-stage-steps" class="flex items-center gap-1 mb-3 text-[10px] uppercase tracking-widest" style="color:var(--t3);"></div>
+                                <div class="w-full overflow-hidden" style="height:8px; border-radius:4px; background:var(--inset); border:1px solid var(--line);" role="progressbar" id="c-stage-bar-track" aria-valuemin="0" aria-valuemax="100">
+                                    <div id="c-stage-bar" style="height:100%; width:0%; background:var(--goldSolid); border-radius:4px; transition:width .4s ease;"></div>
+                                </div>
+                                <p id="c-stage-detail" class="text-xs mt-2" style="color:var(--t3);"></p>
+                            </div>
+
                             <div id="c-onboarding-box" class="glass p-6 border-l-4 border-blue-500 flex flex-col hidden">
                                 <div class="flex justify-between items-center mb-4">
                                     <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-flag-checkered mr-2 text-blue-400"></i> Onboarding Progress</h3>

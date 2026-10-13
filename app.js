@@ -5436,10 +5436,63 @@ window.markOnboardingComplete = async function() {
     }
 };
 
+        // The Journey bar on a client's Health tab: how close they are to the next lifecycle stage.
+        // Onboarding counts the same items the Onboarding box lists (client steps + our tasks), which is
+        // what moves them on. Every later stage counts that stage's checklist tasks, and moving on is
+        // still the admin's call (Move Stage), so a full bar says "ready", never advances anyone.
+        function stageProgressFor(client) {
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(client));
+            if (!row) return null;
+            const stage = row.current_stage || 'Onboarding';
+            const idx = lifecycleStages.indexOf(stage);
+            const next = idx >= 0 ? lifecycleStages[idx + 1] || null : null;
+            let done = 0, total = 0;
+            if (stage === 'Onboarding') {
+                const items = allOnboardingItems(client);
+                const tasks = new Map(globalTasksData.filter(t => normalize(t.client || '') === normalize(client) && t.stage === 'Onboarding')
+                    .map(t => [String(t.title || '').trim().toLowerCase(), t]));
+                total = items.length;
+                done = items.filter(i => i.owner === 'agency'
+                    ? tasks.get(String(i.title || '').trim().toLowerCase())?.status === 'Complete'
+                    : !!onboardingProgressFor(client, i.id)?.completed_at).length;
+            } else {
+                const tasks = globalTasksData.filter(t => normalize(t.client || '') === normalize(client) && t.stage === stage);
+                total = tasks.length;
+                done = tasks.filter(t => t.status === 'Complete').length;
+            }
+            return { stage, idx, next, done, total, pct: total ? Math.round(done / total * 100) : 0 };
+        }
+
+        function renderStageProgress() {
+            const box = document.getElementById('c-stage-box');
+            if (!box) return;
+            const p = cSelectedAccount === "ALL" ? null : stageProgressFor(cSelectedAccount);
+            if (!p) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            document.getElementById('c-stage-steps').innerHTML = lifecycleStages.map((s, i) => {
+                const state = i < p.idx ? 'done' : i === p.idx ? 'now' : 'todo';
+                const color = state === 'todo' ? 'var(--t3)' : state === 'now' ? 'var(--gold)' : 'var(--t2)';
+                return `<span style="flex:1; text-align:center; padding-bottom:4px; border-bottom:2px solid ${state === 'todo' ? 'var(--line)' : 'var(--goldSolid)'}; opacity:${state === 'done' ? 0.55 : 1}; color:${color}; font-weight:${state === 'now' ? 700 : 500};">${state === 'done' ? '✓ ' : ''}${escapeAttr(s)}</span>`;
+            }).join('');
+            const bar = document.getElementById('c-stage-bar');
+            bar.style.width = p.pct + '%';
+            const track = document.getElementById('c-stage-bar-track');
+            track.setAttribute('aria-valuenow', String(p.pct));
+            const unit = p.stage === 'Onboarding' ? 'steps' : 'tasks';
+            document.getElementById('c-stage-summary').innerText = p.next
+                ? `${p.stage} → ${p.next}` : `${p.stage} (last stage)`;
+            document.getElementById('c-stage-detail').innerText = !p.total
+                ? `No ${p.stage} ${unit} yet, so there's nothing to measure.`
+                : p.next
+                    ? (p.done === p.total ? `All ${p.total} ${unit} done. Ready to move to ${p.next}.` : `${p.done} of ${p.total} ${unit} done (${p.pct}%). ${p.total - p.done} to go before ${p.next}.`)
+                    : `${p.done} of ${p.total} ${unit} done.`;
+        }
+
         function renderClientOnboarding() {
             const box = document.getElementById('c-onboarding-box');
             const list = document.getElementById('c-onboarding-list');
             if (!box || !list) return;
+            renderStageProgress();
 
             const items = cSelectedAccount === "ALL" ? [] : allOnboardingItems(cSelectedAccount);
             if (cSelectedAccount === "ALL" || !items.length) { box.classList.add('hidden'); return; }
@@ -13438,7 +13491,7 @@ window.executeStageTransition = async function() {
 
         // 3. Trigger UI Refresh
         const transitionBtn = document.getElementById('btn-stage-transition');
-        const chip = document.getElementById("c-stage-chip"); if(chip) chip.innerText = targetStage;
+        const chip = document.getElementById("c-stage-chip"); if(chip) chip.innerText = targetStage; if (typeof renderStageProgress === 'function') renderStageProgress();
         
         // 4. Conditional Generation — from the stage's checklist template
         if (generateTasks) {
