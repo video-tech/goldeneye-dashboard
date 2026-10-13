@@ -48,6 +48,14 @@ const AUDIT_CONFIG = {
     criticalCplDelta: 0.25,
     watchCplDelta: 0.15,
     improvingCplDelta: -0.15,
+    // The spend rule. Statistics protect small accounts from false alarms, but they also
+    // make an account spending ~$200 a week unreadable: at that size a week of one or
+    // three leads is indistinguishable from bad luck, however much it cost. So real money
+    // going out at double the yardstick CPL is CRITICAL on its own, with no significance
+    // test. The yardstick is the client's target CPL, or their own baseline without one.
+    // The floor keeps a $60 week from ever tripping it.
+    burnCplMultiple: 2.0,
+    burnMinSpend: 200,
     spendStoppedFraction: 0.1,
     // A scale recommendation needs spend to have held roughly steady in BOTH
     // directions. Cutting budget usually improves CPL on its own — you stop buying the
@@ -290,15 +298,34 @@ function computeClientSignal(client, rows, anchor, cfg) {
     // count. A client expecting 3 leads can never clear the bar on a one-lead
     // miss, which is exactly the false alarm the old flat 5% rule fired every
     // morning; a client expecting 40 and getting 22 clears it easily.
-    const expected = baseline.cpl > 0 ? recent.spend / baseline.cpl : 0;
+    //
+    // What "expected" is measured against depends on whether the client has a target
+    // CPL. With one, that is the yardstick: it is what we promised, and an account whose
+    // own history is poor should not read as fine because it is consistently poor. With
+    // none, the client's own baseline is. Only the bad side (CRITICAL / WATCH) uses the
+    // yardstick. "Improving" always means better than their own recent past, since beating
+    // a target is not the same as getting better, so the good side keeps the baseline.
+    const usingTarget = signal.targetCpl > 0;
+    const yardstick = usingTarget ? signal.targetCpl : (baseline.cpl > 0 ? baseline.cpl : null);
+    signal.yardstick = yardstick;
+    signal.yardstickKind = yardstick === null ? null : (usingTarget ? 'target' : 'baseline');
+
+    const expected = yardstick > 0 ? recent.spend / yardstick : 0;
     signal.expectedLeads = expected;
     signal.z = expected > 0 ? (recent.leads - expected) / Math.sqrt(expected) : null;
 
     // Infinity, not null: spend with zero leads is the worst possible outcome
     // and has to sort as such.
-    signal.cplDelta = (recent.cpl !== null && baseline.cpl > 0)
-        ? (recent.cpl - baseline.cpl) / baseline.cpl
+    const deltaVs = (ref) => (recent.cpl !== null && ref > 0)
+        ? (recent.cpl - ref) / ref
         : (recent.cpl === null && recent.spend > 0 ? Infinity : null);
+    signal.cplDelta = deltaVs(yardstick);
+
+    // The same two figures against the client's own baseline, for the good side and for
+    // the driver decomposition (which is always a comparison with their own past).
+    const baseExpected = baseline.cpl > 0 ? recent.spend / baseline.cpl : 0;
+    const baseZ = baseExpected > 0 ? (recent.leads - baseExpected) / Math.sqrt(baseExpected) : null;
+    const baseDelta = deltaVs(baseline.cpl);
 
     // Why the CPL moved, decomposed exactly. Available for every verdict, not
     // just the bad ones — knowing a win came from a CVR jump is what tells you
@@ -308,8 +335,8 @@ function computeClientSignal(client, rows, anchor, cfg) {
     // When CPL barely moved there is no movement to attribute, and naming a driver
     // anyway reads as a diagnosis of something that did not happen. Keep the component
     // deltas — the creative flag reads CTR out of them — but withhold the headline.
-    if (signal.cplDelta !== null && signal.cplDelta !== Infinity
-        && Math.abs(signal.cplDelta) < c.minCplDeltaForDriver) {
+    if (baseDelta !== null && baseDelta !== Infinity
+        && Math.abs(baseDelta) < c.minCplDeltaForDriver) {
         signal.drivers.dominant = null;
         signal.drivers.dominantWorsened = null;
     }
@@ -340,26 +367,49 @@ function computeClientSignal(client, rows, anchor, cfg) {
     // The volume gate, now that we know what this spend was worth in leads. Baseline
     // leads still matter separately: they are what makes the baseline CPL — and so the
     // expectation itself — worth trusting.
-    if (expected < c.minExpectedLeads || baseline.leads < c.minBaselineLeads) {
-        signal.notes.push(`$${recent.spend.toFixed(0)} spend implies only ${expected.toFixed(1)} expected leads against ${baseline.leads} in the baseline — too thin to read anything into the CPL`);
+    // A target is a given, not an estimate, so the baseline-leads floor (which exists to
+    // make sure the baseline CPL is worth trusting) does not apply when one is set.
+    const thin = expected < c.minExpectedLeads || (!usingTarget && baseline.leads < c.minBaselineLeads);
+
+    // The spend rule: real money out at double the yardstick, however few leads that is.
+    // It sits ahead of the volume gate on purpose. This is the account the gate exists to
+    // silence, and the one whose client feels a bad week the most.
+    const burning = yardstick > 0 && recent.spend >= c.burnMinSpend
+        && (recent.cpl === null || recent.cpl >= yardstick * c.burnCplMultiple);
+    const burnNote = () => {
+        const ref = usingTarget ? `the $${yardstick.toFixed(0)} target` : `its usual $${yardstick.toFixed(0)}`;
+        return recent.cpl === null
+            ? `$${recent.spend.toFixed(0)} spent and no leads at all, against ${ref} CPL`
+            : `$${recent.spend.toFixed(0)} bought ${recent.leads} lead${recent.leads === 1 ? '' : 's'} — $${recent.cpl.toFixed(0)} CPL is ${(recent.cpl / yardstick).toFixed(1)}× ${ref}`;
+    };
+
+    if (thin) {
         // Drop the CPL statistics rather than print figures we have just called
         // unreliable. A creative flag survives, because it never rested on them.
         signal.z = null;
         signal.drivers.dominant = null;
         signal.drivers.dominantWorsened = null;
-        signal.verdict = signal.flags.length ? 'WATCH' : 'INSUFFICIENT_VOLUME';
+        if (burning) {
+            signal.verdict = 'CRITICAL';
+            signal.notes.push(`${burnNote()} — too few leads to prove it statistically, but it is real spend`);
+        } else {
+            signal.notes.push(`$${recent.spend.toFixed(0)} spend implies only ${expected.toFixed(1)} expected leads against ${baseline.leads} in the baseline — too thin to read anything into the CPL`);
+            signal.verdict = signal.flags.length ? 'WATCH' : 'INSUFFICIENT_VOLUME';
+        }
         return signal;
     }
 
-    const z = signal.z, d = signal.cplDelta;
-    const bothWays = (zLimit, dLimit, worse) =>
+    const bothWays = (zLimit, dLimit, worse, z = signal.z, d = signal.cplDelta) =>
         z !== null && d !== null && (worse ? (z <= zLimit && d >= dLimit) : (z >= zLimit && d <= dLimit));
 
-    if (bothWays(c.criticalZ, c.criticalCplDelta, true)) {
+    if (burning) {
+        signal.verdict = 'CRITICAL';
+        signal.notes.push(burnNote());
+    } else if (bothWays(c.criticalZ, c.criticalCplDelta, true)) {
         signal.verdict = 'CRITICAL';
     } else if (bothWays(c.watchZ, c.watchCplDelta, true)) {
         signal.verdict = 'WATCH';
-    } else if (bothWays(c.improvingZ, c.improvingCplDelta, false)) {
+    } else if (bothWays(c.improvingZ, c.improvingCplDelta, false, baseZ, baseDelta)) {
         // Cheaper leads on *steady* budget is a real efficiency gain and the only
         // state that earns a scale recommendation. Cheaper leads because we tripled
         // the budget is just more budget — and cheaper leads because we halved it is
@@ -375,7 +425,7 @@ function computeClientSignal(client, rows, anchor, cfg) {
         }
     }
 
-    if (signal.targetCpl && recent.cpl !== null) {
+    if (signal.targetCpl && recent.cpl !== null && !burning) {
         signal.notes.push(recent.cpl > signal.targetCpl
             ? `$${recent.cpl.toFixed(0)} CPL is above the $${signal.targetCpl.toFixed(0)} target`
             : `$${recent.cpl.toFixed(0)} CPL is inside the $${signal.targetCpl.toFixed(0)} target`);
@@ -398,7 +448,7 @@ const VERDICT_ORDER = ['CRITICAL', 'SPEND_STOPPED', 'WATCH', 'SCALE_CANDIDATE', 
 
 // Spelled out for the model, so it never has to infer what a label means.
 const VERDICT_LABEL = {
-    CRITICAL:            'CRITICAL — materially fewer leads than this spend should have bought, and CPL is up sharply',
+    CRITICAL:            'CRITICAL — either materially fewer leads than this spend should have bought with CPL up sharply, or CPL at double the target (or double its usual, when no target is set) on real spend. The note says which; the second kind is a spend judgement on few leads, not a statistical one',
     SPEND_STOPPED:       'SPEND STOPPED — delivery has all but halted against baseline. Operational problem, not a performance one',
     WATCH:               'WATCH — either drifting the wrong way while still inside normal variance, or CPL is holding but the creative signal underneath it is not. The second kind is an early warning: act before it reaches CPL',
     SCALE_CANDIDATE:     'SCALE CANDIDATES — cheaper leads without extra budget, so the efficiency gain is real',
@@ -435,7 +485,8 @@ export function buildAuditContext(signals) {
         }
     }
     md += `[The window ends on the last day the daily pull delivered, so it is as current as the data gets. Days still in progress are excluded — they carry full spend against a fraction of their leads. Do not comment on this.]\n`;
-    md += `[Every verdict below was computed in code and is authoritative. "signal" is how many standard deviations the lead count landed from what the baseline predicted for this spend; roughly -2 is a one-in-forty week. Do not recalculate anything, and do not second-guess a label.]\n`;
+    md += `[Every verdict below was computed in code and is authoritative. "signal" is how many standard deviations the lead count landed from what the target (or, with no target, the baseline) predicted for this spend; roughly -2 is a one-in-forty week. Where a CPL is compared with a target, that is the CPL we told the client to expect, so lead with it. Do not recalculate anything, and do not second-guess a label.]\n`;
+    md += `[A CRITICAL whose note says how many times the target or usual CPL it is came from spend alone: real money at double the yardstick, on too few leads to prove statistically. Say it plainly as that — a week that cost too much — and do not describe it as a proven decline.]\n`;
     md += `[Where a "driver" is given, CPL has been decomposed exactly into the three things that can move it — CPM (auction cost), CTR (people clicking), CVR (clicks becoming leads). The named driver is the one that moved it most. Use it to say what to go and look at: CPM means auction or targeting, CTR means creative or a saturated audience, CVR means the landing page or form rather than the ads.]\n\n`;
 
     const grouped = {};
@@ -462,9 +513,15 @@ export function buildAuditContext(signals) {
                 parts.push(s.expectedLeads !== null
                     ? `${s.recent.leads} leads vs ${fmtNum(s.expectedLeads)} expected`
                     : `${s.recent.leads} leads`);
-                if (s.baseline.cpl !== null) {
-                    parts.push(`CPL ${s.recent.cpl === null ? 'none' : fmtMoney(s.recent.cpl)} vs ${fmtMoney(s.baseline.cpl)} baseline`
+                // The comparison the verdict was judged on: the client's target when they have
+                // one, otherwise their own baseline. Their own baseline is still shown beside
+                // a target, so a client that is on target but well off its own past reads as both.
+                if (s.yardstick) {
+                    parts.push(`CPL ${s.recent.cpl === null ? 'none' : fmtMoney(s.recent.cpl)} vs ${fmtMoney(s.yardstick)} ${s.yardstickKind}`
                         + (s.cplDelta !== null ? ` (${fmtPct(s.cplDelta)})` : ''));
+                    if (s.yardstickKind === 'target' && s.baseline.cpl !== null) {
+                        parts.push(`own baseline ${fmtMoney(s.baseline.cpl)}`);
+                    }
                 }
                 if (s.z !== null) parts.push(`signal ${fmtNum(s.z)}`);
                 if (s.spendDelta !== null) parts.push(`spend ${fmtPct(s.spendDelta)}`);
@@ -474,7 +531,7 @@ export function buildAuditContext(signals) {
                     parts.push(`driver ${d.dominant.toUpperCase()} (${meaning})`);
                     parts.push(`CPM ${fmtPct(d.cpm)}, CTR ${fmtPct(d.ctr)}, CVR ${fmtPct(d.cvr)}`);
                 }
-                parts.push(s.targetCpl ? `target ${fmtMoney(s.targetCpl)}` : 'no CPL target set');
+                if (!s.targetCpl) parts.push('no CPL target set');
                 parts.push(s.healthScore ? `health ${s.healthScore}/100` : 'health unknown');
                 if (s.notes.length) parts.push(s.notes.join('; '));
                 md += parts.join(' | ') + '\n';

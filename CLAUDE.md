@@ -676,9 +676,61 @@ Two traps worth knowing:
 - **The prompt must permit an empty section.** Forcing three populated columns every
   morning guarantees invention on a quiet day.
 
-`clients.target_cpl` is read if present and degrades to "no CPL target set". Without it
-the model can only compare a client to their own past, so it cannot tell a good $60 CPL
-from a terrible one.
+**`clients.target_cpl` (set in Edit Client, added 2026-09-21) is the yardstick when present.**
+Without one, the audit compares a client to their own last 28 days and cannot tell a good
+$60 CPL from a terrible one, and a client whose own history is poor reads as fine for being
+consistently poor. `supabase/sql/target_cpl.sql` is the migration; the column already existed.
+- **The bad side (CRITICAL / WATCH) is judged against the target.** Expected leads = recent spend
+  ÷ target, and `cplDelta` is against the target. The baseline-leads floor doesn't apply, since a
+  target is a given rather than an estimate. `signal.yardstick` / `yardstickKind` say which was used.
+- **The good side (IMPROVING / SCALE_CANDIDATE) always uses their own baseline.** Beating a target
+  isn't the same as improving, and using it there would call every client with an easy target a
+  scale candidate every morning. The driver decomposition also stays against their own past.
+- **The spend rule** (`burnCplMultiple` 2×, `burnMinSpend` $200): CPL at least double the
+  yardstick on $200+ of spend is CRITICAL with **no significance test**, and it runs *before* the
+  volume gate. That gate is what made a $300-a-week account unreadable: at that size 3 leads
+  against 7 expected is one bad week, however much it cost. Zero leads on $200+ counts. Its note
+  reads "…is 2.3× the $45 target" and the model is told to call it a week that cost too much, not a
+  proven decline.
+- **What it costs in texts.** A 7-day window slides daily, so a bad week stays CRITICAL for several
+  weekday mornings, and each one texts both admins. Small accounts also swing (3Sixty's last 8
+  weekly CPLs: $32, 48, 280, 44, 47, 105, 42, 103), so expect the occasional luck-driven text.
+- **Tested 2026-09-21** on the real weekly figures (26 checks): 3Sixty and SimpliBlinds go CRITICAL,
+  PANDEN stays STABLE with no target, and with one goes WATCH at $45 and CRITICAL at $40.
+
+### Per-ad flags in the morning audit (built 2026-10-12, `morning-audit/ads.js`)
+
+Which individual ads are at or over their client's `target_cpl`, appended to the saved card. Needs
+**meta-sync data** and a **target CPL** on the client. Alerts only: nothing is paused or changed.
+- **Decided in code, never by the model.** `computeAdFlags` builds the list and `renderAdFlagsHtml`
+  appends it after the model's text, so the model never sees an ad name or an ad figure (its prompt
+  still says it has account-level data only). Ad and ad set names are escaped.
+- **The rules** (last 7 days, the audit's own window): an ad is flagged when it spent at least
+  `targetMultiple` × target **and** either has no leads or its CPL is at least that. Skipped: an ad
+  under 4 days old (still learning), and one with no spend in the last 2 days (already off).
+- **`AD_ALERT_CONFIG.targetMultiple` is 1 (at target), the team's choice on 2026-10-12.** A 90-day look
+  back at the real ad data, with suggested targets, found that of ads flagged at 1× about 22% were
+  back under target the next week, at 2× about 14%; the money spent on ads that stayed bad the
+  following week was $5,803 at 1× against $867 at 2×. Raise it to 1.5 or 2 to flag fewer ads: it
+  moves both tests at once.
+- **Leads are Meta's, scaled to the daily pull.** Meta's lead count runs well above Make's for some
+  accounts (Anxiety Solutions, Oct 5-11: Meta 37 and Meta's own Ads Manager 37, Make 15; the other
+  clients line up). GHL is the source of truth for leads, and Make's pull is what the audit uses, so
+  each ad's Meta leads are multiplied by (the pull's leads ÷ Meta's leads for the account), within 0 to
+  1.5 and only when the pull covered 80% of the window. The card says when it did this.
+- **Read through the same lens as the rest of the audit:** one yardstick for the account and its ads.
+- **What the card says about clients it skipped:** no target CPL (named, so it nudges), no ad data
+  synced yet, or data more than 2 days behind the audit window (meta-sync late).
+- **No new texts.** The critical-alert text is unchanged. The chat's context (`mode: "context"`) also
+  carries the flagged ads.
+- **Fails safe:** if `meta_ad_daily` is missing or unreadable the section is left out and the card is
+  saved as before. Rows are read per client and paged past PostgREST's 1000-row cap.
+- **Not built:** automatic pausing. When it is, per the plan: a second System User with its own token
+  (the sync's stays view-only), a separate function that only sets an ad to paused, a per-client switch,
+  a log of every pause, never an ad under about 4 days old or a client's last running ad, and a dry-run
+  period first. The look-back found little to gain: about $870 in three months at 2×.
+- **Tests** (`ads.test.mjs`, run with node): 31 checks on the module and 12 deliberate breakages all
+  caught; the loader and its fallbacks run against a fake database; `index.ts` type-checks.
 
 ### Meta restates the past — checked, and it does not bite us
 
@@ -2035,9 +2087,11 @@ GitHub Pages copy but not from the GHL domain.
   they affect nothing — but they will mislead anyone who greps
 - The audit returns raw HTML injected with `innerHTML`; JSON plus client-side rendering
   would be cheaper, safer, and restyleable without re-running the model
-- No ad-level performance data exists anywhere — `daily_reports` is account-level, so
-  "which ad should we turn off" is unanswerable until the Make pull fetches Insights at
-  `level=ad`
+- Ad-level data now comes from meta-sync (`meta_ad_daily`), connected 2026-10-12 for 3Sixty, PANDEN,
+  Anxiety Solutions, Alta Vista, Sunset and (once its rerun lands) Caliber. **Astra Real Estate** is
+  waiting on its owner's approval. `daily_reports` (Make) is still the source for account totals.
+  Meta's lead counts differ from Make's for some accounts (Anxiety Solutions: Meta, and Meta's own
+  Ads Manager, count about 2.5× Make's). GHL is the source of truth; Make's feed was left alone.
 - **A `client_email` value had 2 bytes of hidden trailing whitespace** (length 23 for a
   21-character address — almost certainly `\r\n`), discovered while testing the `tasks`
   RLS fix below. Only confirmed on that one row, but `client_email` is what several

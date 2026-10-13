@@ -3,6 +3,14 @@
   "updates": [
     {
       "date": "2026-10-12",
+      "area": "Reports",
+      "title": "The morning audit lists ads at or over target",
+      "what": "Each morning the audit now also lists individual ads that are at or over their client's target cost per lead over the last 7 days, with spend, leads and a link to the ad in Ads Manager. It only flags: nothing is paused or changed. An ad is skipped while it is still new (under 4 days) or once it has stopped spending. Ad-level leads come from Meta, so they are scaled to match your daily pull for that client, and the card says when it did that. Clients without a target CPL are named, so you know their ads weren't checked.",
+      "note": "The line is \"at or over target\". If that flags too many, it is one setting in the audit code to move it to 1.5x or 2x.",
+      "action": "Set Target CPL on each client in Edit Client, then deploy morning-audit"
+    },
+    {
+      "date": "2026-10-12",
       "area": "SEO",
       "title": "Client landing pages no longer count as Midas's own website leads",
       "what": "Leads from client pages hosted on Midas's domain (Everoak, Astra) were being filed under Midas Media, so Midas's website leads looked like 43 when only 1 was. A client can now list which of its pages count as its own site, and Midas's list is its homepage and booking page. The mislabeled ones are removed. Other clients work as before.",
@@ -72,6 +80,14 @@
       "what": "View all on the overview's Active roster opens the Roster: every client with filters for active, paused and archived, and by service, plus search across client names and the people on file (name, email or phone). Click a client for their full profile: the owner, sales reps, office, website person and anyone else, each with a tap-to-call number and email; business phone, website and address; contract and billing; services; connections; onboarding answers; and private notes. Admins only.",
       "note": "Each person has a Check-in texts switch. It's on for everyone already listed, so nothing changes for the weekly reminder, and off by default for new people, so a website person or bookkeeper can be on file without being texted. People are now edited on the Roster profile; Edit client shows who's on file and links there. This also closes a gap where any signed-in user could read or change any client's contacts.",
       "action": "Run supabase/sql/client_directory.sql, then re-run supabase/sql/rename_client.sql"
+    },
+    {
+      "date": "2026-09-21",
+      "area": "Reports",
+      "title": "Target CPL and a spend rule for the morning audit",
+      "what": "Edit Client has a new Target CPL box. Set it and the morning audit judges that client against the cost per lead you expect instead of their own last 28 days, so an account that is consistently expensive no longer reads as fine. The audit also has a new spend rule: cost per lead at double the target (or double their usual, with no target) on $200 or more of spend in a week is Critical, even when there are too few leads to prove it statistically. Small accounts like 3Sixty and SimpliBlinds used to be marked too thin to judge, which hid exactly these weeks.",
+      "note": "Critical texts both admins, and the week slides forward daily, so a bad week can text you on several mornings in a row. Small accounts also swing week to week, so expect the odd text for a week that was just unlucky. Being under a target never counts as improving; that still means better than their own past.",
+      "action": "Deploy morning-audit (supabase functions deploy morning-audit), then set Target CPL on the clients that should have one"
     },
     {
       "date": "2026-09-16",
