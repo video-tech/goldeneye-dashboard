@@ -12,6 +12,25 @@
            which the desktop sidebar uses, and that sidebar is hidden below md anyway. */
         @media (max-width: 767px) { html, body { overflow-x: hidden; } }
 
+        /* The loading screen. It is in the markup, so it is up the moment this file lands, and app.js takes it
+           down once the first page is drawn. Without it the sign-in card flashed on every load. */
+        #ge-preload { position: fixed; inset: 0; z-index: 100000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--bg, #16110c); transition: opacity .35s ease; }
+        #ge-preload.done { opacity: 0; pointer-events: none; }
+        #ge-preload.gone { display: none; }
+        /* The logo is a transparent PNG, so it sits straight on the screen with a faint gold glow */
+        #ge-preload .pre-mark { width: 96px; height: 96px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 6px 28px rgba(217,180,99,.28)); }
+        #ge-preload .pre-mark img { width: 96px; height: 96px; object-fit: contain; }
+        #ge-preload .pre-name { font-family: Archivo, system-ui, sans-serif; font-size: 22px; font-weight: 600; letter-spacing: .02em; color: var(--t1, #f2ece0); }
+        #ge-preload .pre-bar { width: min(240px, 60vw); height: 3px; border-radius: 2px; background: var(--inset, #241e16); overflow: hidden; }
+        #ge-preload .pre-bar i { display: block; height: 100%; width: 0%; background: var(--goldSolid, #d9b463); transition: width .5s ease; }
+        #ge-preload .pre-bar.wait i { width: 35%; animation: pre-slide 1.1s ease-in-out infinite; }
+        #ge-preload .pre-text { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--t3, #968c7a); min-height: 14px; }
+        @keyframes pre-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+        @media (prefers-reduced-motion: reduce) { #ge-preload .pre-bar.wait i { animation: none; width: 50%; } #ge-preload { transition: none; } }
+        #ge-preload .pre-slow { display: none; font-size: 12px; color: var(--t2, #a79d8c); text-align: center; max-width: 280px; line-height: 1.5; }
+        #ge-preload.slow .pre-slow { display: block; }
+        #ge-preload .pre-slow button { margin-top: 10px; background: var(--goldSolid, #d9b463); color: var(--goldInk, #2a2113); border: 0; border-radius: 2px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+
         /* Paint the canvas itself, so pinching out shows more of the same colour rather
            than white. Only <html> — the GHL containers above stay transparent, which is
            what stops the dashboard fighting the page it's pasted into. #16110c / #f7f3ec
@@ -342,6 +361,14 @@
 
     <div id="theme-wrapper">
 
+        <div id="ge-preload" role="status" aria-live="polite">
+            <div class="pre-mark"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" alt=""></div>
+            <div class="pre-name">Golden Eye</div>
+            <div class="pre-bar wait" id="ge-pre-bar"><i id="ge-pre-fill"></i></div>
+            <div class="pre-text" id="ge-pre-text">Starting</div>
+            <div class="pre-slow" id="ge-pre-slow"><span id="ge-pre-slow-msg">This is taking longer than usual.</span><br><button type="button" onclick="location.reload()">Reload</button></div>
+        </div>
+
         <div id="client-preview-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:10000; background:linear-gradient(90deg,#7c3aed,#2563eb); color:white; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; align-items:center; justify-content:center; gap:10px 16px; flex-wrap:wrap; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,0.4);">
             <span class="text-sm font-bold"><i class="fa-solid fa-eye mr-2"></i>Client preview &mdash; viewing as <span id="client-preview-name">Client</span></span>
             <button onclick="exitClientPreview()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white btn btn-sm text-xs transition">
@@ -352,7 +379,7 @@
         <div id="drawer-overlay" onclick="closeAllDrawers()"></div>
 
         <div id="auth-container" class="glass p-12 max-w-md mx-auto text-center mt-20">
-            <div class="bg-white w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-xl"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="w-12" alt="Logo"></div>
+            <div class="mx-auto mb-6 flex items-center justify-center" style="width:96px; height:96px; filter:drop-shadow(0 6px 28px rgba(217,180,99,.28));"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" style="width:96px; height:96px; object-fit:contain;" alt="Logo"></div>
             <h2 class="text-2xl font-bold mb-2 text-white">Midas HQ</h2>
             <p class="text-gray-400 text-sm mb-8">Sign in to access your dashboard.</p>
 

@@ -3,6 +3,14 @@
   "updates": [
     {
       "date": "2026-10-14",
+      "area": "Data",
+      "title": "A loading screen",
+      "what": "Golden Eye now shows a loading screen with the logo and a progress bar while it signs you in and loads your clients, instead of flashing the sign-in card first. If something is slow it says so and offers a Reload button.",
+      "note": "The dashboard's own half of this is live as soon as it is pushed. To also cover the first second, before the dashboard arrives, paste the updated goldeneye.html into the GHL page again.",
+      "action": "Optional: re-paste goldeneye.html into the GHL page to cover the very first second."
+    },
+    {
+      "date": "2026-10-14",
       "area": "Onboarding",
       "title": "Our checklist for every new client",
       "what": "Everything we do after a client finishes onboarding is now a checklist: getting ready for GHL (answers, Facebook access, Meta sync, target CPL), setting up GHL (account, A2P first, funnel, workflows, people, tests) and launching ads. On the board it shows as three tasks per client. Open a client's Health tab and press Our checklist, in the Journey box or on the highlighted onboarding row, to see every step, tick them off, or open one as a task to assign someone. A group ticks itself when its last step is done, and a few steps tick themselves.",

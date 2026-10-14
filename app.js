@@ -8,8 +8,48 @@
         // Startup timings, printed once as a table in the console (look for [STARTUP]).
         // Times are ms since the page began loading, so the first row shows how long the
         // GHL page, the libraries and body.html/app.js took before this code even ran.
-        const geStartupMarks = [];
-        function geStartupMark(label) {
+        // The loading screen (#ge-preload in body.html). Startup marks move its bar forward, never back, and
+        // it comes down when the first page is drawn, when there is no session (the sign-in card is then the
+        // page), or when loading fails. If it is still up after 20 seconds it offers a reload.
+        const gePreload = (() => {
+            const STEPS = {
+                'app.js running': [12, 'Starting up'], 'signed in': [28, 'Signed in'], 'role checked': [42, 'Checking your access'],
+                '15 tables loaded': [72, 'Loading your clients'], 'onboarding rules loaded': [88, 'Almost there'], 'data loaded': [94, 'Almost there']
+            };
+            let at = 0, down = false, slowTimer = null;
+            const q = (id) => document.getElementById(id);
+            function step(label) {
+                const s = STEPS[label];
+                if (!s || down || s[0] <= at) return;
+                at = s[0];
+                const fill = q('ge-pre-fill'), text = q('ge-pre-text'), bar = q('ge-pre-bar');
+                if (bar) bar.classList.remove('wait');
+                if (fill) fill.style.width = at + '%';
+                if (text) text.textContent = s[1];
+            }
+            function hide() {
+                if (down) return;
+                down = true;
+                clearTimeout(slowTimer);
+                const root = q('ge-preload');
+                if (!root) return;
+                const fill = q('ge-pre-fill'); if (fill) fill.style.width = '100%';
+                root.classList.add('done');
+                setTimeout(() => root.classList.add('gone'), 400);
+            }
+            function fail(message) {
+                const root = q('ge-preload');
+                if (!root || down) return;
+                const msg = q('ge-pre-slow-msg'); if (msg && message) msg.textContent = message;
+                const bar = q('ge-pre-bar'); if (bar) bar.classList.remove('wait');
+                root.classList.add('slow');
+            }
+            slowTimer = setTimeout(() => fail('This is taking longer than usual.'), 20000);
+            return { step, hide, fail };
+        })();
+
+        const geStartupMarks = [];        function geStartupMark(label) {
+            gePreload.step(label);
             if (geStartupReport.done) return; // later refetches aren't startup
             geStartupMarks.push({ step: label, at_ms: Math.round(performance.now()) });
         }
@@ -463,6 +503,7 @@
                         const savedPage = localStorage.getItem('midas_current_page') || 'goldeneye';
                         switchAppPage(savedPage);
                         geStartupMark('page shown');
+                        gePreload.hide();
 
                         runLifecycleCatchUp().then(changed => {
                             geStartupMark(changed ? 'catch-up done (changed data, redrawn)' : 'catch-up done (nothing changed)');
@@ -474,16 +515,22 @@
                     } else {
                         if (globalAllowedClients.length === 0) {
                             document.getElementById('auth-pending-view').classList.remove('hidden');
+                            gePreload.hide();
                         } else {
                             document.getElementById('client-portal-container').classList.remove('hidden');
                             await initClientPortal(globalAllowedClients);
                             geStartupMark('portal shown');
+                            gePreload.hide();
                         }
                         geStartupReport();
                     }
+                } else {
+                    // Nobody is signed in: the sign-in card is the page
+                    gePreload.hide();
                 }
             } catch(e) {
                 console.error("Critical error in initApp lifecycle initialization: ", e);
+                gePreload.fail('Golden Eye could not finish loading.');
             }
         }
         // The drawers sit inside client-portal-container in the markup, so on the admin

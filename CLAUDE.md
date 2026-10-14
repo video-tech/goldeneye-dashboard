@@ -1910,6 +1910,21 @@ Onboarding Progress row, opening `#setup-checklist-modal`.
 - **Tests:** 22 PGlite checks on the SQL (re-runnable, tags, order, group names match their task), 42 on the checklist logic and
   drawer, 15 on generation and the advance rule (5 breakages caught), 71 on the chat tools.
 
+## Loading screen (built 2026-10-14)
+
+`#ge-preload` at the top of `#theme-wrapper` in body.html: logo, name, progress bar and a status line. It is in the markup, so it is up the
+moment body.html lands, and **it fixed the sign-in card flashing on every load** (that card is visible by default until `initApp`
+finds a session).
+- **`gePreload` in app.js** (defined before `geStartupMark`, which drives it): the startup marks move the bar forward and never back
+  (`app.js running` 12%, `signed in` 28, `role checked` 42, `15 tables loaded` 72, `onboarding rules loaded` 88, `data loaded` 94).
+  It comes down in `initApp` after the first page is drawn, after the portal, on the pending screen, when there is no session (the
+  sign-in card becomes the page), and `fail()` shows a message and a Reload button if `initApp` throws. A 20 second watchdog offers a
+  reload if it is still up. Signing in reloads the page, so it shows again.
+- **`goldeneye.html` also paints a plain boot screen** (`#ge-boot`, colors written out because the tokens do not exist yet) before
+  body.html is fetched, and removes it when body.html is injected, since the two look the same. **That half only works once the
+  updated loader is re-pasted into GHL**; the dashboard half needs no re-paste.
+- 16 checks on the controller and its wiring (one breakage caught); the layout was checked in a browser.
+
 ## Make pull limit notice (built 2026-10-14)
 
 Make's daily ads pull (scenario #1) fetches active clients with a Supabase Search Rows step **limited to 10**, kept at 10 on
