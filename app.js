@@ -3832,6 +3832,12 @@ window.submitClientRequest = async function() {
 
             // Save the page choice to the browser's local memory
             localStorage.setItem('midas_current_page', page);
+            if (typeof presenceSetPage === 'function') {
+                presenceSetPage(page);
+                // The office polls only while the Users tab is actually showing
+                if (page !== 'settings') officeClose();
+                else setTimeout(() => { const u = document.getElementById('s-view-users'); if (u && !u.classList.contains('hidden')) officeOpen(); }, 80);
+            }
 
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             const navEl = document.getElementById(`nav-${page}`); if(navEl) navEl.classList.add('active');
@@ -10384,6 +10390,246 @@ window.renderClientPayments = function() {
             renderAlertRecipients();
         };
 
+        // ---- The office (Settings → Users & Roles) ----
+        // Who is online and what they are doing, drawn as little characters at their desks. Each admin's browser
+        // writes one row to team_presence every 30 seconds while Golden Eye is open (page, the client they are
+        // looking at, whether they have stepped away) and the Users tab reads everyone's row. The character and the
+        // typed status are saved on the same row, so they survive being offline. Admins only, by RLS: a client's
+        // browser never learns who is on the team. supabase/sql/team_presence.sql.
+        // Everything drawn comes from whitelisted indexes into the palettes below, never from stored text, so a
+        // hand-edited row cannot put markup into the page. Names and statuses go through escapeAttr.
+        const OFFICE = { beatMs: 30000, pollMs: 20000, onlineMs: 90000, idleMs: 300000, statusMs: 4 * 3600000 };
+        const OFFICE_SKIN = ['#f6d5b8', '#e8b98f', '#c98e5f', '#a2693f', '#7a4a2b', '#4f3020'];
+        const OFFICE_HAIR = ['#2a1d14', '#5b3a1e', '#9a6a2f', '#d8b25a', '#b5442a', '#8c8c94', '#23324f'];
+        const OFFICE_SHIRT = ['#d9b463', '#4c7bd1', '#c8553d', '#4a9a6a', '#8a5cc7', '#e08a3c', '#3fa7b5', '#d86a9a'];
+        const OFFICE_STYLES = ['Short', 'Long', 'Bun', 'Curly', 'Bald'];
+        const OFFICE_ACCS = ['None', 'Glasses', 'Headphones', 'Cap'];
+        const OFFICE_FIELDS = { skin: OFFICE_SKIN.length, hair: OFFICE_HAIR.length, style: OFFICE_STYLES.length, shirt: OFFICE_SHIRT.length, acc: OFFICE_ACCS.length };
+        // page -> [animation, what they are doing]
+        const OFFICE_PAGES = {
+            goldeneye: ['look', 'checking the overview'], tasks: ['type', 'working through tasks'], clients: ['chart', 'in accounts'],
+            sales: ['phone', 'working the sales board'], templates: ['build', 'editing templates'], settings: ['cog', 'in settings'],
+            creatives: ['paint', 'reviewing creatives'], audits: ['chart', 'reading audits'], roster: ['phone', 'on the roster']
+        };
+        const OFFICE_ICONS = { look: 'fa-eye', type: 'fa-keyboard', chart: 'fa-chart-line', phone: 'fa-phone', build: 'fa-pen-ruler', cog: 'fa-gear', paint: 'fa-palette', coffee: 'fa-mug-hot', sleep: 'fa-moon', idle: 'fa-couch' };
+
+        function officeHash(s) { let h = 2166136261; for (const ch of String(s || '')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h; }
+        function officeDefaultCharacter(email) {
+            const h = officeHash(String(email || '').toLowerCase());
+            return { skin: h % OFFICE_SKIN.length, hair: (h >>> 3) % OFFICE_HAIR.length, style: (h >>> 6) % OFFICE_STYLES.length, shirt: (h >>> 9) % OFFICE_SHIRT.length, acc: (h >>> 12) % OFFICE_ACCS.length };
+        }
+        // Whatever is in the database, hand back five in-range integers
+        function officeCleanCharacter(c, email) {
+            const base = officeDefaultCharacter(email);
+            const out = {};
+            for (const k of Object.keys(OFFICE_FIELDS)) {
+                const v = c && typeof c === 'object' ? c[k] : undefined;
+                out[k] = Number.isInteger(v) && v >= 0 && v < OFFICE_FIELDS[k] ? v : base[k];
+            }
+            return out;
+        }
+        function officeCharacterSvg(raw, email) {
+            const c = officeCleanCharacter(raw, email);
+            const skin = OFFICE_SKIN[c.skin], hair = OFFICE_HAIR[c.hair], shirt = OFFICE_SHIRT[c.shirt], ink = '#2a1d14';
+            const cap = 'M10 17 Q10 6 20 6 Q30 6 30 17 Q26 11 20 11 Q14 11 10 17Z';
+            let back = '', front = '';
+            if (c.style === 1) back = `<rect x="8.5" y="13" width="4" height="19" rx="2" fill="${hair}"/><rect x="27.5" y="13" width="4" height="19" rx="2" fill="${hair}"/>`;
+            if (c.style === 2) back = `<circle cx="20" cy="4.5" r="4.2" fill="${hair}"/>`;
+            if (c.style !== 4) front += `<path d="${cap}" fill="${hair}"/>`;
+            if (c.style === 3) front += [[12, 10], [17, 7], [23, 7], [28, 10]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="5" fill="${hair}"/>`).join('');
+            let acc = '';
+            if (c.acc === 1) acc = `<g fill="none" stroke="${ink}" stroke-width="1.2"><circle cx="16.5" cy="18" r="3.4"/><circle cx="23.5" cy="18" r="3.4"/><path d="M19.9 18h.2"/></g>`;
+            if (c.acc === 2) acc = `<path d="M10 17 Q10 3.5 20 3.5 Q30 3.5 30 17" fill="none" stroke="#3a3a44" stroke-width="2"/><rect x="7.5" y="14.5" width="4.5" height="9" rx="2" fill="#3a3a44"/><rect x="28" y="14.5" width="4.5" height="9" rx="2" fill="#3a3a44"/>`;
+            if (c.acc === 3) acc = `<path d="M9.5 14 Q20 1.5 30.5 14Z" fill="${shirt}"/><rect x="19" y="12" width="15" height="3" rx="1.5" fill="${shirt}"/>`;
+            return `<svg class="oc-svg" viewBox="0 0 40 52" aria-hidden="true">`
+                + back
+                + `<g class="oc-arm oc-arm-l"><rect x="5" y="30" width="6.5" height="16" rx="3.2" fill="${shirt}"/><circle cx="8.2" cy="46" r="3" fill="${skin}"/></g>`
+                + `<g class="oc-arm oc-arm-r"><rect x="28.5" y="30" width="6.5" height="16" rx="3.2" fill="${shirt}"/><circle cx="31.8" cy="46" r="3" fill="${skin}"/></g>`
+                + `<rect x="9.5" y="27" width="21" height="22" rx="7" fill="${shirt}"/>`
+                + `<rect x="17" y="24" width="6" height="6" fill="${skin}"/>`
+                + `<g class="oc-head"><circle cx="20" cy="17" r="10" fill="${skin}"/>${front}`
+                + `<circle class="oc-eye" cx="16.5" cy="18" r="1.4" fill="${ink}"/><circle class="oc-eye" cx="23.5" cy="18" r="1.4" fill="${ink}"/>`
+                + `<path d="M17 22.2 Q20 24.6 23 22.2" fill="none" stroke="${ink}" stroke-width="1.1" stroke-linecap="round"/>${acc}</g></svg>`;
+        }
+
+        // online = the heartbeat is fresh; away = it is fresh but the tab is hidden or untouched for 5 minutes
+        function officeState(row, now) {
+            const seen = row && row.last_seen ? new Date(row.last_seen).getTime() : 0;
+            if (!seen || now - seen > OFFICE.onlineMs) return 'offline';
+            return row.away ? 'away' : 'online';
+        }
+        function officeActivity(row, now) {
+            const st = officeState(row, now);
+            if (st === 'offline') return { st, anim: 'sleep', text: row && row.last_seen ? 'last seen ' + officeAgo(now - new Date(row.last_seen).getTime()) : 'not seen yet' };
+            if (st === 'away') return { st, anim: 'coffee', text: 'stepped away' };
+            const known = OFFICE_PAGES[row.page];
+            if (!known) return { st, anim: 'idle', text: 'around' };
+            const detail = row.page === 'clients' && row.detail ? 'looking at ' + row.detail : known[1];
+            return { st, anim: known[0], text: detail };
+        }
+        function officeStatusText(row, now) {
+            if (!row || !row.status || !row.status_at) return '';
+            return now - new Date(row.status_at).getTime() <= OFFICE.statusMs ? String(row.status) : '';
+        }
+        function officeAgo(ms) {
+            const m = Math.floor(Math.max(0, ms) / 60000);
+            if (m < 1) return 'just now';
+            if (m < 60) return m + ' min ago';
+            const h = Math.floor(m / 60);
+            if (h < 24) return h + ' hr ago';
+            const d = Math.floor(h / 24);
+            return d === 1 ? 'yesterday' : d + ' days ago';
+        }
+        // One tile per team member: everyone with a profile, plus anyone with a presence row
+        function officeMerge(profiles, rows) {
+            const by = new Map();
+            for (const p of profiles || []) {
+                const e = String(p.email || '').toLowerCase();
+                if (!e) continue;
+                by.set(e, { email: e, name: (p.full_name || '').split(' ')[0] || e.split('@')[0] });
+            }
+            for (const r of rows || []) {
+                const e = String(r.email || '').toLowerCase();
+                if (!e) continue;
+                by.set(e, { ...(by.get(e) || { email: e }), ...r, email: e, name: r.name || (by.get(e) || {}).name || e.split('@')[0] });
+            }
+            return [...by.values()];
+        }
+        function officeOrder(people, now) {
+            const rank = { online: 0, away: 1, offline: 2 };
+            return people.slice().sort((a, b) => {
+                const sa = officeState(a, now), sb = officeState(b, now);
+                if (sa !== sb) return rank[sa] - rank[sb];
+                return String(a.name).localeCompare(String(b.name));
+            });
+        }
+        function officeTileHtml(p, now, meEmail) {
+            const act = officeActivity(p, now);
+            const status = officeStatusText(p, now);
+            const isMe = p.email === meEmail;
+            const bubble = status && act.st !== 'offline' ? `<div class="oc-bubble">${escapeAttr(status)}</div>` : '';
+            const sleepFx = act.st === 'offline' ? '<span class="oc-zzz">z<i>z</i><b>z</b></span>' : '';
+            const coffee = act.anim === 'coffee' ? '<span class="oc-cup"><i class="fa-solid fa-mug-hot"></i><em></em></span>' : '';
+            const phone = act.anim === 'phone' ? '<span class="oc-phone"><i class="fa-solid fa-mobile-screen"></i></span>' : '';
+            return `<div class="oc-person oc-${act.st} oc-act-${act.anim}" data-email="${escapeAttr(p.email)}">`
+                + bubble
+                + `<div class="oc-stage">${officeCharacterSvg(p.character, p.email)}${sleepFx}${coffee}${phone}<div class="oc-desk"><span class="oc-screen"></span></div></div>`
+                + `<div class="oc-name">${escapeAttr(p.name)}${isMe ? ' <span class="oc-you">you</span>' : ''}</div>`
+                + `<div class="oc-what"><i class="fa-solid ${OFFICE_ICONS[act.anim] || 'fa-circle'}"></i> ${escapeAttr(act.text)}</div></div>`;
+        }
+        function officeSceneHtml(people, now, meEmail) {
+            const ordered = officeOrder(people, now);
+            const on = ordered.filter(p => officeState(p, now) !== 'offline');
+            const off = ordered.filter(p => officeState(p, now) === 'offline');
+            const count = on.length;
+            return `<div class="oc-room"><div class="oc-roomhead"><span class="oc-live"></span> ${count ? count + ' in the office' : 'The office is empty'}</div>`
+                + (on.length ? `<div class="oc-row">${on.map(p => officeTileHtml(p, now, meEmail)).join('')}</div>` : '')
+                + `</div>`
+                + (off.length ? `<div class="oc-lounge"><div class="oc-roomhead">Off duty</div><div class="oc-row">${off.map(p => officeTileHtml(p, now, meEmail)).join('')}</div></div>` : '');
+        }
+
+        // The row this browser writes. Only the columns named here move, so a heartbeat never touches the
+        // character or the status.
+        function presenceRowFor(email, name, page, detail, away, now) {
+            return { email: String(email || '').toLowerCase(), name: String(name || '').slice(0, 40), page: String(page || '').slice(0, 40), detail: String(detail || '').slice(0, 80), away: !!away, last_seen: new Date(now).toISOString() };
+        }
+
+        const officeBeat = { timer: null, started: false, page: 'goldeneye', lastInput: Date.now(), broken: false, poll: null, people: [], editing: null };
+        function officeMyName() { return ((typeof currentUserFullName === 'string' && currentUserFullName) || (typeof currentUserName === 'string' && currentUserName) || String(clientEmail || '').split('@')[0] || '').split(' ')[0]; }
+        async function presenceSend() {
+            if (officeBeat.broken || currentUserRole !== 'admin' || !clientEmail) return;
+            const detail = officeBeat.page === 'clients' && typeof cSelectedAccount === 'string' && cSelectedAccount !== 'ALL' ? cSelectedAccount : '';
+            const away = document.hidden || Date.now() - officeBeat.lastInput > OFFICE.idleMs;
+            try {
+                const { error } = await supabaseClient.from('team_presence').upsert(presenceRowFor(clientEmail, officeMyName(), officeBeat.page, detail, away, Date.now()), { onConflict: 'email' });
+                if (error) { officeBeat.broken = true; clearInterval(officeBeat.timer); console.warn('[office] presence is off:', error.message); }
+            } catch (e) { officeBeat.broken = true; clearInterval(officeBeat.timer); }
+        }
+        function presenceStart() {
+            if (officeBeat.started || currentUserRole !== 'admin' || !clientEmail) return;
+            officeBeat.started = true;
+            const touch = () => { officeBeat.lastInput = Date.now(); };
+            ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev => document.addEventListener(ev, touch, { passive: true }));
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) touch(); presenceSend(); });
+            officeBeat.timer = setInterval(presenceSend, OFFICE.beatMs);
+        }
+        function presenceSetPage(page) { officeBeat.page = page; presenceStart(); presenceSend(); }
+
+        async function officeLoad() {
+            const [rows, profiles] = await Promise.all([
+                supabaseClient.from('team_presence').select('email, name, character, status, status_at, page, detail, away, last_seen'),
+                supabaseClient.from('user_profiles').select('email, full_name, role')
+            ]);
+            if (rows.error) return { error: rows.error.message };
+            const team = (profiles.data || []).filter(p => p.role === 'admin');
+            officeBeat.people = officeMerge(team, rows.data);
+            return {};
+        }
+        async function officeRender() {
+            const host = document.getElementById('office-panel');
+            if (!host) return;
+            const res = await officeLoad();
+            const scene = document.getElementById('office-scene');
+            if (!scene) return;
+            if (res.error) { scene.innerHTML = '<div class="text-sm text-gray-400 p-4">The office needs <code>supabase/sql/team_presence.sql</code> run first.</div>'; return; }
+            const meEmail = String(clientEmail || '').toLowerCase();
+            scene.innerHTML = officeSceneHtml(officeBeat.people, Date.now(), meEmail);
+            const me = officeBeat.people.find(p => p.email === meEmail);
+            const inp = document.getElementById('office-status-input');
+            if (inp && me && document.activeElement !== inp && !inp.dataset.touched) inp.value = officeStatusText(me, Date.now());
+        }
+        window.officeOpen = function () {
+            officeRender();
+            clearInterval(officeBeat.poll);
+            officeBeat.poll = setInterval(officeRender, OFFICE.pollMs);
+        };
+        window.officeClose = function () { clearInterval(officeBeat.poll); officeBeat.poll = null; };
+
+        async function officeSave(patch) {
+            const row = { email: String(clientEmail || '').toLowerCase(), name: officeMyName().slice(0, 40), ...patch };
+            const { error } = await supabaseClient.from('team_presence').upsert(row, { onConflict: 'email' });
+            if (error) { alert('Could not save: ' + error.message); return false; }
+            return true;
+        }
+        window.officeSetStatus = async function () {
+            const inp = document.getElementById('office-status-input');
+            const text = (inp.value || '').trim().slice(0, 80);
+            if (await officeSave({ status: text || null, status_at: text ? new Date().toISOString() : null })) { delete inp.dataset.touched; presenceSend(); officeRender(); }
+        };
+        window.officeClearStatus = async function () {
+            const inp = document.getElementById('office-status-input');
+            inp.value = '';
+            if (await officeSave({ status: null, status_at: null })) { delete inp.dataset.touched; officeRender(); }
+        };
+        window.officeToggleEditor = function () {
+            const box = document.getElementById('office-editor');
+            if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+            const me = officeBeat.people.find(p => p.email === String(clientEmail || '').toLowerCase());
+            officeBeat.editing = officeCleanCharacter(me && me.character, clientEmail);
+            box.classList.remove('hidden');
+            officeEditorRender();
+        };
+        function officeEditorRender() {
+            const c = officeBeat.editing;
+            const box = document.getElementById('office-editor');
+            const sw = (field, colors) => `<div class="oc-swatches">${colors.map((col, i) => `<button type="button" class="oc-sw${c[field] === i ? ' on' : ''}" style="background:${col}" onclick="officePick('${field}',${i})" aria-label="${field} ${i + 1}"></button>`).join('')}</div>`;
+            const pills = (field, names) => `<div class="oc-pills">${names.map((n, i) => `<button type="button" class="oc-pill${c[field] === i ? ' on' : ''}" onclick="officePick('${field}',${i})">${n}</button>`).join('')}</div>`;
+            box.innerHTML = `<div class="oc-editor-grid"><div class="oc-preview">${officeCharacterSvg(c, clientEmail)}</div><div class="oc-controls">`
+                + `<div><label class="modal-label">Skin</label>${sw('skin', OFFICE_SKIN)}</div>`
+                + `<div><label class="modal-label">Hair color</label>${sw('hair', OFFICE_HAIR)}</div>`
+                + `<div><label class="modal-label">Hair style</label>${pills('style', OFFICE_STYLES)}</div>`
+                + `<div><label class="modal-label">Shirt</label>${sw('shirt', OFFICE_SHIRT)}</div>`
+                + `<div><label class="modal-label">Extra</label>${pills('acc', OFFICE_ACCS)}</div>`
+                + `<div class="flex gap-2 pt-1"><button type="button" class="btn-primary px-4 py-2 text-sm" onclick="officeSaveCharacter()">Save character</button><button type="button" class="px-4 py-2 text-sm text-gray-400 hover:text-white" onclick="officeRandom()">Surprise me</button></div>`
+                + `</div></div>`;
+        }
+        window.officePick = function (field, i) { officeBeat.editing[field] = i; officeEditorRender(); };
+        window.officeRandom = function () { const c = {}; for (const k of Object.keys(OFFICE_FIELDS)) c[k] = Math.floor(Math.random() * OFFICE_FIELDS[k]); officeBeat.editing = c; officeEditorRender(); };
+        window.officeSaveCharacter = async function () {
+            if (await officeSave({ character: officeBeat.editing })) { document.getElementById('office-editor').classList.add('hidden'); presenceSend(); officeRender(); }
+        };
+        // ---- end office ----
+
         window.switchSettingsView = window.switchSettingsView || function(view) {
             const views = ['users', 'scoring', 'milestones', 'health', 'notifications', 'updates', 'data'];
             views.forEach(v => {
@@ -10400,6 +10646,7 @@ window.renderClientPayments = function() {
             
             if (view === 'milestones') renderMilestonesSettings();
             if (view === 'users') { renderUsersTable(); populateInviteClientList(); }
+            if (view === 'users') officeOpen(); else officeClose();
             // Fetched on demand — nobody needs this on every dashboard load
             if (view === 'notifications') loadAlertRecipients();
             if (view === 'updates') renderUpdates();

@@ -1985,6 +1985,22 @@ archived clients are not. It assumes the Make filter is the same, which has not 
 - **Tests:** 69 checks on the tools, validation and loop against a fake database and a scripted model (3 breakages caught),
   21 on the browser side, strict `tsc` on the three modules.
 
+## The office: team presence (built 2026-10-14)
+
+The top of Settings → Users & Roles (`#office-panel`): each admin's character at a desk, what they are doing, and a typed status.
+- **Data:** `team_presence` (`supabase/sql/team_presence.sql`), one row per admin, keyed on lower-case email. Admins read all rows and write
+  **only their own** (insert, update and delete are checked against `auth.email()`); clients and members see nothing. 19 PGlite checks.
+- **Polling, not Realtime, on purpose:** a public Realtime channel can be joined by anyone holding the public anon key; a table is protected by RLS.
+- **Heartbeat** (`presenceSend`, app.js): every 30 s and on every page change it upserts email, first name, page, the client on the Accounts page,
+  `away` (tab hidden or untouched for 5 min) and `last_seen`. **It never names `character` or `status`**, so it can't overwrite them.
+  Online = heartbeat under 90 s old. A missing table turns the heartbeat off after one warning.
+- **Characters are five whitelisted palette indexes** (skin, hair, style, shirt, extra), cleaned by `officeCleanCharacter` and drawn by
+  `officeCharacterSvg`, so stored text can never reach the markup. Default character comes from a hash of the email. Names and statuses use `escapeAttr`.
+- **Activity** comes from the page (`OFFICE_PAGES`): typing on Tasks, phone on Roster/Sales, and so on. Away = coffee, offline = asleep in Off duty.
+  A status expires after 4 hours. The office polls every 20 s, only while the Users view is showing.
+- **Adding an activity** means a line in `OFFICE_PAGES`, an icon in `OFFICE_ICONS` and (if it needs a new move) a CSS animation in body.html.
+- **Tests:** 55 node checks on the helpers, heartbeat and wiring (12 mutations caught); layout checked in the browser pane.
+
 ## Tasks page filters (2026-10-02)
 
 - **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first

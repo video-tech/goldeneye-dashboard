@@ -3,6 +3,14 @@
   "updates": [
     {
       "date": "2026-10-14",
+      "area": "Settings",
+      "title": "The office: who is online and what they are doing",
+      "what": "Settings → Users & Roles now opens with a little office. Make your character (My character), and when you have Golden Eye open you appear at your desk, typing, on the phone, reviewing creatives or looking at a client, depending on the page you are on. Step away and you grab a coffee, close the tab and you go to sleep in the Off duty row. Type what you are up to in the box and it shows in a speech bubble for four hours.",
+      "note": "Only admins can see it, and a client's browser never learns who is on the team.",
+      "action": "Run supabase/sql/team_presence.sql"
+    },
+    {
+      "date": "2026-10-14",
       "area": "Onboarding",
       "title": "Older clients no longer show our onboarding steps as outstanding",
       "what": "A client who has moved past Onboarding now shows our own onboarding steps (Get ready for GHL, Set up GHL) as done in their Onboarding Progress, instead of \"No task yet\". For their own steps, use Mark client steps done at the top of that box."

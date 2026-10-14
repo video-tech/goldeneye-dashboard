@@ -29,6 +29,73 @@
         @media (prefers-reduced-motion: reduce) { #ge-preload .pre-bar.wait i { animation: none; width: 50%; } #ge-preload { transition: none; } }
         #ge-preload .pre-slow { display: none; font-size: 12px; color: var(--t2, #a79d8c); text-align: center; max-width: 280px; line-height: 1.5; }
         #ge-preload.slow .pre-slow { display: block; }
+        /* The office on Settings > Users & Roles: little characters at their desks. */
+        #office-panel { --oc-line: var(--border, rgba(255,255,255,.08)); }
+        .oc-room, .oc-lounge { border: 1px solid var(--oc-line); border-radius: 12px; padding: 14px 14px 10px; background: linear-gradient(180deg, rgba(217,180,99,.05), rgba(0,0,0,.18)); }
+        .oc-lounge { margin-top: 10px; background: rgba(0,0,0,.14); }
+        .oc-roomhead { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--t3, #968c7a); display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .oc-live { width: 8px; height: 8px; border-radius: 50%; background: #4a9a6a; box-shadow: 0 0 0 0 rgba(74,154,106,.6); animation: oc-pulse 2s infinite; }
+        .oc-row { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-end; }
+        .oc-person { width: 132px; display: flex; flex-direction: column; align-items: center; position: relative; padding-top: 34px; text-align: center; }
+        .oc-stage { position: relative; width: 100px; height: 96px; }
+        .oc-svg { position: absolute; left: 14px; top: -6px; width: 72px; height: 94px; overflow: visible; }
+        .oc-desk { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; border-radius: 6px 6px 3px 3px; background: linear-gradient(180deg, #6b4f33, #4d3822); box-shadow: 0 6px 10px rgba(0,0,0,.35); }
+        .oc-screen { position: absolute; right: 5px; top: -14px; width: 26px; height: 18px; border-radius: 3px; background: #14202b; border: 2px solid #2d3a47; box-shadow: 0 0 12px rgba(120,190,255,.25); }
+        .oc-screen::after { content: ""; position: absolute; left: 3px; right: 3px; top: 4px; height: 2px; background: rgba(140,200,255,.7); box-shadow: 0 4px 0 rgba(140,200,255,.45), 0 8px 0 rgba(140,200,255,.3); }
+        .oc-name { margin-top: 6px; font-weight: 700; font-size: 13px; color: var(--t1, #f2ece0); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .oc-you { font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--goldInk, #2a2113); background: var(--goldSolid, #d9b463); padding: 1px 5px; border-radius: 6px; vertical-align: middle; }
+        .oc-what { font-size: 11px; color: var(--t2, #a79d8c); line-height: 1.3; min-height: 28px; max-width: 120px; overflow-wrap: anywhere; }
+        .oc-what i { margin-right: 3px; opacity: .8; }
+        .oc-bubble { position: absolute; top: 0; left: 50%; transform: translateX(-50%); max-width: 132px; min-width: 40px; padding: 5px 9px; border-radius: 10px; background: var(--t1, #f2ece0); color: #1d1710; font-size: 11px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; box-shadow: 0 3px 10px rgba(0,0,0,.35); animation: oc-pop .35s ease-out; z-index: 2; }
+        .oc-bubble::after { content: ""; position: absolute; left: 50%; bottom: -5px; margin-left: -5px; border: 5px solid transparent; border-top-color: var(--t1, #f2ece0); border-bottom: 0; }
+        .oc-offline .oc-svg { filter: grayscale(.85) brightness(.7); transform: translateY(14px); }
+        .oc-offline .oc-desk { opacity: .45; }
+        .oc-offline .oc-screen { background: #0c1117; box-shadow: none; }
+        .oc-offline .oc-screen::after { display: none; }
+        .oc-offline .oc-name, .oc-offline .oc-what { opacity: .65; }
+        .oc-away .oc-svg { transform: translateX(-8px); }
+        .oc-away .oc-screen { box-shadow: none; opacity: .7; }
+        .oc-head { transform-box: fill-box; transform-origin: 50% 90%; animation: oc-bob 4s ease-in-out infinite; }
+        .oc-eye { transform-box: fill-box; transform-origin: center; animation: oc-blink 5s infinite; }
+        .oc-arm { transform-box: fill-box; transform-origin: 50% 0; }
+        .oc-act-type .oc-arm-l { animation: oc-type .28s ease-in-out infinite alternate; }
+        .oc-act-type .oc-arm-r { animation: oc-type .28s ease-in-out .14s infinite alternate; }
+        .oc-act-chart .oc-arm-r { animation: oc-type .5s ease-in-out infinite alternate; }
+        .oc-act-build .oc-arm-r, .oc-act-paint .oc-arm-r { animation: oc-wave 1.1s ease-in-out infinite alternate; }
+        .oc-act-look .oc-head { animation: oc-look 5s ease-in-out infinite; }
+        .oc-act-cog .oc-head { animation: oc-look 3s ease-in-out infinite; }
+        .oc-act-phone .oc-arm-r { transform: rotate(-150deg); animation: oc-talk 1.2s ease-in-out infinite alternate; }
+        .oc-act-coffee .oc-arm-r { transform: rotate(-120deg); }
+        .oc-offline .oc-head, .oc-offline .oc-eye { animation: none; }
+        .oc-offline .oc-eye { transform: scaleY(.15); }
+        .oc-phone { position: absolute; left: 0; top: 4px; color: #9fb4c8; font-size: 15px; transform: rotate(-12deg); }
+        .oc-cup { position: absolute; right: -4px; top: 40px; color: #e9dcc3; font-size: 14px; }
+        .oc-cup em { position: absolute; left: 3px; top: -10px; width: 3px; height: 8px; border-radius: 3px; background: rgba(255,255,255,.55); animation: oc-steam 1.6s ease-in-out infinite; }
+        .oc-zzz { position: absolute; right: 0; top: 4px; font-weight: 800; color: #9fb4c8; font-size: 15px; }
+        .oc-zzz i, .oc-zzz b { position: absolute; font-style: normal; opacity: 0; }
+        .oc-zzz { animation: oc-z 2.6s ease-in-out infinite; }
+        .oc-zzz i { left: 9px; top: -9px; font-size: 12px; animation: oc-z 2.6s ease-in-out .5s infinite; }
+        .oc-zzz b { left: 17px; top: -17px; font-size: 10px; animation: oc-z 2.6s ease-in-out 1s infinite; }
+        .oc-editor-grid { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+        .oc-preview { position: relative; width: 110px; height: 140px; flex: none; border-radius: 12px; background: rgba(0,0,0,.25); border: 1px solid var(--oc-line); }
+        .oc-preview .oc-svg { left: 18px; top: 12px; width: 74px; height: 96px; }
+        .oc-controls { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 220px; }
+        .oc-swatches, .oc-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+        .oc-sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+        .oc-sw.on { border-color: var(--t1, #f2ece0); transform: scale(1.12); }
+        .oc-pill { padding: 4px 10px; border-radius: 14px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--oc-line); color: var(--t2, #a79d8c); background: transparent; }
+        .oc-pill.on { background: var(--goldSolid, #d9b463); color: var(--goldInk, #2a2113); border-color: transparent; }
+        @keyframes oc-pulse { 70% { box-shadow: 0 0 0 7px rgba(74,154,106,0); } 100% { box-shadow: 0 0 0 0 rgba(74,154,106,0); } }
+        @keyframes oc-pop { 0% { transform: translateX(-50%) scale(.6); opacity: 0; } 100% { transform: translateX(-50%) scale(1); opacity: 1; } }
+        @keyframes oc-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.2px); } }
+        @keyframes oc-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
+        @keyframes oc-type { from { transform: rotate(-9deg); } to { transform: rotate(9deg); } }
+        @keyframes oc-wave { from { transform: rotate(-4deg); } to { transform: rotate(26deg); } }
+        @keyframes oc-look { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-6deg); } 65% { transform: rotate(6deg); } }
+        @keyframes oc-talk { from { transform: rotate(-152deg); } to { transform: rotate(-142deg); } }
+        @keyframes oc-steam { 0% { opacity: 0; transform: translateY(4px); } 50% { opacity: 1; } 100% { opacity: 0; transform: translateY(-6px); } }
+        @keyframes oc-z { 0% { opacity: 0; transform: translateY(6px); } 35% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+        @media (prefers-reduced-motion: reduce) { .oc-live, .oc-head, .oc-eye, .oc-arm, .oc-bubble, .oc-zzz, .oc-zzz i, .oc-zzz b, .oc-cup em { animation: none !important; } .oc-zzz i, .oc-zzz b { opacity: 1; } }
         #ge-preload .pre-slow button { margin-top: 10px; background: var(--goldSolid, #d9b463); color: var(--goldInk, #2a2113); border: 0; border-radius: 2px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
 
         /* Paint the canvas itself, so pinching out shows more of the same colour rather
@@ -1912,6 +1979,21 @@
                     <div id="s-view-users" class="space-y-6 block glass p-6">
                         <div class="flex justify-between items-center mb-4">
                             <div><h3 class="text-lg font-bold">Users & Roles</h3><p class="text-gray-400 text-sm">Manage user roles and client access.</p></div>
+                        </div>
+
+                        <div id="office-panel" class="mb-6">
+                            <div class="flex flex-wrap items-end gap-3 mb-3">
+                                <div class="flex-1 min-w-[240px]">
+                                    <label class="modal-label" for="office-status-input">What are you up to?</label>
+                                    <input type="text" id="office-status-input" class="glass-input" maxlength="80" placeholder="Writing hooks for PANDEN, on a call until 3..." oninput="this.dataset.touched=1" onkeydown="if(event.key==='Enter')officeSetStatus()">
+                                </div>
+                                <button type="button" class="btn-primary px-4 py-2 text-sm" onclick="officeSetStatus()">Set status</button>
+                                <button type="button" class="px-3 py-2 text-sm text-gray-400 hover:text-white" onclick="officeClearStatus()">Clear</button>
+                                <button type="button" class="px-3 py-2 text-sm text-blue-300 hover:text-blue-200" onclick="officeToggleEditor()"><i class="fa-solid fa-user-pen mr-1"></i> My character</button>
+                            </div>
+                            <div id="office-editor" class="hidden bg-black/20 p-4 rounded-xl border border-white/5 mb-3"></div>
+                            <div id="office-scene"></div>
+                            <p class="text-xs text-gray-500 mt-2">Shows teammates who have Golden Eye open. Your status clears itself after 4 hours.</p>
                         </div>
 
                         <div class="bg-black/20 p-5 rounded-xl border border-white/5 mb-6">
