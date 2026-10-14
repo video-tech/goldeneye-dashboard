@@ -5682,6 +5682,14 @@ window.markOnboardingComplete = async function() {
                     : `${p.done} of ${p.total} ${unit} done.`;
         }
 
+        function agencyStepImplicitlyDone(clientName, item) {
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+            if (!row || (row.current_stage || 'Onboarding') === 'Onboarding') return false;
+            const a = obFor(clientName);
+            const live = new Set(a ? a.steps.filter(r => r.service_status === 'onboarding').map(r => r.step_id) : []);
+            return !live.has(item.id);
+        }
+
         function renderClientOnboarding() {
             const box = document.getElementById('c-onboarding-box');
             const list = document.getElementById('c-onboarding-list');
@@ -5696,8 +5704,11 @@ window.markOnboardingComplete = async function() {
                 normalize(t.client || '') === normalize(cSelectedAccount) && t.stage === 'Onboarding');
             const taskByTitle = new Map(clientTasks.map(t => [String(t.title || '').trim().toLowerCase(), t]));
 
+            // A client who has moved past Onboarding got there because our own onboarding work was finished (or they
+            // predate these steps, so no task was ever raised), so those steps count as done. Not the steps of an add-on
+            // they are still onboarding: those need their task.
             const isDone = item => item.owner === 'agency'
-                ? taskByTitle.get(String(item.title || '').trim().toLowerCase())?.status === 'Complete'
+                ? taskByTitle.get(String(item.title || '').trim().toLowerCase())?.status === 'Complete' || agencyStepImplicitlyDone(cSelectedAccount, item)
                 : !!onboardingProgressFor(cSelectedAccount, item.id)?.completed_at;
 
             const done = items.filter(isDone).length;

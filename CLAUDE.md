@@ -1905,6 +1905,9 @@ Onboarding Progress row, opening `#setup-checklist-modal`.
 - **Auto-ticks:** three steps carry an existing auto-check (ad account saved, GHL location saved, ad data flowing). The next ones to
   add are "target CPL set", "meta-sync ran without error", and whatever the GHL API setup can prove, as new keys in
   `onboarding_auto_checks`. When the GHL account is created through the API, its steps become auto-checks the same way.
+- **Clients already past Onboarding** show our onboarding steps as done in Onboarding Progress (`agencyStepImplicitlyDone`): they
+  predate these steps, so no task was ever raised for them, and the stage move itself means that work was finished. Not the steps of an
+  add-on they are still onboarding (those need their task). Their own client steps are ticked with the existing **Mark client steps done** button.
 - **Existing clients** do not get one: the steps are raised when onboarding finishes or Campaign Building starts. The overview chat
   ignores steps (`tasks` and `onboarding` tools).
 - **Tests:** 22 PGlite checks on the SQL (re-runnable, tags, order, group names match their task), 42 on the checklist logic and
