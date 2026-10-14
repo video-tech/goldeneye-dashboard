@@ -212,12 +212,23 @@ function service() {
     return { base, headers: { "apikey": key, "Authorization": `Bearer ${key}` } };
 }
 
-async function clientsForLocation(locationId: string): Promise<{ name: string; gsc_property: string | null }[]> {
+export interface LocationClient {
+    name: string;
+    gsc_property: string | null;
+    // Optional allow-list of landing hosts that count as this client's own site
+    // (supabase/sql/lead_hosts.sql). Null or empty means the whole domain counts.
+    lead_hosts?: string[] | null;
+}
+
+async function clientsForLocation(locationId: string): Promise<LocationClient[]> {
     const { base, headers } = service();
-    const res = await fetch(
-        `${base}/rest/v1/clients?select=name,gsc_property&ghl_location_id=eq.${encodeURIComponent(locationId)}`,
+    const ask = (cols: string) => fetch(
+        `${base}/rest/v1/clients?select=${cols}&ghl_location_id=eq.${encodeURIComponent(locationId)}`,
         { headers },
     );
+    let res = await ask("name,gsc_property,lead_hosts");
+    // lead_hosts.sql not run yet: ask without it rather than dropping every lead
+    if (res.status === 400) res = await ask("name,gsc_property");
     if (!res.ok) throw new Error(`clients lookup failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
     return await res.json();
 }
@@ -253,7 +264,7 @@ interface Decision {
 // Decides whether this contact is a website lead for exactly one client, and stores it if so.
 // Every "not stored" path still carries the classification, so capture mode can show what the
 // rules made of a payload even when it belongs to no one.
-async function decide(payload: any): Promise<Decision> {
+export async function decide(payload: any): Promise<Decision> {
     const skip = (reason: string, client: string | null = null): Decision =>
         ({ stored: false, reason, client, classification: payload ? classify(payload, null) : null });
 
@@ -277,8 +288,15 @@ async function decide(payload: any): Promise<Decision> {
     // For a sub-account shared between clients, or with a non-client, the landing page is
     // what decides whose lead it is. The case that forced this was Midas's own sub-account
     // being shared with Sunset Design Build.
-    const matches = seo.filter((c) => onDomain(landingHost, domainOf(c.gsc_property)));
-    if (!matches.length) return skip("landing page is not on the client's website");
+    // A domain can host other people's pages: Midas's own domain carries client landing pages
+    // (everoakcabinetry.midasmediafirm.com), and those are not Midas's website leads. A client
+    // with lead_hosts counts only those hosts.
+    const hostAllowed = (c: LocationClient) =>
+        !c.lead_hosts?.length || c.lead_hosts.some((h) => bare(String(h)) === bare(landingHost));
+    const onSite = seo.filter((c) => onDomain(landingHost, domainOf(c.gsc_property)));
+    if (!onSite.length) return skip("landing page is not on the client's website");
+    const matches = onSite.filter(hostAllowed);
+    if (!matches.length) return skip("landing page is on the client's domain but not one of its own lead hosts");
     if (matches.length > 1) return skip("more than one client matches this landing page");
 
     const client = matches[0];
@@ -474,6 +492,9 @@ Deno.serve(async (req: Request) => {
         stored: decision.stored,
         reason: decision.reason,
         client: decision.client,
+        // The GHL sub-account id, so a lead that isn't stored can still be traced to the
+        // account it came from. An id, never a name, phone or email.
+        location: format === "json" ? str(body?.location?.id) : null,
         source: decision.classification?.source ?? null,
         detail: decision.classification?.source_detail ?? null,
         lead_type: decision.classification?.lead_type ?? null,

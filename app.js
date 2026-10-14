@@ -1,12 +1,55 @@
         // ================= GLOBAL STATE =================
         const wrapper = document.getElementById('midas-master');
         const supabaseClient = window.supabase.createClient(wrapper.dataset.supaUrl, wrapper.dataset.supaKey);
+        // Where app.js was served from (GitHub Pages, or a local preview), for files fetched
+        // later on demand. Read now: document.currentScript is only set while this first runs.
+        const GE_ASSET_BASE = (document.currentScript?.src || '').replace(/\/app\.js(\?.*)?$/, '') || 'https://video-tech.github.io/goldeneye-dashboard';
 
         // Startup timings, printed once as a table in the console (look for [STARTUP]).
         // Times are ms since the page began loading, so the first row shows how long the
         // GHL page, the libraries and body.html/app.js took before this code even ran.
-        const geStartupMarks = [];
-        function geStartupMark(label) {
+        // The loading screen (#ge-preload in body.html). Startup marks move its bar forward, never back, and
+        // it comes down when the first page is drawn, when there is no session (the sign-in card is then the
+        // page), or when loading fails. If it is still up after 20 seconds it offers a reload.
+        const gePreload = (() => {
+            const STEPS = {
+                'app.js running': [12, 'Starting up'], 'signed in': [28, 'Signed in'], 'role checked': [42, 'Checking your access'],
+                '15 tables loaded': [72, 'Loading your clients'], 'onboarding rules loaded': [88, 'Almost there'], 'data loaded': [94, 'Almost there']
+            };
+            let at = 0, down = false, slowTimer = null;
+            const q = (id) => document.getElementById(id);
+            function step(label) {
+                const s = STEPS[label];
+                if (!s || down || s[0] <= at) return;
+                at = s[0];
+                const fill = q('ge-pre-fill'), text = q('ge-pre-text'), bar = q('ge-pre-bar');
+                if (bar) bar.classList.remove('wait');
+                if (fill) fill.style.width = at + '%';
+                if (text) text.textContent = s[1];
+            }
+            function hide() {
+                if (down) return;
+                down = true;
+                clearTimeout(slowTimer);
+                const root = q('ge-preload');
+                if (!root) return;
+                const fill = q('ge-pre-fill'); if (fill) fill.style.width = '100%';
+                root.classList.add('done');
+                setTimeout(() => root.classList.add('gone'), 400);
+            }
+            function fail(message) {
+                const root = q('ge-preload');
+                if (!root || down) return;
+                const msg = q('ge-pre-slow-msg'); if (msg && message) msg.textContent = message;
+                const bar = q('ge-pre-bar'); if (bar) bar.classList.remove('wait');
+                root.classList.add('slow');
+            }
+            slowTimer = setTimeout(() => fail('This is taking longer than usual.'), 20000);
+            return { step, hide, fail };
+        })();
+
+        const geStartupMarks = [];        function geStartupMark(label) {
+            gePreload.step(label);
             if (geStartupReport.done) return; // later refetches aren't startup
             geStartupMarks.push({ step: label, at_ms: Math.round(performance.now()) });
         }
@@ -64,6 +107,8 @@
 
         let currentUserRole = 'pending'; 
         let currentUserName = 'User';
+        let currentUserFullName = '';   // user_profiles.full_name; decides "You" on the Tasks page
+        let globalTeamProfiles = [];    // admins and members, for the Tasks person filter
         let clientEmail = '';
         let globalAllowedClients = [];
 	let globalAuditsData = []; // Add this near line 656 with your other global variables
@@ -79,11 +124,16 @@
         let portalReports = [];
         let globalHealthData = {};
         let globalTasksData = [];
+        let globalSetupSteps = [];      // 'Setup step' tasks: the checklist steps, kept off the board and loaded separately
+        let globalArchivedTasks = [];   // tasks with archived_at set, shown only in the Archived view
         let globalAdsData = [];
         let globalCreativesData = [];
         let globalSeoData = [];
         let globalCheckinsData = [];
         let globalContactsData = [];
+        // Roster page: admin-only business details + notes (client_profiles)
+        let globalClientProfiles = [];
+        let clientProfilesReady = false;
         let globalOnboardingSteps = [];
         let globalOnboardingProgress = [];
         let globalServices = [];          // add-ons on top of Base, from services
@@ -314,7 +364,14 @@
             const name = typeof client === 'string' ? client : client?.name;
             if (!name) return 0;
             const want = normalize(name);
-            return globalContactsData.filter(c => normalize(c.client_name) === want && c.active !== false).length;
+            return globalContactsData.filter(c => normalize(c.client_name) === want && isCheckinContact(c)).length;
+        }
+
+        // Someone on the weekly check-in, as opposed to anyone on file (a website person or
+        // bookkeeper on the Roster has checkin_texts off). Before client_directory.sql runs
+        // the column is absent, so undefined counts as on, matching the reminder's coalesce.
+        function isCheckinContact(c) {
+            return c.active !== false && c.checkin_texts !== false;
         }
 
         // ================= CLIENT STATUS =================
@@ -350,10 +407,11 @@
                     // invited client signed in and sat on the pending screen forever.
                     // The two lookups don't depend on each other, so they go together.
                     const [{ data: profile }, { data: preApproved }] = await Promise.all([
-                        supabaseClient.from('user_profiles').select('role').eq('email', clientEmail).single(),
+                        supabaseClient.from('user_profiles').select('role, full_name').eq('email', clientEmail).single(),
                         supabaseClient.from('pre_approved_users').select('role, client_access').eq('email', clientEmail).maybeSingle()
                     ]);
                     currentUserRole = profile?.role || 'pending';
+                    currentUserFullName = profile?.full_name || '';
                     geStartupMark('role checked');
 
                     if (preApproved && (currentUserRole === 'pending' || !profile)) {
@@ -439,11 +497,13 @@
                         // drawn again only if it actually changed something.
                         await fetchAllGlobalData(globalAllowedClients, { deferCatchUp: true });
                         geStartupMark('data loaded');
+                        updateRosterNav();
 
                         // Restore the last visited page from memory, or default to the goldeneye dashboard
                         const savedPage = localStorage.getItem('midas_current_page') || 'goldeneye';
                         switchAppPage(savedPage);
                         geStartupMark('page shown');
+                        gePreload.hide();
 
                         runLifecycleCatchUp().then(changed => {
                             geStartupMark(changed ? 'catch-up done (changed data, redrawn)' : 'catch-up done (nothing changed)');
@@ -455,16 +515,22 @@
                     } else {
                         if (globalAllowedClients.length === 0) {
                             document.getElementById('auth-pending-view').classList.remove('hidden');
+                            gePreload.hide();
                         } else {
                             document.getElementById('client-portal-container').classList.remove('hidden');
                             await initClientPortal(globalAllowedClients);
                             geStartupMark('portal shown');
+                            gePreload.hide();
                         }
                         geStartupReport();
                     }
+                } else {
+                    // Nobody is signed in: the sign-in card is the page
+                    gePreload.hide();
                 }
             } catch(e) {
                 console.error("Critical error in initApp lifecycle initialization: ", e);
+                gePreload.fail('Golden Eye could not finish loading.');
             }
         }
         // The drawers sit inside client-portal-container in the markup, so on the admin
@@ -634,7 +700,7 @@
             const results = await Promise.allSettled([
                 // Paged past the 1000-row cap; RLS still limits a client to their own rows
                 fetchAllRows('daily_reports'),
-                supabaseClient.from('tasks').select('*').in('client', allowedClients),
+                supabaseClient.from('tasks').select('*').neq('type', 'Setup step').in('client', allowedClients),
                 clientLeadsQuery,
                 supabaseClient.from('ad_approvals').select('*').in('client_name', allowedClients),
                 supabaseClient.from('seo_metrics').select('*').in('client_name', allowedClients),
@@ -658,7 +724,8 @@
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
             allRawReports = rResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
 
-            globalTasksData = results[1].status === 'fulfilled' ? (results[1].value.data || []) : [];
+            // Archived tasks never reach the portal (supabase/sql/task_archive.sql)
+            globalTasksData = (results[1].status === 'fulfilled' ? (results[1].value.data || []) : []).filter(t => !t.archived_at);
             globalClientLeadsData = results[2].status === 'fulfilled' ? (results[2].value.data || []) : [];
             globalCreativesData = results[3].status === 'fulfilled' ? (results[3].value.data || []) : [];
             allRawSeo = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
@@ -775,7 +842,7 @@
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
     if(tabName === 'seo') renderCpSeo();
-    if(tabName === 'deckcalc') ensureDeckCalcLoaded();
+    if(tabName === 'deckcalc') { ensureDeckCalcLoaded(); deckQbRefresh(); }
     if(tabName === 'leaderboard') renderAnonymizedLeaderboard();
     if(tabName === 'knowledge') renderKnowledgeBase();
     if(tabName === 'profile') renderCpProfile();
@@ -1282,6 +1349,8 @@ function obTeamRowHtml(stepId, contact) {
                value="${escapeAttr(stripSlashEscapes(contact?.contact_name))}">
         <input type="tel" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-phone" placeholder="Mobile number"
                value="${escapeAttr(stripSlashEscapes(contact?.phone))}">
+        <input type="email" class="glass-input !py-2 flex-1 min-w-[160px] ob-team-email" placeholder="Email (optional)"
+               value="${escapeAttr(stripSlashEscapes(contact?.email))}">
         <button type="button" onclick="this.closest('.ob-team-row').remove()"
                 class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
             <i class="fa-solid fa-xmark"></i>
@@ -1291,7 +1360,7 @@ function obTeamRowHtml(stepId, contact) {
 
 function obTeamStepHtml(s, complete) {
     const mine = globalContactsData.filter(c =>
-        normalize(c.client_name || '') === normalize(currentActiveClient || '') && c.active !== false);
+        normalize(c.client_name || '') === normalize(currentActiveClient || '') && isCheckinContact(c));
 
     if (complete) {
         const names = mine.map(c => escapeAttr(stripSlashEscapes(c.contact_name || c.phone))).join(', ');
@@ -1339,9 +1408,10 @@ window.obSaveTeam = async function(stepId, justMe) {
         people = [...document.querySelectorAll(`#ob-team-rows-${stepId} .ob-team-row`)]
             .map(r => ({
                 contact_name: r.querySelector('.ob-team-name').value.trim(),
-                phone: r.querySelector('.ob-team-phone').value.trim()
+                phone: r.querySelector('.ob-team-phone').value.trim(),
+                email: (r.querySelector('.ob-team-email')?.value || '').trim().toLowerCase()
             }))
-            .filter(p => p.contact_name || p.phone);
+            .filter(p => p.contact_name || p.phone || p.email);
 
         if (!people.length) {
             show("Add at least one person, or choose “it's just me” below.");
@@ -1358,21 +1428,33 @@ window.obSaveTeam = async function(stepId, justMe) {
             show(`That number for ${badPhone.contact_name} doesn't look complete.`);
             return;
         }
+        const badEmail = people.find(p => p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email));
+        if (badEmail) {
+            show(`That email for ${badEmail.contact_name} doesn't look right.`);
+            return;
+        }
     }
 
     try {
+        // Email is always sent (prefilled above), so re-saving never blanks one we have
         const rows = people.filter(p => p.phone).map(p => ({
             client_name: currentActiveClient,
             contact_name: p.contact_name,
             phone: p.phone,
+            email: p.email || null,
             active: true
         }));
 
         if (rows.length) {
-            // Matches the admin editor's conflict target, so re-saving updates a person
-            // rather than adding them twice
-            const { data, error } = await supabaseClient.from('client_contacts')
-                .upsert(rows, { onConflict: 'phone' }).select();
+            // Re-saving updates a person rather than adding them twice. A number is unique
+            // per client since client_directory.sql; before that it was unique across the
+            // table, so fall back to that if the new index isn't there yet (42P10).
+            let { data, error } = await supabaseClient.from('client_contacts')
+                .upsert(rows, { onConflict: 'client_name,phone' }).select();
+            if (error && error.code === '42P10') {
+                ({ data, error } = await supabaseClient.from('client_contacts')
+                    .upsert(rows, { onConflict: 'phone' }).select());
+            }
             if (error) throw error;
             if (data?.length) {
                 const fresh = new Set(data.map(d => String(d.phone)));
@@ -1843,14 +1925,14 @@ window.renderCpProfile = function() {
     const team = document.getElementById('cp-profile-team');
     if (!team) return;
 
-    const mine = globalContactsData.filter(c => normalize(c.client_name) === want && c.active !== false);
+    const mine = globalContactsData.filter(c => normalize(c.client_name) === want && isCheckinContact(c));
     if (!mine.length) {
         team.innerHTML = '<p class="text-xs text-gray-500 italic">No one added yet. Invite a teammate so they get the weekly check-in too.</p>';
         return;
     }
 
     team.innerHTML = mine.map(c => {
-        const d = String(c.phone || '').replace(/D/g, '');
+        const d = String(c.phone || '').replace(/\D/g, '').slice(-10);
         const phone = d.length === 10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : (c.phone || '');
         return `<div class="flex items-center justify-between gap-3 bg-black/20 border border-white/5 rounded-xl px-3 py-2">
                     <span class="text-sm font-bold text-white truncate">${escapeAttr(stripSlashEscapes(c.contact_name || 'Unnamed'))}</span>
@@ -2334,10 +2416,14 @@ async function raiseOnboardingAgencyTasks(clientName, stage) {
     }
 }
 
+// Archived tasks count as "already raised": archiving a finished handoff task must never read as
+// "never raised", or the next admin load files a new one and texts everyone again.
+const tasksIncludingArchived = () => globalTasksData.concat(globalArchivedTasks);
+
 function onboardingHandoffRaised(clientName) {
     const key = normalize(clientName || '');
     const title = OB_COMPLETE_TASK_TITLE.trim().toLowerCase();
-    return globalTasksData.some(t =>
+    return tasksIncludingArchived().some(t =>
         normalize(t.client || '') === key &&
         String(t.title || '').trim().toLowerCase() === title);
 }
@@ -2565,10 +2651,19 @@ function portalCheckinFor(client, week, who = clientEmail) {
         String(c.contact_name || '').trim().toLowerCase() === key) || null;
 }
 
+// Rows our team logged from the client's texts (Roster → Log check-in, source 'staff')
+function staffCheckinsFor(client, week) {
+    return globalCheckinsData.filter(c =>
+        normalize(c.client_name || '') === normalize(client || '') &&
+        c.week_start === week && c.source === 'staff');
+}
+
 function weeklyCheckinOutstanding() {
     // An admin viewing a client's portal must not file numbers as them
     if (currentUserRole === 'admin') return false;
-    return !portalCheckinFor(currentActiveClient, reportingWeekStart());
+    const week = reportingWeekStart();
+    // A week our team already logged is done: no popup, and the reports unlock
+    return !portalCheckinFor(currentActiveClient, week) && !staffCheckinsFor(currentActiveClient, week).length;
 }
 
 const money0 = n => '$' + Math.round(Number(n) || 0).toLocaleString();
@@ -2599,8 +2694,11 @@ window.updateCheckinSourceTotal = function(suffix) {
         : 'Leave blank if nothing closed. A zero week is fine, just enter 0.';
 };
 
-function weeklyCheckinFormHtml(suffix) {
-    const existing = portalCheckinFor(currentActiveClient, reportingWeekStart());
+// opts lets the Roster reuse the form for a VA's entry: its own row to prefill, its own save
+function weeklyCheckinFormHtml(suffix, opts = {}) {
+    const existing = 'existing' in opts ? opts.existing : portalCheckinFor(currentActiveClient, reportingWeekStart());
+    const submitCall = opts.submitCall || `submitWeeklyCheckin('${suffix}')`;
+    const submitLabel = opts.submitLabel || (existing ? 'Update this week' : 'Submit');
     const v = f => existing?.[f] ?? '';
 
     // Prefill each source row from a saved breakdown. A check-in saved before sources existed
@@ -2645,9 +2743,10 @@ function weeklyCheckinFormHtml(suffix) {
                 <p class="text-[11px] mb-2 -mt-1" style="color:var(--t3);">Someone who called, walked in or used your website, but told you they'd seen the ads. We can't track these automatically, so this is the only way they get counted.</p>
                 <input type="number" min="0" step="1" id="wc-indirect-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('indirect_leads'))}">
             </div>
+            ${opts.beforeSubmit || ''}
             <p id="wc-error-${suffix}" class="text-sm hidden" style="color:var(--neg);"></p>
-            <button id="wc-submit-${suffix}" onclick="submitWeeklyCheckin('${suffix}')" class="btn-primary btn text-sm w-full">
-                ${existing ? 'Update this week' : 'Submit'}
+            <button id="wc-submit-${suffix}" onclick="${submitCall}" class="btn-primary btn text-sm w-full">
+                ${submitLabel}
             </button>
         </div>`;
 }
@@ -2723,16 +2822,37 @@ window.openCpReport = function(id) {
 window.renderWeeklyCheckin = function() {
     const week = reportingWeekStart();
     const existing = portalCheckinFor(currentActiveClient, week);
+    // When our team logged this week from their texts, show that instead of a blank form:
+    // a second entry from the client would be added on top and double the week.
+    const logged = existing ? [] : staffCheckinsFor(currentActiveClient, week);
 
     const mount = document.getElementById('cp-checkin-form-mount');
-    if (mount) { mount.innerHTML = weeklyCheckinFormHtml('tab'); updateCheckinSourceTotal('tab'); }
+    if (mount) {
+        if (logged.length) {
+            const sum = f => logged.some(r => r[f] != null) ? logged.reduce((n, r) => n + (Number(r[f]) || 0), 0) : null;
+            const est = sum('estimates_count'), jobs = sum('closes_count'), rev = sum('revenue_total');
+            const parts = [
+                est != null ? `${est} estimate${est === 1 ? '' : 's'}` : '',
+                jobs != null ? `${jobs} job${jobs === 1 ? '' : 's'} closed` : '',
+                rev != null ? money0(rev) : ''
+            ].filter(Boolean);
+            mount.innerHTML = `<div class="text-sm p-4" style="background:var(--inset); border-radius:3px; color:var(--t2);">
+                <p style="color:var(--t1);"><i class="fa-solid fa-circle-check mr-2" style="color:var(--pos);"></i>${escapeAttr(parts.join(' · ') || 'Logged')}</p>
+                <p class="mt-2">If anything's off, just reply to our text and we'll fix it.</p></div>`;
+        } else {
+            mount.innerHTML = weeklyCheckinFormHtml('tab');
+            updateCheckinSourceTotal('tab');
+        }
+    }
 
     const head = document.getElementById('cp-checkin-heading');
     if (head) head.innerText = `Numbers for ${weekRangeLabel(week)}`;
 
     const sub = document.getElementById('cp-checkin-subhead');
     if (sub) {
-        sub.innerText = existing
+        sub.innerText = logged.length
+            ? 'Our team logged your numbers for this week from your texts.'
+            : existing
             ? "You've already sent your numbers for this week — change them below if anything's moved."
             : 'Takes about a minute, and only covers your own numbers. These build your revenue reporting and the network leaderboard.';
     }
@@ -2790,12 +2910,11 @@ window.renderWeeklyCheckin = function() {
     }).join('');
 };
 
-window.submitWeeklyCheckin = async function(suffix) {
-    if (previewBlocksWrite('submitting a check-in')) return;
-    const btn = document.getElementById(`wc-submit-${suffix}`);
-    const err = document.getElementById(`wc-error-${suffix}`);
+// Reads the check-in form with this suffix. Shared by the client's own check-in and the
+// Roster's "Log check-in", so both save exactly the same shape.
+function readCheckinForm(suffix) {
     const num = id => {
-        const raw = document.getElementById(`wc-${id}-${suffix}`).value.trim();
+        const raw = (document.getElementById(`wc-${id}-${suffix}`)?.value || '').trim();
         return raw === '' ? null : Number(raw);
     };
 
@@ -2824,17 +2943,22 @@ window.submitWeeklyCheckin = async function(suffix) {
         ...Object.values(bySource).flatMap(x => [x.closes, x.revenue])
     ].filter(v => v !== null);
 
+    if (!entered.length) return { error: 'Put a number in at least one box — a zero week is fine, just enter 0.' };
+    if (entered.some(v => !isFinite(v) || v < 0)) return { error: 'Those need to be positive numbers.' };
+    return { row, numbers };
+}
+
+window.submitWeeklyCheckin = async function(suffix) {
+    if (previewBlocksWrite('submitting a check-in')) return;
+    const btn = document.getElementById(`wc-submit-${suffix}`);
+    const err = document.getElementById(`wc-error-${suffix}`);
+
     const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
     if (err) err.classList.add('hidden');
 
-    if (!entered.length) {
-        show('Put a number in at least one box — a zero week is fine, just enter 0.');
-        return;
-    }
-    if (entered.some(v => !isFinite(v) || v < 0)) {
-        show('Those need to be positive numbers.');
-        return;
-    }
+    const form = readCheckinForm(suffix);
+    if (form.error) { show(form.error); return; }
+    const { row, numbers } = form;
 
     const original = btn.innerHTML;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Saving...';
@@ -2949,8 +3073,10 @@ window.maybeShowWeeklyCheckin = function() {
             // Deck Calculator iframe is per-client (3Sixty only); force a reload if an admin
             // switches clients while it's showing, rather than leaving the last client's frame up.
             deckCalcLoaded = false;
+            // The last client's deck must never be sent as this client's estimate.
+            deckCalcEstimate = null;
             updateDeckCalcTabVisibility();
-            if(!document.getElementById('cp-view-deckcalc').classList.contains('hidden')) ensureDeckCalcLoaded();
+            if(!document.getElementById('cp-view-deckcalc').classList.contains('hidden')) { ensureDeckCalcLoaded(); deckQbRefresh(); }
         }
 
         function getLocalYYYYMMDD(dateObj) { return dateObj.getFullYear() + '-' + String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + String(dateObj.getDate()).padStart(2, '0'); }
@@ -3408,7 +3534,7 @@ window.submitClientRequest = async function() {
         async function fetchAllGlobalData(allowedClients, { deferCatchUp = false } = {}) {
     let clientsQ = supabaseClient.from('clients').select('*');
     let healthQ = supabaseClient.from('client_health').select('*');
-    let tasksQ = supabaseClient.from('tasks').select('*');
+    let tasksQ = supabaseClient.from('tasks').select('*').neq('type', 'Setup step');
     // Paged: PostgREST returns at most 1000 rows per request, and daily_reports passed that
     // long ago, so a single select('*') silently handed back an arbitrary 1000 of them.
     let adsQ = fetchAllRows('daily_reports');
@@ -3436,6 +3562,12 @@ window.submitClientRequest = async function() {
     let clientServicesQ = supabaseClient.from('client_services').select('*');
     let answersQ = supabaseClient.from('onboarding_answers').select('*');
 
+    // Business phone, website, address and private notes for the Roster page. Admin-only
+    // table (client_directory.sql), so nobody else even asks for it.
+    const profilesQ = currentUserRole === 'admin'
+        ? supabaseClient.from('client_profiles').select('*')
+        : Promise.resolve({ data: [] });
+
     if (allowedClients && currentUserRole !== 'admin') {
         clientsQ = clientsQ.in('name', allowedClients); healthQ = healthQ.in('client_name', allowedClients); tasksQ = tasksQ.in('client', allowedClients); crQ = crQ.in('client_name', allowedClients); seoQ = seoQ.in('client_name', allowedClients);
         checkinsQ = checkinsQ.in('client_name', allowedClients);
@@ -3444,7 +3576,13 @@ window.submitClientRequest = async function() {
         answersQ = answersQ.in('client_name', allowedClients);
     }
 
-    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ, servicesQ, clientServicesQ, answersQ ]);
+    // Who can be picked in the Tasks person filter. Staff only; a failed or empty read just
+    // leaves that list built from the assignees on the tasks themselves.
+    const teamQ = (currentUserRole === 'admin' || currentUserRole === 'member')
+        ? supabaseClient.from('user_profiles').select('email, full_name, role').in('role', ['admin', 'member'])
+        : Promise.resolve({ data: [] });
+
+    const results = await Promise.allSettled([ clientsQ, healthQ, tasksQ, adsQ, crQ, seoQ, auditsQ, checkinsQ, contactsQ, stageTplQ, obStepsQ, obProgQ, servicesQ, clientServicesQ, answersQ, profilesQ, teamQ ]);
     geStartupMark('15 tables loaded');
 
     let fClients = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
@@ -3479,6 +3617,11 @@ window.submitClientRequest = async function() {
     globalServices = results[12].status === 'fulfilled' ? (results[12].value.data || []) : [];
     globalClientServices = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
     globalOnboardingAnswers = results[14].status === 'fulfilled' ? (results[14].value.data || []) : [];
+    // A missing table (client_directory.sql not run yet) comes back as an error with no
+    // data, so this is simply empty and the roster says the details can't be saved yet.
+    globalClientProfiles = results[15].status === 'fulfilled' ? (results[15].value.data || []) : [];
+    clientProfilesReady = results[15].status === 'fulfilled' && !results[15].value.error;
+    globalTeamProfiles = results[16].status === 'fulfilled' ? (results[16].value.data || []) : [];
 
             if (allowedClients && currentUserRole !== 'admin') {
                 const normAllowed = allowedClients.map(a => normalize(a));
@@ -3511,8 +3654,12 @@ window.submitClientRequest = async function() {
                 c.current_score = score || 0; return c;
             });
 
-            globalTasksData = fTasks;
-            globalTasksData.forEach(t => t.score = Math.round((((t.p||3)*0.4)+((t.u||3)*0.4)+((6-(t.e||3))*0.2))*20));
+            // Archived tasks are kept apart: every board, count, report and stage rule reads
+            // globalTasksData, so archiving behaves like deleting everywhere, but the row stays,
+            // which stops task generation recreating it (it dedupes against the database).
+            globalArchivedTasks = fTasks.filter(t => t.archived_at);
+            globalTasksData = fTasks.filter(t => !t.archived_at);
+            globalTasksData.concat(globalArchivedTasks).forEach(t => t.score = Math.round((((t.p||3)*0.4)+((t.u||3)*0.4)+((6-(t.e||3))*0.2))*20));
             
             globalAdsData = fAds.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
 
@@ -3531,6 +3678,7 @@ window.submitClientRequest = async function() {
             // Which onboarding steps apply to each client, before anything below reads it
             await loadOnboardingApplicability(globalClientsData.map(c => c.name));
             geStartupMark('onboarding rules loaded');
+            await loadSetupSteps();
 
             // Only the first load defers this (see initApp): every other caller refetches
             // after a change and renders straight after, so it still waits for the result.
@@ -3560,6 +3708,7 @@ window.submitClientRequest = async function() {
                 await reconcileOnboardingHandoffTasks();
                 // Before the stage advance, so a task Golden Eye just ticked off can move its client on
                 await runAutoChecks();
+                await syncSetupSummaries();
                 await autoAdvanceCompletedOnboarding();
                 return lifecycleSnapshot() !== before;
             });
@@ -3593,7 +3742,8 @@ window.submitClientRequest = async function() {
             sales: { crumb: 'Agency', title: 'sales command.' },
             templates: { crumb: 'Agency', title: 'templates.' },
             settings: { crumb: 'Agency', title: 'settings.' },
-            audits: { crumb: 'Agency', title: 'morning audits.' }
+            audits: { crumb: 'Agency', title: 'morning audits.' },
+            roster: { crumb: 'Agency', title: 'roster.' }
         };
         function updateGeHeader(page) {
             const crumbEl = document.getElementById('ge-crumb');
@@ -3676,6 +3826,10 @@ window.submitClientRequest = async function() {
 
         function navTo(page) { switchAppPage(page); }
         function switchAppPage(page) {
+            // The roster is for admins and VAs (members), who see a trimmed version: people and
+            // check-ins only. Anyone else who lands on it (a saved page) gets the overview instead.
+            if (page === 'roster' && !rosterAllowed()) page = 'goldeneye';
+
             // Save the page choice to the browser's local memory
             localStorage.setItem('midas_current_page', page);
 
@@ -3694,7 +3848,8 @@ window.submitClientRequest = async function() {
     
     // 👇 NEW LINE ADDED HERE: Make sure the audits page hides when switching tabs 👇
     const auditsPage = document.getElementById('page-audits'); if(auditsPage) auditsPage.classList.add('hidden');
-    
+    const rosterPage = document.getElementById('page-roster'); if(rosterPage) rosterPage.classList.add('hidden');
+
     if (page === 'goldeneye') { 
         document.getElementById('page-goldeneye').classList.remove('hidden');
         // Was a fixed 250 ms wait. The page is already unhidden above, so the charts can
@@ -3710,9 +3865,10 @@ window.submitClientRequest = async function() {
     
     // 👇 NEW LINES ADDED HERE: Trigger the audits page to show up 👇
     else if (page === 'audits') { 
-        if(auditsPage) auditsPage.classList.remove('hidden'); 
-        setTimeout(() => renderMorningAudits(), 50); 
+        if(auditsPage) auditsPage.classList.remove('hidden');
+        setTimeout(() => renderMorningAudits(), 50);
     }
+    else if (page === 'roster') { if (rosterPage) rosterPage.classList.remove('hidden'); renderRoster(); }
 }
 
         function populateTemplateClientDropdown() {
@@ -3824,11 +3980,147 @@ window.submitClientRequest = async function() {
         }
 
         // --- GOLDEN EYE (DASHBOARD) RENDERING ---
+
+// ============================================================================
+// Ask Golden Eye: the chat on the Overview page (supabase/functions/overview-chat)
+// ============================================================================
+// The browser sends only the conversation's text. The function runs read-only lookups as the signed-in
+// admin and returns the answer plus the names of what it looked at. Nothing here writes anything.
+const OV_CHAT_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/overview-chat";
+const OV_CHAT_MAX_TURNS = 20;   // the function's limit; a longer chat asks for a fresh start
+const OV_CHAT_SUGGESTIONS = [
+    'Who needs attention this week?',
+    'Which ads are over their target CPL?',
+    'What tasks are overdue, and who owns them?',
+    "Compare this week's leads with last week for every client"
+];
+const OV_CHAT_SOURCES = {
+    list_clients: 'clients', ad_performance: 'ad performance', ad_breakdown: 'individual ads', ad_changes: 'ad changes',
+    tasks: 'tasks', checkins: 'check-ins', leads: 'website leads', seo_overview: 'SEO', onboarding: 'onboarding', latest_audit: 'the morning audit'
+};
+let ovChatTurns = [];
+let ovChatBusy = false;
+
+async function callOverviewChat(messages) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired. Sign in again.');
+    const res = await fetch(OV_CHAT_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ messages })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+        const e = data.error;
+        throw new Error((e && (e.message || (typeof e === 'string' ? e : ''))) || `the chat service returned ${res.status}`);
+    }
+    return data;
+}
+
+function ovChatBubble(role, html, extra = '') {
+    const box = document.getElementById('ov-chat-msgs');
+    if (!box) return null;
+    const me = role === 'user';
+    const el = document.createElement('div');
+    el.style.cssText = `align-self:${me ? 'flex-end' : 'flex-start'}; max-width:${me ? '80%' : '92%'}; padding:10px 14px; border-radius:3px; font-size:13.5px; line-height:1.55; ${me ? 'background:var(--goldWash); border:1px solid var(--goldLine); color:var(--t1);' : 'background:var(--inset); border:1px solid var(--line); color:var(--t1);'}${extra}`;
+    el.innerHTML = html;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return el;
+}
+
+function ovChatRenderSuggestions() {
+    const el = document.getElementById('ov-chat-suggest');
+    if (!el) return;
+    el.innerHTML = ovChatTurns.length ? '' : OV_CHAT_SUGGESTIONS.map((q, i) =>
+        `<button type="button" onclick="ovChatSend(OV_CHAT_SUGGESTIONS[${i}])" class="text-xs" style="padding:5px 11px; border-radius:2px; background:var(--inset); border:1px solid var(--line); color:var(--t2); cursor:pointer;">${escapeAttr(q)}</button>`).join('');
+    const reset = document.getElementById('ov-chat-reset');
+    if (reset) reset.classList.toggle('hidden', !ovChatTurns.length);
+}
+
+window.ovChatReset = function () {
+    if (ovChatBusy) return;
+    ovChatTurns = [];
+    const box = document.getElementById('ov-chat-msgs'); if (box) box.innerHTML = '';
+    ovChatRenderSuggestions();
+};
+
+window.ovChatSubmit = function (e) {
+    e.preventDefault();
+    const input = document.getElementById('ov-chat-input');
+    const text = (input.value || '').trim();
+    if (text) { input.value = ""; window.ovChatSend(text); }
+};
+
+window.ovChatSend = async function (text) {
+    text = String(text || '').trim();
+    if (!text || ovChatBusy || currentUserRole !== 'admin') return;
+    if (ovChatTurns.length + 1 > OV_CHAT_MAX_TURNS) return alert('This chat has got long. Press New chat to start a fresh one.');
+    ovChatBusy = true;
+    const send = document.getElementById('ov-chat-send'); if (send) send.disabled = true;
+    ovChatTurns.push({ role: 'user', content: text });
+    ovChatRenderSuggestions();
+    ovChatBubble('user', escapeAttr(text));
+    const thinking = ovChatBubble('assistant', 'Looking that up&hellip;', 'color:var(--t3);');
+    try {
+        const data = await callOverviewChat(ovChatTurns);
+        const reply = String(data.reply || '').trim();
+        ovChatTurns.push({ role: 'assistant', content: reply });
+        const looked = (data.looked_at || []).map(n => OV_CHAT_SOURCES[n] || null).filter(Boolean);
+        thinking.style.color = 'var(--t1)';
+        thinking.innerHTML = formatChatReply(reply) + (looked.length
+            ? `<div class="text-xs" style="margin-top:8px; color:var(--t3);">Looked at: ${escapeAttr(looked.join(', '))}</div>` : '');
+    } catch (err) {
+        // A failed question is dropped from the history, so a retry does not send it twice
+        ovChatTurns.pop();
+        thinking.style.color = 'var(--neg)';
+        thinking.innerHTML = escapeAttr('Could not answer: ' + (err.message || err));
+    } finally {
+        ovChatBusy = false;
+        if (send) send.disabled = false;
+        const box = document.getElementById('ov-chat-msgs'); if (box) box.scrollTop = box.scrollHeight;
+        ovChatRenderSuggestions();
+    }
+};
+
+function showOverviewChat() {
+    const el = document.getElementById('ov-chat');
+    if (!el) return;
+    const isAdmin = currentUserRole === 'admin';
+    el.classList.toggle('hidden', !isAdmin);
+    if (isAdmin) ovChatRenderSuggestions();
+}
+
+        // Make's daily ads pull fetches active clients with a Search Rows step limited to 10. Ten is fine today
+        // (the limit was lowered after an error), but the 11th client would silently get no ad data. So
+        // admins are told when they reach ten, and again, louder, if they go past it.
+        const MAKE_PULL_LIMIT = 10;
+        function makeLimitNotice(clients) {
+            const n = (clients || []).filter(c => isActiveClient(c) && normalizeAccountId(c.ad_account_id)).length;
+            if (n < MAKE_PULL_LIMIT) return null;
+            return n === MAKE_PULL_LIMIT
+                ? { level: 'warn', n, text: `You have ${n} active clients with an ad account, which is the limit on Make's daily ads pull. Raise the Search Rows limit in that scenario before you add another, or the next client will get no ad data.` }
+                : { level: 'bad', n, text: `You have ${n} active clients with an ad account, but Make's daily ads pull only reads ${MAKE_PULL_LIMIT}. ${n - MAKE_PULL_LIMIT} of them are getting no new ad data. Raise the Search Rows limit in that scenario.` };
+        }
+        function showMakeLimitNotice() {
+            const el = document.getElementById('ov-make-limit');
+            if (!el) return;
+            const note = currentUserRole === 'admin' ? makeLimitNotice(globalClientsData) : null;
+            el.classList.toggle('hidden', !note);
+            if (!note) { el.innerText = ''; return; }
+            el.innerText = note.text;
+            el.style.cssText += note.level === 'bad'
+                ? 'background:var(--inset); border:1px solid var(--neg); color:var(--neg);'
+                : 'background:var(--goldWash); border:1px solid var(--goldLine); color:var(--t1);';
+        }
+
         function renderGoldenEye() {
             // Check for a cached audit first thing!
             checkSavedAudit();
             // Puts the count of unread changes on Settings → Updates
             if (typeof checkUpdatesBadge === 'function') checkUpdatesBadge();
+            showOverviewChat();
+            showMakeLimitNotice();
 
             const isLight = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isLight ? '#64748b' : 'rgba(255,255,255,0.6)';
 
@@ -3898,6 +4190,9 @@ window.submitClientRequest = async function() {
 
             const rosterAdd = document.getElementById('btn-add-client-roster');
             if (rosterAdd) rosterAdd.classList.toggle('hidden', currentUserRole !== 'admin');
+            const rosterAll = document.getElementById('btn-roster-view-all');
+            if (rosterAll) rosterAll.classList.toggle('hidden', !rosterAllowed());
+            updateRosterNav();
 
             document.getElementById('dash-client-count').innerText = `${activeClients.length} Active`; let clientListHtml = '';
             // Div-grid rows matching the target design's fixed side columns, not a <table> —
@@ -3976,9 +4271,9 @@ window.submitClientRequest = async function() {
         }
 
         // --- TASK MODULE ---
-        function initTasksPage() { selectedTaskIds.clear(); renderTaskSummary(); renderActiveTaskView(); initColumnSortable(); }
+        function initTasksPage() { selectedTaskIds.clear(); taskDoneCap = TASK_DONE_CAP; updateTaskArchiveButton(); renderTaskFilterOptions(); renderTaskSummary(); renderActiveTaskView(); initColumnSortable(); }
         function switchTaskView(mode) {
-            currentTaskView = mode; document.getElementById('btn-view-kanban').classList.toggle('active', mode === 'kanban'); document.getElementById('btn-view-table').classList.toggle('active', mode === 'table');
+            currentTaskView = mode; if (mode === 'kanban' && taskArchiveView) { taskArchiveView = false; selectedTaskIds.clear(); document.getElementById('task-archive-banner')?.classList.add('hidden'); updateTaskArchiveButton(); } document.getElementById('btn-view-kanban').classList.toggle('active', mode === 'kanban'); document.getElementById('btn-view-table').classList.toggle('active', mode === 'table');
             if (mode === 'kanban') { document.getElementById('view-kanban').classList.remove('hidden'); document.getElementById('view-table').classList.add('hidden'); document.getElementById('btn-columns').classList.add('hidden'); document.getElementById('t-bulk-bar').classList.add('hidden'); } 
             else { document.getElementById('view-kanban').classList.add('hidden'); document.getElementById('view-table').classList.remove('hidden'); document.getElementById('btn-columns').classList.remove('hidden'); updateTaskBulkBar(); }
             renderActiveTaskView();
@@ -3990,11 +4285,13 @@ window.submitClientRequest = async function() {
         // created, including finished ones), and "Done this week" is real — completed AND
         // updated in the trailing 7 days — rather than the all-time completed count the
         // old "Completed" tile showed. Both are genuine computation changes, not paint.
+        // Counts follow the You/Ours/Client/Midas, person and client filters (not the
+        // search box), so picking "You" shows your own late and due-today numbers.
         function renderTaskSummary() {
             const today = new Date().toISOString().split('T')[0];
             const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
             let open=0, o=0, dt=0, ip=0, doneWeek=0;
-            globalTasksData.forEach(t => {
+            globalTasksData.filter(taskMatchesFilters).forEach(t => {
                 if (t.status !== 'Complete') {
                     open++;
                     if (t.status === 'In Progress') ip++;
@@ -4004,6 +4301,16 @@ window.submitClientRequest = async function() {
                 }
             });
             document.getElementById('stat-total').innerText = open;
+            const scopeEl = document.getElementById('stat-total-scope');
+            if (scopeEl) {
+                const personLabel = document.getElementById('task-person-filter')?.selectedOptions?.[0]?.textContent;
+                const parts = [
+                    { all: '', you: 'yours', ours: 'ours', theirs: 'client to do', midas: 'Midas internal' }[taskOwnerFilter],
+                    taskPersonFilter ? personLabel : '',
+                    taskClientFilter ? stripSlashEscapes(taskClientFilter) : '',
+                ].filter(Boolean);
+                scopeEl.innerText = parts.length ? parts.join(' · ') : 'all accounts';
+            }
             document.getElementById('stat-overdue').innerText = o;
             document.getElementById('stat-today').innerText = dt;
             document.getElementById('stat-progress').innerText = ip;
@@ -4018,18 +4325,105 @@ window.submitClientRequest = async function() {
 
         // Which side of the board you're looking at. Kept out of the search box so the two
         // filters compose — searching a client name while showing only what they owe us.
-        let taskOwnerFilter = 'all';
+        //   all    everything
+        //   you    assigned to whoever is signed in (their first name in the assignee)
+        //   ours   anything not assigned to the client
+        //   theirs assigned to the client
+        //   midas  our internal work: tasks filed under the Midas Media client
+        // The person and client selects narrow any of these further. All three are
+        // remembered per browser, so the board opens the way you left it.
+        const TASK_OWNER_MODES = ['all', 'you', 'ours', 'theirs', 'midas'];
+        const taskPref = (k, fallback) => { try { return localStorage.getItem(k) ?? fallback; } catch (e) { return fallback; } };
+        const saveTaskPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+        let taskOwnerFilter = TASK_OWNER_MODES.includes(taskPref('ge-task-owner', 'all')) ? taskPref('ge-task-owner', 'all') : 'all';
+        let taskPersonFilter = taskPref('ge-task-person', '');   // normalized name, '' = anyone
+        let taskClientFilter = taskPref('ge-task-client', '');   // exact client name, '' = all
 
-        const matchesTaskOwner = t =>
-            taskOwnerFilter === 'all' ||
-            (taskOwnerFilter === 'theirs' ? taskIsClients(t) : !taskIsClients(t));
+        // "Tenny, Aidan" is two people. Split on commas, ampersands, slashes and "and".
+        const taskAssignees = t => String(t.assignee || '')
+            .split(/\s*(?:,|&|\/|\band\b)\s*/i).map(s => normalize(s)).filter(Boolean);
 
-        window.setTaskOwnerFilter = function(mode) {
-            taskOwnerFilter = ['all', 'ours', 'theirs'].includes(mode) ? mode : 'all';
-            ['all', 'ours', 'theirs'].forEach(m => {
+        // The signed-in person's first name, as tasks are assigned by first name (a new
+        // task defaults to it). Profile name first, then the Google name, then the email.
+        function myTaskName() {
+            const full = (currentUserFullName || currentUserName || '').trim();
+            const first = full && full !== 'User' ? full.split(/\s+/)[0] : (clientEmail || '').split('@')[0];
+            return normalize(first || '');
+        }
+
+        function taskMatchesFilters(t) {
+            const mine = myTaskName();
+            const isMidas = normalize(t.client || '') === normalize('Midas Media');
+            if (taskOwnerFilter === 'you' && !(mine && taskAssignees(t).includes(mine))) return false;
+            if (taskOwnerFilter === 'ours' && taskIsClients(t)) return false;
+            if (taskOwnerFilter === 'theirs' && !taskIsClients(t)) return false;
+            if (taskOwnerFilter === 'midas' && !isMidas) return false;
+            if (taskPersonFilter && !taskAssignees(t).includes(taskPersonFilter)) return false;
+            if (taskClientFilter && normalize(t.client || '') !== normalize(taskClientFilter)) return false;
+            return true;
+        }
+
+        const taskTextMatch = (t, q) => !q || (t.title || '').toLowerCase().includes(q) || (t.client || '').toLowerCase().includes(q);
+
+        function syncTaskFilterButtons() {
+            TASK_OWNER_MODES.forEach(m => {
                 const b = document.getElementById(`btn-owner-${m}`);
                 if (b) b.classList.toggle('active', m === taskOwnerFilter);
             });
+        }
+
+        // Admins first (from user_profiles), then anyone else tasks are assigned to
+        // ("KJ", "Media Buyer"), so a name that isn't a login can still be picked.
+        function renderTaskFilterOptions() {
+            const personSel = document.getElementById('task-person-filter');
+            const clientSel = document.getElementById('task-client-filter');
+            if (personSel) {
+                const seen = new Map();
+                globalTeamProfiles.filter(p => p.role === 'admin' && p.full_name).forEach(p => {
+                    const first = p.full_name.trim().split(/\s+/)[0];
+                    if (first && !seen.has(normalize(first))) seen.set(normalize(first), { label: first, admin: true });
+                });
+                globalTasksData.forEach(t => String(t.assignee || '').split(/\s*(?:,|&|\/|\band\b)\s*/i).forEach(raw => {
+                    const label = raw.trim(), key = normalize(label);
+                    if (!key || key === 'client' || key === 'unassigned' || seen.has(key)) return;
+                    seen.set(key, { label, admin: false });
+                }));
+                const people = [...seen.entries()].sort((a, b) => (b[1].admin - a[1].admin) || a[1].label.localeCompare(b[1].label));
+                if (taskPersonFilter && !seen.has(taskPersonFilter)) taskPersonFilter = '';
+                personSel.innerHTML = `<option value="">Anyone</option>` + people.map(([key, p]) =>
+                    `<option value="${escapeAttr(key)}">${escapeAttr(stripSlashEscapes(p.label))}</option>`).join('');
+                personSel.value = taskPersonFilter;
+            }
+            if (clientSel) {
+                const names = new Map();
+                globalClientsData.forEach(c => names.set(normalize(c.name), { name: c.name, archived: (c.status || 'active') === 'archived' }));
+                globalTasksData.forEach(t => { if (t.client && !names.has(normalize(t.client))) names.set(normalize(t.client), { name: t.client, archived: false }); });
+                const list = [...names.values()].sort((a, b) => (a.archived - b.archived) || a.name.localeCompare(b.name));
+                if (taskClientFilter && !names.has(normalize(taskClientFilter))) taskClientFilter = '';
+                clientSel.innerHTML = `<option value="">All clients</option>` + list.map(c =>
+                    `<option value="${escapeAttr(c.name)}">${escapeAttr(stripSlashEscapes(c.name))}${c.archived ? ' (archived)' : ''}</option>`).join('');
+                clientSel.value = taskClientFilter;
+            }
+            syncTaskFilterButtons();
+        }
+
+        window.setTaskOwnerFilter = function(mode) {
+            taskOwnerFilter = TASK_OWNER_MODES.includes(mode) ? mode : 'all';
+            saveTaskPref('ge-task-owner', taskOwnerFilter);
+            syncTaskFilterButtons();
+            renderTaskSummary();
+            renderActiveTaskView();
+        };
+        window.setTaskPersonFilter = function(v) {
+            taskPersonFilter = v || '';
+            saveTaskPref('ge-task-person', taskPersonFilter);
+            renderTaskSummary();
+            renderActiveTaskView();
+        };
+        window.setTaskClientFilter = function(v) {
+            taskClientFilter = v || '';
+            saveTaskPref('ge-task-client', taskClientFilter);
+            renderTaskSummary();
             renderActiveTaskView();
         };
 
@@ -4076,20 +4470,32 @@ window.submitClientRequest = async function() {
             return out;
         }
 
+        // Done column paging (renderKanban). Reset to the first page whenever the page opens.
+        const TASK_DONE_CAP = 8;
+        const TASK_DONE_STEP = 20;
+        let taskDoneCap = TASK_DONE_CAP;
+        window.showMoreDoneTasks = function() { taskDoneCap += TASK_DONE_STEP; renderKanban(); };
+        window.showFewerDoneTasks = function() { taskDoneCap = TASK_DONE_CAP; renderKanban(); };
+
         function renderKanban() {
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
-            let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
-            f = f.filter(matchesTaskOwner);
-            // Shown under All as well as Client — "All" meaning all but these was just
-            // confusing. Hidden under Ours, which is the point of that filter. Board only:
-            // the list view has checkboxes wired to real task ids, and these have none.
-            if (taskOwnerFilter !== "ours") {
-                f = f.concat(clientOnboardingPseudoTasks().filter(t =>
-                    (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q)));
+            let f = globalTasksData.filter(t => taskTextMatch(t, q) && taskMatchesFilters(t));
+            // The client's onboarding steps, shown under All and Client (and when "Client" is
+            // the picked person) — never under You, Ours or Midas, which are our own work.
+            // Board only: the list view has checkboxes wired to real task ids, and these have none.
+            if (taskOwnerFilter === 'all' || taskOwnerFilter === 'theirs') {
+                f = f.concat(clientOnboardingPseudoTasks().filter(t => taskTextMatch(t, q) && taskMatchesFilters(t)));
             }
             const cols = { 'Not Started': document.getElementById('col-todo'), 'In Progress': document.getElementById('col-prog'), 'Blocked': document.getElementById('col-rev'), 'Complete': document.getElementById('col-done') };
             const counts = { 'Not Started': 0, 'In Progress': 0, 'Blocked': 0, 'Complete': 0 };
             Object.values(cols).forEach(el => { if(el) el.innerHTML = ''; }); f.sort((a,b) => b.score - a.score);
+
+            // Done only grows, so it shows the most recently finished first and stops at
+            // taskDoneCap, with View more at the bottom. The column's count is still the total.
+            const isDone = t => (t.status || 'Not Started') === 'Complete';
+            const doneAll = f.filter(isDone).sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+            const doneHidden = Math.max(0, doneAll.length - taskDoneCap);
+            f = f.filter(t => !isDone(t)).concat(doneAll.slice(0, taskDoneCap));
 
             // Cards match the target design: mono client label (gold + " · client" suffix
             // when it's the client's own task — folds ownership into the label itself
@@ -4132,11 +4538,21 @@ window.submitClientRequest = async function() {
                             </div>
                         </div>`;
             });
+            counts['Complete'] = doneAll.length;
+            const archBtn = document.getElementById('btn-archive-done');
+            if (archBtn) { const n = doneAll.filter(t => !t.__onboardingStep).length; archBtn.classList.toggle('hidden', currentUserRole !== 'admin' || !n); }
+            if (doneHidden > 0 && cols['Complete']) {
+                cols['Complete'].insertAdjacentHTML('beforeend', `<button type="button" class="kanban-more w-full ge-label" onclick="showMoreDoneTasks()"
+                    style="padding:10px; border:1px dashed var(--line); border-radius:3px; color:var(--gold); cursor:pointer;">View ${Math.min(doneHidden, TASK_DONE_STEP)} more <span style="color:var(--t3);">(${doneHidden} older)</span></button>`);
+            } else if (taskDoneCap > TASK_DONE_CAP && cols['Complete']) {
+                cols['Complete'].insertAdjacentHTML('beforeend', `<button type="button" class="kanban-more w-full ge-label" onclick="showFewerDoneTasks()"
+                    style="padding:10px; border:1px dashed var(--line); border-radius:3px; color:var(--t2); cursor:pointer;">Show less</button>`);
+            }
             document.getElementById('count-todo').innerText = counts['Not Started']; document.getElementById('count-prog').innerText = counts['In Progress']; document.getElementById('count-rev').innerText = counts['Blocked']; document.getElementById('count-done').innerText = counts['Complete'];
             
             sortableInstances.forEach(s=>s.destroy()); sortableInstances=[];
             document.querySelectorAll('#page-tasks .kanban-col').forEach(c => {
-                sortableInstances.push(new Sortable(c, { group:'kanban', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
+                sortableInstances.push(new Sortable(c, { group:'kanban', draggable:'.kanban-card', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
                     const id = e.item.getAttribute('data-id'); const nS = e.to.getAttribute('data-status'); const t = globalTasksData.find(x=>x.id==id);
                     if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); if(await queueLifecycle(autoAdvanceCompletedOnboarding)) renderKanban(); }
                 }}));
@@ -4149,23 +4565,22 @@ window.submitClientRequest = async function() {
             activeCols.forEach(c => { const d=masterCols.find(x=>x.id===c); if(d) h+=`<th class="p-4 sortable" onclick="setTaskSort('${d.id}')">${d.label} ${getI(d.id)}</th>`; }); thead.innerHTML = h + `</tr>`;
 
             const searchEl = document.getElementById('task-search-filter'); const q = searchEl ? searchEl.value.toLowerCase() : '';
-            let f = globalTasksData.filter(t => (t.title || "").toLowerCase().includes(q) || (t.client || "").toLowerCase().includes(q));
-            f = f.filter(matchesTaskOwner);
+            let f = (taskArchiveView ? globalArchivedTasks : globalTasksData).filter(t => taskTextMatch(t, q) && taskMatchesFilters(t));
             f.sort((a,b) => { let vA=a[currentTaskSort]||'', vB=b[currentTaskSort]||''; if(currentTaskSort==='score'){ if(taskPrioMode==='total'){vA=a.score;vB=b.score;} if(taskPrioMode==='dueDate'){vA=a.u;vB=b.u;} if(taskPrioMode==='et'){vA=a.e;vB=b.e;} } if(vA<vB) return taskSortDir==='asc'?-1:1; if(vA>vB) return taskSortDir==='asc'?1:-1; return 0; });
 
-            const td = new Date().toISOString().split('T')[0]; let bH = ''; if(f.length===0) bH = `<tr><td colspan="10" class="p-8 text-center" style="color:var(--t3);">No tasks.</td></tr>`;
+            const td = new Date().toISOString().split('T')[0]; let bH = ''; if(f.length===0) bH = `<tr><td colspan="10" class="p-8 text-center" style="color:var(--t3);">${taskArchiveView ? 'No archived tasks.' : 'No tasks.'}</td></tr>`;
             f.forEach(t => {
                 let sColor = 'var(--t2)'; if(t.status==='In Progress') sColor='var(--warn)'; if(t.status==='Complete') sColor='var(--pos)'; if(t.status==='Blocked') sColor='var(--neg)';
                 let dI='', dColor='var(--t2)'; if(t.status!=='Complete'&&t.due){ if(t.due<td){dI='<i class="fa-solid fa-circle-exclamation mr-1" style="color:var(--neg);"></i>'; dColor='var(--neg)';} else if(t.due===td){dI='<i class="fa-solid fa-bell mr-1" style="color:var(--warn);"></i>'; dColor='var(--warn)';} }
-                let pC = t.score>75?'var(--neg)':(t.score>50?'var(--warn)':'var(--t3)'); const chk = selectedTaskIds.has(t.id)?'checked':'';
+                const openAttr = taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`; let pC = t.score>75?'var(--neg)':(t.score>50?'var(--warn)':'var(--t3)'); const chk = selectedTaskIds.has(t.id)?'checked':'';
 
                 bH += `<tr class="ge-table-row transition" style="border-bottom:1px solid var(--line);${chk?' background:var(--goldWash);':''}">
                     <td class="p-4"><input type="checkbox" class="row-checkbox" value="${t.id}" ${chk} onchange="toggleTaskRow(this, ${t.id})"></td>
-                    <td class="p-4 font-bold cursor-pointer transition" style="color:var(--t1);" onclick="openTaskDrawer(${t.id})"><span class="flex items-center gap-2 flex-wrap">${t.title || 'Untitled'}${clientTaskBadge(t)}</span></td>
-                    <td class="p-4 cursor-pointer" style="color:var(--gold);" onclick="goToClient('${escapeHTML(t.client)}')">${t.client || 'Unknown'}</td>
-                    <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-xs" style="color:var(--t1);">${t.score}</span></td>
-                    <td class="p-4 font-bold cursor-pointer" style="color:${dColor};" onclick="openTaskDrawer(${t.id})">${dI}${t.due||'-'}</td>
-                    <td class="p-4 cursor-pointer" onclick="openTaskDrawer(${t.id})"><span class="ge-label" style="padding:3px 8px; border-radius:2px; border:1px solid var(--line); color:${sColor};">${t.status}</span></td>`;
+                    <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'} transition" style="color:var(--t1);"${taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`}><span class="flex items-center gap-2 flex-wrap">${escapeAttr(stripSlashEscapes(t.title || 'Untitled'))}${taskArchiveView ? `<span class="ge-label" style="padding:2px 6px; border-radius:2px; background:var(--inset);">Archived ${escapeAttr(new Date(t.archived_at).toLocaleDateString())}</span>` : clientTaskBadge(t)}</span></td>
+                    <td class="p-4 cursor-pointer" style="color:var(--gold);" onclick="goToClient('${escapeHTML(t.client)}')">${escapeAttr(stripSlashEscapes(t.client || 'Unknown'))}</td>
+                    <td class="p-4${taskArchiveView ? '' : ' cursor-pointer'}"${openAttr}><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-xs" style="color:var(--t1);">${t.score}</span></td>
+                    <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'}" style="color:${dColor};"${openAttr}>${dI}${t.due||'-'}</td>
+                    <td class="p-4${taskArchiveView ? '' : ' cursor-pointer'}"${openAttr}><span class="ge-label" style="padding:3px 8px; border-radius:2px; border:1px solid var(--line); color:${sColor};">${t.status}</span></td>`;
                 activeCols.forEach(c => { let v=t[c]||'-'; if(c==='assignee'&&t.assignee) v=`<div style="width:24px; height:24px; border-radius:2px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; color:var(--t2);">${t.assignee.substring(0,2).toUpperCase()}</div>`; if(c==='updated_at') v=new Date(v).toLocaleDateString(); if(c==='notes') v=`<span class="truncate block max-w-[150px] opacity-70 text-xs">${v}</span>`; bH+=`<td class="p-4" style="color:var(--t2);">${v}</td>`; }); bH += `</tr>`;
             });
             document.getElementById('t-table-body').innerHTML = bH; updateTaskBulkBar();
@@ -4174,10 +4589,108 @@ window.submitClientRequest = async function() {
         function setTaskSort(c){ if(currentTaskSort===c) taskSortDir=taskSortDir==='asc'?'desc':'asc'; else {currentTaskSort=c; taskSortDir=c==='score'?'desc':'asc';} renderTable(); }
         function setTaskPrio(m){ taskPrioMode=m; currentTaskSort='score'; taskSortDir='desc'; document.getElementById('prio-dropdown').classList.remove('show'); renderTable(); }
         function toggleTaskRow(cb, id){ if(cb.checked) selectedTaskIds.add(id); else selectedTaskIds.delete(id); renderTable(); }
-        function toggleAllTasks(cb){ if(cb.checked) globalTasksData.forEach(t=>selectedTaskIds.add(t.id)); else selectedTaskIds.clear(); renderTable(); }
+        // Only the rows on screen, so a bulk delete or status change can't reach tasks the
+        // filters or the search box are hiding.
+        function toggleAllTasks(cb){
+            const q = (document.getElementById('task-search-filter')?.value || '').toLowerCase();
+            if(cb.checked) (taskArchiveView ? globalArchivedTasks : globalTasksData).filter(t => taskTextMatch(t, q) && taskMatchesFilters(t)).forEach(t=>selectedTaskIds.add(t.id));
+            else selectedTaskIds.clear();
+            renderTable();
+        }
         function clearSelection(){ selectedTaskIds.clear(); renderTable(); }
-        function updateTaskBulkBar(){ if(currentTaskView!=='table') return; const b=document.getElementById('t-bulk-bar'); if(selectedTaskIds.size>0){ document.getElementById('t-bulk-count').innerText=selectedTaskIds.size; b.classList.remove('hidden'); } else b.classList.add('hidden'); }
-        async function deleteSelectedTasks(){ if(currentUserRole!=='admin') return alert("Admin only"); if(confirm(`Delete ${selectedTaskIds.size} task(s)?`)){ await supabaseClient.from('tasks').delete().in('id', Array.from(selectedTaskIds)); await fetchAllGlobalData(globalAllowedClients); initTasksPage(); } }
+        function updateTaskBulkBar(){
+            if(currentTaskView!=='table') return;
+            const b=document.getElementById('t-bulk-bar');
+            // Archived view: Restore and Delete forever. Otherwise: Change status and Archive.
+            ['t-bulk-status','t-bulk-archive'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', taskArchiveView));
+            ['t-bulk-restore','t-bulk-delete'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !taskArchiveView));
+            if(selectedTaskIds.size>0){ document.getElementById('t-bulk-count').innerText=selectedTaskIds.size; b.classList.remove('hidden'); } else b.classList.add('hidden');
+        }
+
+        // ---- Archive instead of delete (supabase/sql/task_archive.sql) ----
+        // An archived task keeps its row with archived_at set. fetchAllGlobalData keeps those apart
+        // in globalArchivedTasks, so every board, count, report and stage rule ignores them as if
+        // deleted, while task generation (which dedupes against the database) still sees the title
+        // and doesn't recreate it. Delete forever is only offered from the Archived view.
+        let taskArchiveView = false;
+
+        function archiveSaveError(error) {
+            const msg = `${error?.message || ''} ${error?.details || ''}`;
+            return (error?.code === 'PGRST204' || /archived_at/.test(msg))
+                ? 'Run supabase/sql/task_archive.sql in the SQL Editor first, then try again.'
+                : (error?.message || String(error));
+        }
+
+        async function setTasksArchived(ids, archived) {
+            const payload = archived
+                ? { archived_at: new Date().toISOString(), archived_by: clientEmail || null }
+                : { archived_at: null, archived_by: null };
+            const { data, error } = await supabaseClient.from('tasks').update(payload).in('id', ids).select('id');
+            if (error) { alert("Couldn't " + (archived ? 'archive' : 'restore') + ': ' + archiveSaveError(error)); return false; }
+            // RLS refuses an update by matching nothing rather than with an error
+            if (!data?.length) { alert("Couldn't " + (archived ? 'archive' : 'restore') + ": your login isn't allowed to change tasks. Run supabase/sql/tasks_admin_access.sql in the SQL Editor."); return false; }
+            return true;
+        }
+
+        async function refreshAfterTaskChange() {
+            await fetchAllGlobalData(globalAllowedClients);
+            if (!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage();
+            if (!document.getElementById('page-clients').classList.contains('hidden') && typeof renderClientTasks === 'function') renderClientTasks();
+            if (!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
+        }
+
+        async function archiveSelectedTasks(){
+            if (currentUserRole !== 'admin') return alert('Admin only');
+            const ids = Array.from(selectedTaskIds);
+            if (!ids.length || !confirm(`Archive ${ids.length} task(s)? They leave the board but can be restored from Archived.`)) return;
+            if (await setTasksArchived(ids, true)) { selectedTaskIds.clear(); await refreshAfterTaskChange(); }
+        }
+
+        // Board counterpart of the list's bulk Archive: every finished task the current filters and
+        // search show (including ones behind "View more"), never the onboarding pseudo-cards.
+        async function archiveDoneTasks(){
+            if (currentUserRole !== 'admin') return alert('Admin only');
+            const q = (document.getElementById('task-search-filter')?.value || '').toLowerCase();
+            const ids = globalTasksData.filter(t => (t.status || 'Not Started') === 'Complete' && taskTextMatch(t, q) && taskMatchesFilters(t)).map(t => t.id);
+            if (!ids.length || !confirm(`Archive ${ids.length} finished task(s)? They leave the board but can be restored from Archived.`)) return;
+            if (await setTasksArchived(ids, true)) await refreshAfterTaskChange();
+        }
+
+        async function restoreSelectedTasks(){
+            if (currentUserRole !== 'admin') return alert('Admin only');
+            const ids = Array.from(selectedTaskIds);
+            if (!ids.length) return;
+            if (await setTasksArchived(ids, false)) { selectedTaskIds.clear(); await refreshAfterTaskChange(); }
+        }
+
+        async function deleteArchivedForever(){
+            if (currentUserRole !== 'admin') return alert('Admin only');
+            // Only ever archived rows, whatever is selected
+            const ids = Array.from(selectedTaskIds).filter(id => globalArchivedTasks.some(t => t.id === id));
+            if (!ids.length || !confirm(`Permanently delete ${ids.length} archived task(s)? This can't be undone, and a deleted onboarding or checklist task can be generated again.`)) return;
+            const { error } = await supabaseClient.from('tasks').delete().in('id', ids);
+            if (error) return alert("Couldn't delete: " + error.message);
+            selectedTaskIds.clear();
+            await refreshAfterTaskChange();
+        }
+
+        // The Archived view is the list view showing archived tasks (filters and search still apply).
+        window.setTaskArchiveView = function(on) {
+            taskArchiveView = !!on;
+            selectedTaskIds.clear();
+            document.getElementById('task-archive-banner')?.classList.toggle('hidden', !taskArchiveView);
+            if (taskArchiveView && currentTaskView !== 'table') switchTaskView('table');
+            else renderActiveTaskView();
+            updateTaskArchiveButton();
+        };
+
+        function updateTaskArchiveButton() {
+            const btn = document.getElementById('btn-task-archived');
+            if (!btn) return;
+            btn.classList.toggle('hidden', currentUserRole !== 'admin' || taskArchiveView);
+            const n = document.getElementById('task-archived-count');
+            if (n) n.innerText = globalArchivedTasks.length ? `(${globalArchivedTasks.length})` : '';
+        }
         async function updateSelectedStatus(){ const s=prompt("Update status to (Not Started, In Progress, Blocked, Complete):","Complete"); if(s){ await supabaseClient.from('tasks').update({status:s}).in('id', Array.from(selectedTaskIds)); await fetchAllGlobalData(globalAllowedClients); initTasksPage(); } }
 
         function openColumnDrawer() {
@@ -4230,20 +4743,40 @@ window.submitClientRequest = async function() {
 
     if(id==='new'){ 
         activeEditId=null;
-        document.getElementById('t-drawer-headline').innerText="New task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
+        document.getElementById('t-drawer-headline').innerText="New task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-notify-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
         if (clientToSet) checkTaskClientBox(clientToSet);
     } else { 
-        const t=globalTasksData.find(x=>x.id===id);
+        const t=globalTasksData.find(x=>x.id===id) || globalSetupSteps.find(x=>x.id===id);
         if(!t) return; activeEditId=t.id; document.getElementById('t-drawer-headline').innerText="Edit task"; document.getElementById('t-title').value=t.title; 
         if(t.client) checkTaskClientBox(t.client);
         document.getElementById('t-stage').value=t.stage||'Onboarding'; document.getElementById('t-assignee').value=t.assignee||''; document.getElementById('t-type').value=t.type||'One-off'; document.getElementById('t-due').value=t.due||'';
-        document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden');
+        document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden'); document.getElementById('t-notify-btn').classList.remove('hidden');
         document.getElementById('t-hidden').checked = t.client_visible === false;
     }
     updateTaskClientDisplay();
     updateTaskScore(); document.getElementById('drawer-overlay').classList.add('show'); f.classList.add('open');
 }
         
+        // Texts whoever the task is assigned to (task_notify.sql). The database reads the assignee, so
+        // an unsaved change in the drawer would text the OLD person: stop and say to save first.
+        async function notifyTaskAssignee() {
+            const t = globalTasksData.find(x => x.id === activeEditId);
+            if (!t) return;
+            const shown = (document.getElementById('t-assignee').value || '').trim();
+            if (shown !== (t.assignee || '').trim()) return alert('The assignee was changed but not saved. Save the task first, then text them.');
+            if (!shown) return alert('This task has no assignee to text.');
+            if (!confirm(`Text ${shown} about "${t.title}"?`)) return;
+            const b = document.getElementById('t-notify-btn'); const label = b.innerHTML;
+            b.disabled = true; b.innerText = 'Sending...';
+            try {
+                const { data, error } = await supabaseClient.rpc('notify_task_assignee', { p_task_id: t.id });
+                if (error) alert(/notify_task_assignee/.test(error.message || '') && /not find|does not exist/i.test(error.message || '')
+                    ? 'Texting needs supabase/sql/task_notify.sql to be run first.' : 'Could not send: ' + error.message);
+                else if (!data || !data.ok) alert('Not sent: ' + ((data && data.reason) || 'unknown reason'));
+                else alert('Texted ' + data.texted.join(' and ') + '.' + (data.missing && data.missing.length ? ' No number on file for ' + data.missing.join(', ') + '.' : ''));
+            } finally { b.disabled = false; b.innerHTML = label; }
+        }
+
         function updateTaskScore(){ const p=parseInt(document.getElementById('t-p').value); const u=parseInt(document.getElementById('t-u').value); const e=parseInt(document.getElementById('t-e').value); document.getElementById('val-p').innerText=p; document.getElementById('val-u').innerText=u; document.getElementById('val-e').innerText=e; const s=Math.round(((p*0.4)+(u*0.4)+((6-e)*0.2))*20); const el=document.getElementById('t-calc-score'); el.innerText=s; el.style.color = `var(${s>75?'--neg':(s>50?'--warn':'--t1')})`; }
         
         async function saveTask(e){ 
@@ -4280,7 +4813,8 @@ window.submitClientRequest = async function() {
             if(!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
         }
         
-        async function deleteTask(){ if(!activeEditId||currentUserRole!=='admin') return; if(confirm("Delete task?")){ await supabaseClient.from('tasks').delete().eq('id',activeEditId); closeAllDrawers(); await fetchAllGlobalData(globalAllowedClients); if(!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage(); if(!document.getElementById('page-clients').classList.contains('hidden')) renderClientTasks(); if(!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();} }
+        // Archive, not delete: the task leaves every board but can be restored from Archived
+        async function archiveTask(){ if(!activeEditId||currentUserRole!=='admin') return; if(!confirm("Archive this task? It leaves the board and can be restored from Archived.")) return; if(await setTasksArchived([activeEditId], true)){ closeAllDrawers(); await refreshAfterTaskChange(); } }
 
         function initClientsPage() {
             // Paused clients are always listed so their history stays reachable.
@@ -4596,6 +5130,7 @@ function filterAdsData() {
                 if(document.getElementById('h-kpi-leads')) document.getElementById('h-kpi-leads').innerText = currentAdsStats.l.toLocaleString();
 
                 updateClientKpiDeltas(s, e);
+                renderAdActivityPanel(s, e);
 
                 const isL = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isL?'#64748b':'rgba(255,255,255,0.6)';
                 const wrapCsAds = getComputedStyle(document.getElementById('theme-wrapper'));
@@ -5092,10 +5627,78 @@ window.markOnboardingComplete = async function() {
     }
 };
 
+        // The Journey bar on a client's Health tab: how close they are to the next lifecycle stage.
+        // Onboarding counts the same items the Onboarding box lists (client steps + our tasks), which is
+        // what moves them on. Every later stage counts that stage's checklist tasks, and moving on is
+        // still the admin's call (Move Stage), so a full bar says "ready", never advances anyone.
+        function stageProgressFor(client) {
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(client));
+            if (!row) return null;
+            const stage = row.current_stage || 'Onboarding';
+            const idx = lifecycleStages.indexOf(stage);
+            const next = idx >= 0 ? lifecycleStages[idx + 1] || null : null;
+            let done = 0, total = 0;
+            if (stage === 'Onboarding') {
+                const items = allOnboardingItems(client);
+                const tasks = new Map(globalTasksData.filter(t => normalize(t.client || '') === normalize(client) && t.stage === 'Onboarding')
+                    .map(t => [String(t.title || '').trim().toLowerCase(), t]));
+                total = items.length;
+                done = items.filter(i => i.owner === 'agency'
+                    ? tasks.get(String(i.title || '').trim().toLowerCase())?.status === 'Complete'
+                    : !!onboardingProgressFor(client, i.id)?.completed_at).length;
+            } else {
+                const tasks = globalTasksData.filter(t => normalize(t.client || '') === normalize(client) && t.stage === stage);
+                total = tasks.length;
+                done = tasks.filter(t => t.status === 'Complete').length;
+            }
+            return { stage, idx, next, done, total, pct: total ? Math.round(done / total * 100) : 0 };
+        }
+
+        function renderStageProgress() {
+            const box = document.getElementById('c-stage-box');
+            if (!box) return;
+            const p = cSelectedAccount === "ALL" ? null : stageProgressFor(cSelectedAccount);
+            if (!p) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            document.getElementById('c-stage-steps').innerHTML = lifecycleStages.map((s, i) => {
+                const state = i < p.idx ? 'done' : i === p.idx ? 'now' : 'todo';
+                const color = state === 'todo' ? 'var(--t3)' : state === 'now' ? 'var(--gold)' : 'var(--t2)';
+                return `<span style="flex:1; text-align:center; padding-bottom:4px; border-bottom:2px solid ${state === 'todo' ? 'var(--line)' : 'var(--goldSolid)'}; opacity:${state === 'done' ? 0.55 : 1}; color:${color}; font-weight:${state === 'now' ? 700 : 500};">${state === 'done' ? '✓ ' : ''}${escapeAttr(s)}</span>`;
+            }).join('');
+            const checklistBtn = document.getElementById('c-stage-checklist');
+            if (checklistBtn) {
+                const groups = currentUserRole === 'admin' ? setupGroupsFor(cSelectedAccount) : [];
+                const total = groups.reduce((n, g) => n + g.total, 0), done = groups.reduce((n, g) => n + g.done, 0);
+                checklistBtn.classList.toggle('hidden', !groups.length);
+                document.getElementById('c-stage-checklist-label').innerText = groups.length ? `Our checklist · ${done} of ${total}` : 'Our checklist';
+            }
+            const bar = document.getElementById('c-stage-bar');
+            bar.style.width = p.pct + '%';
+            const track = document.getElementById('c-stage-bar-track');
+            track.setAttribute('aria-valuenow', String(p.pct));
+            const unit = p.stage === 'Onboarding' ? 'steps' : 'tasks';
+            document.getElementById('c-stage-summary').innerText = p.next
+                ? `${p.stage} → ${p.next}` : `${p.stage} (last stage)`;
+            document.getElementById('c-stage-detail').innerText = !p.total
+                ? `No ${p.stage} ${unit} yet, so there's nothing to measure.`
+                : p.next
+                    ? (p.done === p.total ? `All ${p.total} ${unit} done. Ready to move to ${p.next}.` : `${p.done} of ${p.total} ${unit} done (${p.pct}%). ${p.total - p.done} to go before ${p.next}.`)
+                    : `${p.done} of ${p.total} ${unit} done.`;
+        }
+
+        function agencyStepImplicitlyDone(clientName, item) {
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+            if (!row || (row.current_stage || 'Onboarding') === 'Onboarding') return false;
+            const a = obFor(clientName);
+            const live = new Set(a ? a.steps.filter(r => r.service_status === 'onboarding').map(r => r.step_id) : []);
+            return !live.has(item.id);
+        }
+
         function renderClientOnboarding() {
             const box = document.getElementById('c-onboarding-box');
             const list = document.getElementById('c-onboarding-list');
             if (!box || !list) return;
+            renderStageProgress();
 
             const items = cSelectedAccount === "ALL" ? [] : allOnboardingItems(cSelectedAccount);
             if (cSelectedAccount === "ALL" || !items.length) { box.classList.add('hidden'); return; }
@@ -5105,8 +5708,11 @@ window.markOnboardingComplete = async function() {
                 normalize(t.client || '') === normalize(cSelectedAccount) && t.stage === 'Onboarding');
             const taskByTitle = new Map(clientTasks.map(t => [String(t.title || '').trim().toLowerCase(), t]));
 
+            // A client who has moved past Onboarding got there because our own onboarding work was finished (or they
+            // predate these steps, so no task was ever raised), so those steps count as done. Not the steps of an add-on
+            // they are still onboarding: those need their task.
             const isDone = item => item.owner === 'agency'
-                ? taskByTitle.get(String(item.title || '').trim().toLowerCase())?.status === 'Complete'
+                ? taskByTitle.get(String(item.title || '').trim().toLowerCase())?.status === 'Complete' || agencyStepImplicitlyDone(cSelectedAccount, item)
                 : !!onboardingProgressFor(cSelectedAccount, item.id)?.completed_at;
 
             const done = items.filter(isDone).length;
@@ -5161,7 +5767,8 @@ window.markOnboardingComplete = async function() {
                         <span class="text-sm truncate ${complete ? 'text-gray-500 line-through' : 'text-white'}">${escapeHTML(item.title)}</span>
                         ${mine && item.auto_check ? '<i class="fa-solid fa-bolt text-emerald-400/70 text-[10px] shrink-0" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}
                     </div>
-                    <div class="text-[11px] whitespace-nowrap">${state}</div>
+                    <div class="flex items-center gap-3 text-[11px] whitespace-nowrap">${mine && currentUserRole === 'admin' && setupGroupsFor(cSelectedAccount).some(g => g.stage === 'Onboarding' && String(g.group).trim().toLowerCase() === String(item.title || '').trim().toLowerCase())
+                        ? `<button type="button" onclick="openSetupChecklist()" class="${isBlocker ? 'btn-primary' : ''} btn text-xs" style="padding:3px 10px;${isBlocker ? '' : ' background:transparent; border:1px solid var(--line); color:var(--t2);'}"><i class="fa-solid fa-list-check mr-1.5"></i>Our checklist</button>` : ''}<span>${state}</span></div>
                 </div>`;
             }).join('') + clientAnswersHtml(cSelectedAccount);
         }
@@ -5574,6 +6181,9 @@ Treat this period as a fresh starting point. State every number plainly as where
             // whose notes said 32 and 2.25K. No seo_daily rows means no SEO block at all, and SEO
             // then comes only from the notes.
             const seoBlock = await buildReportSeoBlock(cSelectedAccount, s, e);
+            // What changed in the ad account this period and what it did, from meta-sync. Empty
+            // until that's set up for this client, and the report reads as it always has.
+            const adActivityBlock = await buildReportAdActivityBlock(cSelectedAccount, s, e);
 
             // SEO gets its own required section whenever there's anything to say, decided here
             // rather than left to the model. On 2026-09-14 a report dropped SEO entirely even
@@ -5601,7 +6211,7 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             ${trendBlock}
 
-            ${workBlock}${seoBlock}
+            ${workBlock}${seoBlock}${adActivityBlock}
 
             MEDIA BUYER'S NOTES:
             "${n || 'No manual notes provided this week. Draw the highlights and action plan from the data above rather than waiting for more.'}"
@@ -5633,7 +6243,18 @@ Treat this period as a fresh starting point. State every number plainly as where
             - In "html_report", leave the ${WORKING_ON_MARKER} marker exactly where it is in the
               template. Don't write that section's content into the HTML yourself.
 
-            THE MEDIA BUYER'S NOTES WIN — follow this exactly:
+            ${adActivityBlock ? `AD CHANGES — only because the AD CHANGES AND RESULTS block appears above:
+            - Give the changes their own highlight (or two, if there were several): what we changed
+              and what it did, in plain words, using the effect figures exactly as given. "Too early
+              to tell" stays too early to tell; never guess an outcome.
+            - Say "we" for our changes and "Meta" for Meta's own. Never name a person.
+            - Never invent a reason for a change. Use a reason only if the notes give one.
+            - Ad names are internal labels. Describe an ad by what it is ("the candid photo ad"),
+              quoting a name only when nothing else identifies it.
+            - "EACH AD THIS PERIOD" is for pointing out the best and worst performers, not for listing
+              every ad.
+
+            ` : ''}THE MEDIA BUYER'S NOTES WIN — follow this exactly:
             - The notes are written by the person running the account, and they know things the data
               above doesn't. Every specific fact or number in the notes goes into the report,
               EXACTLY as written: counts, dollar amounts, clicks, impressions, AI mentions, anything.
@@ -5923,6 +6544,373 @@ Treat this period as a fresh starting point. State every number plainly as where
 
  // ---- Admin SEO tab (rebuilt 2026-09-11) ----
  // ---- The weekly report's Organic Search facts ----
+// ---- Ad changes and per-ad results for the weekly report (meta-sync) ----
+// meta_activity is Meta's change log and meta_ad_daily is spend and leads per ad per day, both
+// filled by the meta-sync function. This turns them into facts the report states: what changed in
+// the period, what the affected ads did before and after, and how each ad did. Code computes,
+// the model quotes, same as the SEO block and the morning audit.
+//
+// Never names who made a change: the report is for the client, so a change is something "we"
+// did, or Meta's system did. Returns '' when the client has no rows (not synced, no ads, or the
+// tables don't exist yet), and the report is written exactly as before.
+
+const AD_FACTS_MAX_CHANGES = 8;
+const AD_FACTS_MAX_ADS = 6;
+const AD_FACTS_WINDOW_DAYS = 7;     // before/after window around a change
+const AD_FACTS_MIN_AFTER_DAYS = 3;  // fewer days of results after a change = too early to tell
+
+function adFactsYmd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function adFactsDenverDay(iso) {
+    // The change's calendar day where the team works, so "Oct 1" means Oct 1 in Utah
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso)); }
+    catch (e) { return String(iso).slice(0, 10); }
+}
+function adFactsShortDate(ymd) {
+    const d = new Date(ymd + 'T12:00:00');
+    return isNaN(d) ? ymd : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+const adFactsMoney = (n) => '$' + (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const adFactsQuote = (s) => `"${stripSlashEscapes(String(s || 'unnamed')).replace(/"/g, "'")}"`;
+
+const AD_FACTS_LEVEL = { AD: 'ad', ADGROUP: 'ad set', AD_SET: 'ad set', ADSET: 'ad set', CAMPAIGN: 'campaign', CAMPAIGN_GROUP: 'campaign', ACCOUNT: 'account', AD_ACCOUNT: 'account' };
+
+// Budget amounts come in the currency's minor unit (cents). Shown only when the change says it's
+// money; otherwise the sentence just says the budget changed rather than print a wrong figure.
+function adFactsBudgetValue(v, extra) {
+    const money = /payment|budget|amount/i.test(String(extra?.type || '')) || !!extra?.currency;
+    if (!money) return null;
+    if (typeof v === 'number') return adFactsMoney(v / 100);
+    if (v && typeof v === 'object') {
+        const n = Object.values(v).find(x => typeof x === 'number');
+        if (typeof n === 'number') return adFactsMoney(n / 100);
+    }
+    return null;
+}
+
+function describeAdChange(a, actorLabel) {
+    const level = AD_FACTS_LEVEL[String(a.object_type || '').toUpperCase()] || 'item';
+    const what = `the ${level} ${adFactsQuote(a.object_name)}`;
+    // The report says "we" (it goes to the client); the admin panel passes the person's name
+    const who = actorLabel || (a.actor_is_meta ? "Meta's system" : 'we');
+    const x = a.extra || {};
+    const ov = typeof x.old_value === 'string' ? x.old_value : null;
+    const nv = typeof x.new_value === 'string' ? x.new_value : null;
+    switch (a.category) {
+        case 'status':
+            if (nv && /^active$/i.test(nv)) return `${who} turned on ${what}`;
+            if (nv && /inactive|paused|archived|deleted/i.test(nv)) return `${who} turned off ${what}`;
+            if (nv && /disapprov|reject|issues/i.test(nv)) return `Meta rejected ${what} (status: ${nv})`;
+            return `${who} changed the status of ${what}${ov && nv ? ` from ${ov} to ${nv}` : ''}`;
+        case 'budget': {
+            const from = adFactsBudgetValue(x.old_value, x), to = adFactsBudgetValue(x.new_value, x);
+            return from && to ? `${who} changed the budget on ${what} from ${from} to ${to}` : `${who} changed the budget on ${what}`;
+        }
+        case 'bid': return `${who} changed the bidding on ${what}`;
+        case 'targeting': return `${who} changed who sees ${what} (audience, placements or optimization)`;
+        case 'creative': return `${who} changed the creative on ${what}`;
+        case 'schedule': return `${who} changed the schedule of ${what}`;
+        case 'created': return `${who} created ${what}`;
+        case 'review_declined': return `Meta rejected ${what} in review`;
+        default: return `${who} changed ${what}`;
+    }
+}
+
+// The ads a change reaches: the ad itself, or every ad under the ad set or campaign it was made
+// on. In the change log "campaign_id" is Meta's legacy name for the ad set.
+function adsAffectedBy(a, adRows) {
+    const id = String(a.object_id || '');
+    const parent = a.extra && a.extra.campaign_id != null ? String(a.extra.campaign_id) : '';
+    const ids = new Set();
+    adRows.forEach(r => {
+        if (r.ad_id === id || r.adset_id === id || r.campaign_id === id) ids.add(r.ad_id);
+    });
+    if (!ids.size && parent) adRows.forEach(r => { if (r.adset_id === parent) ids.add(r.ad_id); });
+    return ids;
+}
+
+function sumAdRows(rows) {
+    const t = { spend: 0, leads: 0, days: new Set() };
+    rows.forEach(r => { t.spend += Number(r.spend) || 0; t.leads += Number(r.leads) || 0; if ((Number(r.spend) || 0) > 0) t.days.add(r.date); });
+    return t;
+}
+
+function adChangeEffect(a, adRows, lastDataDay) {
+    const affected = adsAffectedBy(a, adRows);
+    if (!affected.size) return 'no ad results to compare yet';
+    const day = adFactsDenverDay(a.event_time);
+    const addDays = (ymd, n) => { const d = new Date(ymd + 'T12:00:00'); d.setDate(d.getDate() + n); return adFactsYmd(d); };
+    const beforeFrom = addDays(day, -AD_FACTS_WINDOW_DAYS), afterTo = addDays(day, AD_FACTS_WINDOW_DAYS);
+    const mine = adRows.filter(r => affected.has(r.ad_id));
+    // The change day itself is split, so it belongs to neither side
+    const before = sumAdRows(mine.filter(r => r.date >= beforeFrom && r.date < day));
+    const afterRows = mine.filter(r => r.date > day && r.date <= afterTo);
+    const after = sumAdRows(afterRows);
+    // Days the sync actually has results for (any ad), so a per-day figure never divides by days
+    // that were never pulled
+    const covered = (from, to) => new Set(adRows.filter(r => r.date >= from && r.date <= to).map(r => r.date)).size;
+    const daysBefore = covered(beforeFrom, addDays(day, -1));
+    const daysAfter = covered(addDays(day, 1), afterTo);
+    const perDay = (t, n) => n > 0 ? t.spend / n : 0;
+    const side = (t, n) => {
+        const cpl = t.leads > 0 ? `, ${adFactsMoney(t.spend / t.leads)} per lead` : '';
+        return `${adFactsMoney(perDay(t, n))}/day, ${t.leads} lead${t.leads === 1 ? '' : 's'} over ${n} day${n === 1 ? '' : 's'}${cpl}`;
+    };
+    if (a.category === 'created') {
+        return daysAfter < AD_FACTS_MIN_AFTER_DAYS
+            ? 'too early to tell (it has only just started)'
+            : `since it started: ${side(after, daysAfter)}`;
+    }
+    if (daysBefore === 0) return daysAfter ? `after: ${side(after, daysAfter)} (no results from before the change to compare with)` : 'no ad results to compare yet';
+    if (daysAfter < AD_FACTS_MIN_AFTER_DAYS) {
+        return `too early to tell (only ${daysAfter} day${daysAfter === 1 ? '' : 's'} of results since); before the change: ${side(before, daysBefore)}`;
+    }
+    if (after.spend === 0 && before.spend > 0) return `spend stopped: ${side(before, daysBefore)} before, nothing spent in the ${daysAfter} days since`;
+    return `before: ${side(before, daysBefore)}; after: ${side(after, daysAfter)}`;
+}
+
+// Pure: activity rows + per-ad rows in, report text out. Tested on its own.
+function computeAdActivityFacts(activities, adRows, s, e) {
+    const start = adFactsYmd(s), end = adFactsYmd(e);
+    const lastDataDay = adRows.reduce((m, r) => (r.date > m ? r.date : m), '');
+
+    // One line per object per kind per day: an ad set toggled three times in an afternoon is one
+    // change, described by where it ended up.
+    const latest = new Map();
+    activities
+        .filter(a => a.significant)
+        .filter(a => { const d = adFactsDenverDay(a.event_time); return d >= start && d <= end; })
+        .sort((x, y) => String(x.event_time).localeCompare(String(y.event_time)))
+        .forEach(a => latest.set(`${a.object_id}|${a.category}|${adFactsDenverDay(a.event_time)}`, a));
+    let changes = [...latest.values()];
+    const totalChanges = changes.length;
+    changes = changes.slice(-AD_FACTS_MAX_CHANGES);
+
+    const inPeriod = adRows.filter(r => r.date >= start && r.date <= end);
+    const byAd = new Map();
+    inPeriod.forEach(r => {
+        const t = byAd.get(r.ad_id) || { name: r.ad_name, spend: 0, leads: 0 };
+        t.spend += Number(r.spend) || 0; t.leads += Number(r.leads) || 0; t.name = r.ad_name || t.name;
+        byAd.set(r.ad_id, t);
+    });
+    const ads = [...byAd.values()].filter(t => t.spend > 0).sort((a, b) => b.spend - a.spend);
+
+    if (!changes.length && !ads.length) return '';
+
+    let out = `\n\nAD CHANGES AND RESULTS (computed from Meta's change history and per-ad results; use these figures exactly, never calculate your own):`;
+    if (changes.length) {
+        out += `\nCHANGES MADE THIS PERIOD${totalChanges > changes.length ? ` (the latest ${changes.length} of ${totalChanges})` : ''}:`;
+        changes.forEach(a => {
+            out += `\n- ${adFactsShortDate(adFactsDenverDay(a.event_time))}: ${describeAdChange(a)}. Effect on the ads it covers: ${adChangeEffect(a, adRows, lastDataDay)}.`;
+        });
+    } else {
+        out += `\nCHANGES MADE THIS PERIOD: none in Meta's change history.`;
+    }
+    if (ads.length) {
+        out += `\nEACH AD THIS PERIOD (by spend):`;
+        ads.slice(0, AD_FACTS_MAX_ADS).forEach(t => {
+            out += `\n- ${adFactsQuote(t.name)}: ${adFactsMoney(t.spend)} spent, ${t.leads} lead${t.leads === 1 ? '' : 's'}${t.leads > 0 ? `, ${adFactsMoney(t.spend / t.leads)} per lead` : ''}`;
+        });
+        if (ads.length > AD_FACTS_MAX_ADS) out += `\n- …and ${ads.length - AD_FACTS_MAX_ADS} smaller ads`;
+    }
+    return out;
+}
+
+async function buildReportAdActivityBlock(clientName, s, e) {
+    try {
+        const client = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+        if (!client || !normalizeAccountId(client.ad_account_id)) return '';
+        // Results from a week before the period, for the "before" side of an early change
+        const from = new Date(s); from.setDate(from.getDate() - AD_FACTS_WINDOW_DAYS);
+        const until = new Date(e); until.setDate(until.getDate() + 1);
+        const [actRes, adRes] = await Promise.all([
+            supabaseClient.from('meta_activity')
+                .select('event_time, event_type, event_label, object_id, object_name, object_type, actor_is_meta, extra, category, significant')
+                .eq('client_name', client.name).eq('significant', true)
+                .gte('event_time', from.toISOString()).lt('event_time', until.toISOString())
+                .order('event_time').limit(500),
+            // Paged past PostgREST's 1000-row cap: a busy account runs dozens of ads a day
+            (async () => {
+                const rows = [];
+                for (let at = 0; at < 20000; at += 1000) {
+                    const { data, error } = await supabaseClient.from('meta_ad_daily')
+                        .select('date, ad_id, ad_name, adset_id, campaign_id, spend, leads')
+                        .eq('client_name', client.name).gte('date', adFactsYmd(from)).lte('date', adFactsYmd(e))
+                        .order('date').order('ad_id').range(at, at + 999);
+                    if (error) return { data: null, error };
+                    rows.push(...(data || []));
+                    if (!data || data.length < 1000) break;
+                }
+                return { data: rows, error: null };
+            })(),
+        ]);
+        if (actRes.error || adRes.error) return '';
+        return computeAdActivityFacts(actRes.data || [], adRes.data || [], s, e);
+    } catch (err) {
+        console.warn('Ad activity block skipped:', err?.message || err);
+        return '';
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Activity panel on a client's Ads tab (admin only): what changed in the account, who did it and
+// what the ads did either side, plus every ad's share of spend. Reads the same tables and the same
+// describeAdChange / adChangeEffect the weekly report uses, so the two always tell the same story.
+// Unlike the report it names the person, since only admins see it.
+// ---------------------------------------------------------------------------------------------
+const AD_PANEL_MAX_DAYS = 120;      // "all time" is clamped: the ad tables are paged and a year is a lot of rows
+const AD_PANEL_SHOW_CHANGES = 12;
+const AD_PANEL_SHOW_ADS = 10;
+let adPanelToken = 0;
+let adPanelExpanded = { changes: false, ads: false };
+let adPanelLast = null;
+
+const AD_PANEL_CATEGORY = {
+    status: ['Status', '--warn'], budget: ['Budget', '--gold'], bid: ['Bidding', '--gold'], targeting: ['Targeting', '--t2'],
+    creative: ['Creative', '--t2'], schedule: ['Schedule', '--t2'], created: ['New', '--pos'], review_declined: ['Rejected', '--neg']
+};
+
+// One entry per object per kind per day, latest wins, newest first: an ad set toggled three times in
+// an afternoon is one change, described by where it ended up. Same rule as the report.
+function adPanelChanges(acts, startYmd, endYmd) {
+    const latest = new Map();
+    acts.filter(a => a.significant)
+        .filter(a => { const d = adFactsDenverDay(a.event_time); return d >= startYmd && d <= endYmd; })
+        .sort((x, y) => String(x.event_time).localeCompare(String(y.event_time)))
+        .forEach(a => latest.set(`${a.object_id}|${a.category}|${adFactsDenverDay(a.event_time)}`, a));
+    return [...latest.values()].reverse();
+}
+
+// Per ad across the window: spend, leads, share of the account's spend. Ads with no spend are left out.
+function adPanelAds(adRows, startYmd, endYmd) {
+    const by = new Map();
+    adRows.filter(r => r.date >= startYmd && r.date <= endYmd).forEach(r => {
+        const t = by.get(r.ad_id) || { id: r.ad_id, name: r.ad_name, adset: r.adset_name, spend: 0, leads: 0 };
+        t.spend += Number(r.spend) || 0; t.leads += Number(r.leads) || 0;
+        t.name = r.ad_name || t.name; t.adset = r.adset_name || t.adset;
+        by.set(r.ad_id, t);
+    });
+    const ads = [...by.values()].filter(t => t.spend > 0).sort((a, b) => b.spend - a.spend);
+    const total = ads.reduce((n, t) => n + t.spend, 0);
+    ads.forEach(t => { t.share = total > 0 ? t.spend / total : 0; t.cpl = t.leads > 0 ? t.spend / t.leads : null; });
+    return { ads, total };
+}
+
+async function loadAdPanelData(client, from, e) {
+    const until = new Date(e); until.setDate(until.getDate() + 1);
+    const [actRes, adRes] = await Promise.all([
+        supabaseClient.from('meta_activity')
+            .select('event_time, event_type, event_label, object_id, object_name, object_type, actor_name, actor_is_meta, extra, category, significant')
+            .eq('client_name', client.name).eq('significant', true)
+            .gte('event_time', from.toISOString()).lt('event_time', until.toISOString())
+            .order('event_time').limit(1000),
+        (async () => {
+            const rows = [];
+            for (let at = 0; at < 30000; at += 1000) {
+                const { data, error } = await supabaseClient.from('meta_ad_daily')
+                    .select('date, ad_id, ad_name, adset_id, adset_name, campaign_id, spend, leads')
+                    .eq('client_name', client.name).gte('date', adFactsYmd(from)).lte('date', adFactsYmd(e))
+                    .order('date').order('ad_id').range(at, at + 999);
+                if (error) return { data: null, error };
+                rows.push(...(data || []));
+                if (!data || data.length < 1000) break;
+            }
+            return { data: rows, error: null };
+        })(),
+    ]);
+    if (actRes.error || adRes.error) throw (actRes.error || adRes.error);
+    return { acts: actRes.data || [], adRows: adRes.data || [] };
+}
+
+function adPanelHtml(model) {
+    const { changes, ads, total, adRows, target, clamped, startYmd, endYmd } = model;
+    const lastDataDay = adRows.reduce((m, r) => (r.date > m ? r.date : m), '');
+    const money = n => adFactsMoney(n);
+    const shownC = adPanelExpanded.changes ? changes : changes.slice(0, AD_PANEL_SHOW_CHANGES);
+    const shownA = adPanelExpanded.ads ? ads : ads.slice(0, AD_PANEL_SHOW_ADS);
+    const note = clamped ? `<p class="text-xs" style="color:var(--t3); margin-top:8px;">Showing the last ${AD_PANEL_MAX_DAYS} days.</p>` : '';
+    const moreBtn = (which, count, limit) => count > limit
+        ? `<button type="button" onclick="adPanelToggle('${which}')" class="text-xs" style="margin-top:8px; background:none; border:none; color:var(--gold); cursor:pointer; padding:0; text-align:left;">${adPanelExpanded[which] ? 'Show fewer' : 'Show all ' + count}</button>` : '';
+
+    const changeRows = shownC.map(a => {
+        const who = a.actor_is_meta ? "Meta's system" : (a.actor_name || 'Someone');
+        const [label, color] = AD_PANEL_CATEGORY[a.category] || ['Change', '--t2'];
+        let effect = adChangeEffect(a, adRows, lastDataDay);
+        if (effect === 'no ad results to compare yet') effect = '';
+        const text = describeAdChange(a, who);
+        return `<div style="display:grid; grid-template-columns:54px minmax(0,1fr); gap:12px; padding:12px 0; border-top:1px solid var(--line);">
+            <div class="text-xs ge-num" style="color:var(--t3); padding-top:2px;">${escapeAttr(adFactsShortDate(adFactsDenverDay(a.event_time)))}</div>
+            <div style="min-width:0;">
+                <div style="font-size:13px; color:var(--t1); line-height:1.45;"><span class="ge-label" style="color:var(${color}); margin-right:8px;">${label}</span>${escapeAttr(text)}</div>
+                ${effect ? `<div class="text-xs" style="margin-top:3px; color:var(--t3); line-height:1.45;">${escapeAttr(effect)}</div>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+
+    const adRowsHtml = shownA.map(t => {
+        const over = !!target && (t.cpl !== null ? t.cpl >= target : t.spend >= target);
+        return `<tr style="border-top:1px solid var(--line);">
+            <td class="py-2.5 pr-3" style="min-width:0; max-width:210px;"><div class="truncate" style="font-size:13px; color:var(--t1);" title="${escapeAttr(stripSlashEscapes(t.name || ''))}">${escapeAttr(stripSlashEscapes(t.name || 'unnamed'))}</div>
+                <div class="truncate text-xs" style="color:var(--t3);">${escapeAttr(stripSlashEscapes(t.adset || ''))}</div></td>
+            <td class="py-2.5 pr-3" style="width:120px;"><div class="text-xs ge-num" style="color:var(--t2);">${money(t.spend)} · ${Math.round(t.share * 100)}%</div>
+                <div style="height:4px; border-radius:2px; background:var(--inset); margin-top:4px;"><div style="height:100%; width:${Math.max(2, Math.round(t.share * 100))}%; background:var(--goldSolid); border-radius:2px;"></div></div></td>
+            <td class="py-2.5 pr-3 text-right ge-num" style="color:var(--pos);">${t.leads}</td>
+            <td class="py-2.5 text-right ge-num" style="color:var(${over ? '--neg' : '--t2'});">${t.cpl !== null ? money(t.cpl) : '—'}</td>
+        </tr>`;
+    }).join('');
+
+    return `<div class="glass p-6 flex flex-col">
+            <div class="flex items-baseline justify-between"><h3 class="ge-title" style="font-size:18px;">activity.</h3>
+                <span class="text-xs" style="color:var(--t3);">${changes.length} change${changes.length === 1 ? '' : 's'} · ${escapeAttr(adFactsShortDate(startYmd))} – ${escapeAttr(adFactsShortDate(endYmd))}</span></div>
+            <p class="text-xs" style="margin-top:5px; color:var(--t2);">From Meta's change history. Before and after compares the ads each change reaches, 7 days either side.</p>
+            <div style="margin-top:10px;">${changeRows || '<p class="text-xs italic py-4" style="color:var(--t3);">No changes in Meta\'s history for this period.</p>'}</div>${moreBtn('changes', changes.length, AD_PANEL_SHOW_CHANGES)}${note}
+        </div>
+        <div class="glass p-6 flex flex-col">
+            <div class="flex items-baseline justify-between"><h3 class="ge-title" style="font-size:18px;">ads.</h3>
+                <span class="text-xs ge-num" style="color:var(--t3);">${money(total)} across ${ads.length} ad${ads.length === 1 ? '' : 's'}</span></div>
+            <p class="text-xs" style="margin-top:5px; color:var(--t2);">Share of spend and Meta's own lead count${target ? `. CPL in red is at or over the ${money(target)} target.` : '. Set a target CPL in Edit Client to flag ads.'}</p>
+            <div class="overflow-x-auto" style="margin-top:10px;"><table class="w-full text-left text-sm">
+                <thead><tr><th class="ge-label pb-2 font-normal">Ad</th><th class="ge-label pb-2 font-normal">Spend · share</th><th class="ge-label pb-2 font-normal text-right">Leads</th><th class="ge-label pb-2 font-normal text-right">CPL</th></tr></thead>
+                <tbody>${adRowsHtml || '<tr><td colspan="4" class="py-4 text-xs italic" style="color:var(--t3);">No ad spend in this period.</td></tr>'}</tbody></table></div>${moreBtn('ads', ads.length, AD_PANEL_SHOW_ADS)}
+        </div>`;
+}
+
+window.adPanelToggle = function (which) {
+    adPanelExpanded[which] = !adPanelExpanded[which];
+    const el = document.getElementById('ad-activity-panel');
+    if (el && adPanelLast) el.innerHTML = adPanelHtml(adPanelLast);
+};
+
+async function renderAdActivityPanel(s, e) {
+    const el = document.getElementById('ad-activity-panel');
+    if (!el) return;
+    const token = ++adPanelToken;
+    const hide = () => { el.classList.add('hidden'); el.innerHTML = ''; adPanelLast = null; };
+    if (currentUserRole !== 'admin' || cSelectedAccount === 'ALL') return hide();
+    const client = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+    if (!client || !normalizeAccountId(client.ad_account_id)) return hide();
+    try {
+        let start = new Date(s), clamped = false;
+        const floor = new Date(e); floor.setDate(floor.getDate() - AD_PANEL_MAX_DAYS);
+        if (start < floor) { start = floor; clamped = true; }
+        start.setHours(0, 0, 0, 0);
+        const from = new Date(start); from.setDate(from.getDate() - AD_FACTS_WINDOW_DAYS);
+        const { acts, adRows } = await loadAdPanelData(client, from, e);
+        if (token !== adPanelToken) return;   // a newer render superseded this one
+        const startYmd = adFactsYmd(start), endYmd = adFactsYmd(e);
+        const { ads, total } = adPanelAds(adRows, startYmd, endYmd);
+        const changes = adPanelChanges(acts, startYmd, endYmd);
+        // Nothing synced for this client (not connected yet): no panel rather than an empty one
+        if (!acts.length && !adRows.length) return hide();
+        const target = client.target_cpl ? parseFloat(client.target_cpl) : null;
+        adPanelExpanded = { changes: false, ads: false };
+        adPanelLast = { changes, ads, total, adRows, target, clamped, startYmd, endYmd };
+        el.innerHTML = adPanelHtml(adPanelLast);
+        el.classList.remove('hidden');
+    } catch (err) {
+        if (token === adPanelToken) { console.warn('Activity panel skipped:', err?.message || err); hide(); }
+    }
+}
+
 // Same figures the client's own Organic Search tab shows (seo_client_overview, seo_keyword_summary,
 // seo_almost_page_one, seo_changelog), so the report and the tab can never disagree. Everything is
 // computed here and handed to the model as text to quote: it never recalculates, the same rule the
@@ -8311,17 +9299,159 @@ async function buildChatSeoBriefing(clientName) {
      frame.src = 'https://video-tech.github.io/goldeneye-dashboard/snippets/3sixty-deck-estimator.html?v=' + Date.now();
  }
 
+ // ---- Create a QuickBooks estimate from the deck (supabase/functions/deck-estimate) ----
+ // The calculator posts {deckEstimate} on every render (postEstimateToParent, on only in this
+ // portal copy); the panel under it (#cp-deckcalc-qb) sends that plus the customer to the
+ // deck-estimate function, which checks access, stores the row and calls the client's Make
+ // scenario. The panel stays hidden until that function says this client's QuickBooks is
+ // connected, so the tab looks exactly as before for everyone else.
+ const DECK_ESTIMATE_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/deck-estimate";
+ let deckCalcEstimate = null;   // the latest deck the calculator reported
+ let deckQbBusy = false;
+
  // The estimator posts {iframeHeight} on every render (notifyHeight in the snippet). Without
  // this the frame stayed at body.html's fixed 1400px with scrolling off, so the single-column
  // calculator (~3000px) was cut off at the bottom. Only our own frame's messages are honoured,
- // and the height is bounds-checked since the payload comes from another document.
+ // and everything in them is checked, since the payload comes from another document.
  window.addEventListener('message', (e) => {
      const frame = document.getElementById('cp-deckcalc-frame');
      if (!frame || e.source !== frame.contentWindow) return;
-     const h = Number(e.data && e.data.iframeHeight);
+     const d = e.data || {};
+     if (d.deckEstimate && typeof d.deckEstimate === 'object' && Array.isArray(d.deckEstimate.line_items)) {
+         deckCalcEstimate = d.deckEstimate;
+         deckQbRenderDeck();
+         return;
+     }
+     const h = Number(d.iframeHeight);
      if (!Number.isFinite(h) || h < 200 || h > 20000) return;
      frame.style.height = Math.ceil(h) + 'px';
  });
+
+ // Unlike callMakeRelay this never throws on a refusal: a 502 still carries the stored estimate
+ // and its status ("unconfirmed" means check QuickBooks before retrying), which the rep needs.
+ async function callDeckEstimate(body) {
+     const { data: { session } } = await supabaseClient.auth.getSession();
+     if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+     const res = await fetch(DECK_ESTIMATE_FN, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+         body: JSON.stringify(body)
+     });
+     const data = await res.json().catch(() => ({}));
+     return { ok: res.ok, status: res.status, data };
+ }
+
+ // Shows the panel only when the function answers ready for THIS client. Anything else (not
+ // connected yet, not deployed, no access, offline) leaves it hidden rather than half-working.
+ async function deckQbRefresh() {
+     const panel = document.getElementById('cp-deckcalc-qb');
+     if (!panel) return;
+     const client = currentActiveClient;
+     panel.classList.add('hidden');
+     try {
+         const r = await callDeckEstimate({ mode: 'status', client });
+         if (client !== currentActiveClient) return;   // switched clients while waiting
+         if (!(r.ok && r.data.ready)) return;
+         panel.classList.remove('hidden');
+         deckQbRenderDeck();
+         deckQbLoadHistory();
+     } catch (err) {
+         console.warn('deck-estimate status:', err.message);
+     }
+ }
+
+ function deckQbRenderDeck() {
+     const el = document.getElementById('cp-deckcalc-qb-deck');
+     const btn = document.getElementById('cp-qb-create');
+     if (!el || !btn) return;
+     const e = deckCalcEstimate;
+     if (!e || !e.line_items.length) {
+         el.textContent = 'Waiting for the calculator…';
+         btn.disabled = true;
+         return;
+     }
+     const money = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-US');
+     el.textContent = `${e.total_sqft} sq ft · ${e.material} · ${e.line_items.length} lines · ${money(e.price_high)}`;
+     btn.disabled = deckQbBusy;
+ }
+
+ async function deckQbCreate() {
+     const msg = document.getElementById('cp-qb-msg');
+     const btn = document.getElementById('cp-qb-create');
+     const val = id => (document.getElementById(id)?.value || '').trim();
+     const show = (text, color) => { msg.textContent = text; msg.style.color = color; msg.classList.remove('hidden'); };
+     const e = deckCalcEstimate;
+     if (!e || deckQbBusy) return;
+
+     const customer = {
+         first_name: val('cp-qb-first'), last_name: val('cp-qb-last'), email: val('cp-qb-email'),
+         phone: val('cp-qb-phone'), address: val('cp-qb-address'), city: val('cp-qb-city'), postal_code: val('cp-qb-zip')
+     };
+     if (!customer.first_name || !customer.last_name || !customer.email) {
+         return show('First name, last name and email are required.', 'var(--neg)');
+     }
+
+     const client = currentActiveClient;
+     deckQbBusy = true;
+     btn.disabled = true;
+     btn.textContent = 'Creating…';
+     show('Sending to QuickBooks…', 'var(--t2)');
+     try {
+         const r = await callDeckEstimate({
+             mode: 'create', client,
+             estimate: {
+                 customer, line_items: e.line_items, total: e.price_high, price_low: e.price_low, notes: e.notes || null,
+                 summary: { total_sqft: e.total_sqft, deck_levels: e.deck_levels, material: e.material, rail_type: e.rail_type,
+                            rail_lf: e.rail_lf, steps: e.steps, addons: e.addons }
+             }
+         });
+         const est = r.data.estimate;
+         if (r.data.duplicate) {
+             show(`This estimate was already created a moment ago${est?.qb_doc_number ? ` (#${est.qb_doc_number})` : ''}. Nothing new was sent.`, 'var(--warn)');
+         } else if (r.ok && est?.status === 'created') {
+             show(`Created estimate #${est.qb_doc_number || est.qb_estimate_id} in QuickBooks for ${est.customer_name}.`, 'var(--pos)');
+             ['cp-qb-first', 'cp-qb-last', 'cp-qb-email', 'cp-qb-phone', 'cp-qb-address', 'cp-qb-city', 'cp-qb-zip']
+                 .forEach(id => { const f = document.getElementById(id); if (f) f.value = ''; });
+         } else {
+             show(r.data.error || `Something went wrong (${r.status}).`, est?.status === 'unconfirmed' ? 'var(--warn)' : 'var(--neg)');
+         }
+     } catch (err) {
+         // The request may have reached the server before the connection dropped.
+         show(`${err.message} Check QuickBooks before trying again.`, 'var(--neg)');
+     } finally {
+         deckQbBusy = false;
+         btn.textContent = 'Create QuickBooks estimate';
+         deckQbRenderDeck();
+         deckQbLoadHistory();
+     }
+ }
+
+ // Read straight from deck_estimates: RLS (client_row_visible) scopes it to this client.
+ async function deckQbLoadHistory() {
+     const wrap = document.getElementById('cp-qb-history-wrap');
+     const box = document.getElementById('cp-qb-history');
+     if (!wrap || !box) return;
+     const client = currentActiveClient;
+     const { data, error } = await supabaseClient.from('deck_estimates')
+         .select('created_at, created_by, customer_name, total, status, qb_doc_number, error')
+         .eq('client_name', client).order('created_at', { ascending: false }).limit(10);
+     if (client !== currentActiveClient) return;
+     if (error || !data || !data.length) { wrap.classList.add('hidden'); return; }
+     const label = { created: 'Created', failed: 'Failed', unconfirmed: 'Check QuickBooks', pending: 'Sending' };
+     const color = { created: 'var(--pos)', failed: 'var(--neg)', unconfirmed: 'var(--warn)', pending: 'var(--t2)' };
+     box.innerHTML = data.map(r => {
+         const when = new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+         const total = '$' + Math.round(Number(r.total) || 0).toLocaleString('en-US');
+         const status = (label[r.status] || r.status) + (r.qb_doc_number ? ` #${r.qb_doc_number}` : '');
+         return `<div style="display:flex; gap:12px; align-items:baseline; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
+             <span style="color:var(--t3); width:52px; flex-shrink:0;">${escapeAttr(when)}</span>
+             <span style="color:var(--t1); flex:1;" class="truncate" title="${escapeAttr(r.created_by)}">${escapeAttr(r.customer_name)}</span>
+             <span style="color:var(--t1); font-variant-numeric:tabular-nums;">${escapeAttr(total)}</span>
+             <span style="color:${color[r.status] || 'var(--t2)'}; width:150px; text-align:right; flex-shrink:0;" title="${escapeAttr(r.error || '')}">${escapeAttr(status)}</span>
+         </div>`;
+     }).join('');
+     wrap.classList.remove('hidden');
+ }
 
  // Position buckets, with the validated ordinal ramp for each theme
  function cpSeoRamp() {
@@ -10610,11 +11740,10 @@ window.initStageTemplateEditor = function() {
     const picker = document.getElementById('tpl-stage-picker');
     if (!picker) return;
     if (!picker.options.length) {
-        // Onboarding lives in its own editor — it's the only stage the client takes part
-        // in, so its list mixes their steps with ours and can't be edited here.
+        // The client's own onboarding steps live in their own editor. "Onboarding" here is OUR setup
+        // steps (type Setup step), raised once the client has finished theirs.
         picker.innerHTML = lifecycleStages
-            .filter(s => s !== 'Onboarding')
-            .map(s => `<option value="${s}">${s}</option>`).join('');
+            .map(s => `<option value="${s}">${s === 'Onboarding' ? 'Onboarding (our setup steps)' : s}</option>`).join('');
     }
     renderStageTemplates();
 };
@@ -10640,7 +11769,7 @@ window.addStageTemplateRow = function(tpl) {
     const container = document.getElementById('tpl-stage-tasks-container');
     if (!container) return;
 
-    const types = ['Checklist', 'Milestone', 'One-off', 'Recurring'];
+    const types = ['Checklist', 'Setup step', 'Milestone', 'One-off', 'Recurring'];
     const row = document.createElement('div');
     row.className = 'tpl-stage-row bg-black/20 border border-white/5 rounded-xl p-2 space-y-1';
     row.dataset.tplId = tpl?.id || '';
@@ -11129,6 +12258,18 @@ async function generateStageTasks(clientName, stage, opts = {}) {
             }))
         : stageItems;
 
+    // Our setup steps for Onboarding live in stage_templates (stage 'Onboarding') and are raised with the
+    // agency tasks, for the services being onboarded.
+    if (stage === 'Onboarding') {
+        const { data: stepRows, error: stepErr } = await supabaseClient.rpc('stage_templates_for_client', { p_client: clientName, p_stage: 'Onboarding' });
+        let steps = stepErr ? [] : (stepRows || []).filter(t => t.task_type === SETUP_STEP_TYPE);
+        if (opts.onlyServices) {
+            const want = new Set(opts.onlyServices);
+            steps = steps.filter(t => (t.service_keys || []).some(k => want.has(k)));
+        }
+        templates.push(...steps);
+    }
+
     if (!templates.length) return 0;
 
     // Matched on the normalized name rather than an exact one: everything else in the
@@ -11143,6 +12284,10 @@ async function generateStageTasks(clientName, stage, opts = {}) {
         .map(t => String(t.title || '').trim().toLowerCase()));
     const toCreate = templates.filter(t => !existing.has(String(t.task_title || '').trim().toLowerCase()));
     if (!toCreate.length) return 0;
+
+    // A group's own task carries the group's name
+    const setupGroupTitles = new Set(templates.filter(t => t.task_type === SETUP_STEP_TYPE && t.checklist_group)
+        .map(t => String(t.checklist_group).trim().toLowerCase()));
 
     const now = new Date().toISOString();
     const dueFrom = days => {
@@ -11163,6 +12308,8 @@ async function generateStageTasks(clientName, stage, opts = {}) {
             status: 'Not Started',
             assignee: t.assignee || null,
             checklist_group: t.checklist_group || null,
+            // Our steps, and the group tasks that stand for them, are internal: never shown to the client
+            client_visible: t.task_type !== SETUP_STEP_TYPE && !setupGroupTitles.has(String(t.task_title || '').trim().toLowerCase()),
             p, u, e,
             score: Math.round(((p * 0.4) + (u * 0.4) + ((6 - e) * 0.2)) * 20),
             due: dueFrom(t.due_days),
@@ -11222,6 +12369,195 @@ async function reconcileOnboardingHandoffTasks() {
 // Ticks off our own tasks whose "done when" check now passes (supabase/sql/auto_check_reconcile.sql).
 // The decision is made in that SQL function, which the daily schedule also runs; this just asks
 // it on load and mirrors what it closed into the board.
+// ============================================================================
+// The setup checklist: "Our checklist" on a client's Health tab (supabase/sql/setup_checklist.sql)
+// ============================================================================
+// What we do after a client finishes onboarding is a list of steps. Each step is a task of type
+// 'Setup step', hidden from the board, the feeds and the portal, and shown only here. They roll up
+// into one ordinary task per group ("Set up GHL"), which is what the board shows, and which ticks
+// itself when its last step is done.
+const SETUP_STEP_TYPE = 'Setup step';
+
+async function loadSetupSteps() {
+    if (currentUserRole !== 'admin') { globalSetupSteps = []; return; }
+    try {
+        const rows = [];
+        for (let at = 0; at < 20000; at += 1000) {
+            const { data, error } = await supabaseClient.from('tasks').select('*')
+                .eq('type', SETUP_STEP_TYPE).is('archived_at', null).order('id').range(at, at + 999);
+            if (error) throw error;
+            rows.push(...(data || []));
+            if (!data || data.length < 1000) break;
+        }
+        globalSetupSteps = rows;
+    } catch (err) {
+        console.warn('Setup steps not loaded:', err?.message || err);
+        globalSetupSteps = [];
+    }
+}
+
+// "A2P — Buy a local number" is the section "A2P" and the step "Buy a local number"
+function setupStepParts(title) {
+    const t = String(title || '');
+    const i = t.indexOf(' — ');
+    return i > 0 ? { label: t.slice(0, i), name: t.slice(i + 3) } : { label: '', name: t };
+}
+
+// A client's groups in the order the work happens: by stage, then by the first step created
+function setupGroupsFor(clientName) {
+    const key = normalize(clientName || '');
+    const mine = (globalSetupSteps || []).filter(t => normalize(t.client || '') === key && t.checklist_group);
+    const by = new Map();
+    for (const t of mine) {
+        const k = `${t.stage}|${String(t.checklist_group).toLowerCase()}`;
+        if (!by.has(k)) by.set(k, { group: t.checklist_group, stage: t.stage, steps: [] });
+        by.get(k).steps.push(t);
+    }
+    const stageIdx = s => { const i = lifecycleStages.indexOf(s); return i < 0 ? 99 : i; };
+    const groups = [...by.values()];
+    groups.forEach(g => {
+        g.steps.sort((a, b) => Number(a.id) - Number(b.id));
+        g.total = g.steps.length;
+        g.done = g.steps.filter(s => s.status === 'Complete').length;
+        g.summary = (globalTasksData || []).find(t => normalize(t.client || '') === key && t.stage === g.stage
+            && String(t.title || '').trim().toLowerCase() === String(g.group).trim().toLowerCase()) || null;
+    });
+    groups.sort((a, b) => stageIdx(a.stage) - stageIdx(b.stage) || Number(a.steps[0].id) - Number(b.steps[0].id));
+    return groups;
+}
+
+// A group's own task follows its steps: Complete when the last one is done, In Progress once one is.
+// Only ever forward, like the automatic checks, so a mis-click on a step never reopens a finished group.
+async function syncSetupSummaries() {
+    if (currentUserRole !== 'admin') return 0;
+    let changed = 0;
+    for (const c of globalClientsData) {
+        for (const g of setupGroupsFor(c.name)) {
+            const s = g.summary;
+            if (!s) continue;
+            let next = null;
+            if (g.done === g.total && s.status !== 'Complete') next = 'Complete';
+            else if (g.done > 0 && s.status === 'Not Started') next = 'In Progress';
+            if (!next) continue;
+            const { data, error } = await supabaseClient.from('tasks')
+                .update({ status: next, updated_at: new Date().toISOString() }).eq('id', s.id).select('id');
+            if (error || !data?.length) { console.warn(`[LIFECYCLE ENGINE] Could not update "${g.group}" for ${c.name}:`, error?.message || 'refused'); continue; }
+            s.status = next;
+            changed++;
+        }
+    }
+    return changed;
+}
+
+let setupChecklistClient = null;
+
+window.openSetupChecklist = function () {
+    const name = cSelectedAccount;
+    if (!name || name === 'ALL' || currentUserRole !== 'admin') return;
+    setupChecklistClient = name;
+    const modal = document.getElementById('setup-checklist-modal');
+    if (!modal) return;
+    // Modals can sit inside the hidden portal container, so they are lifted out, like the others
+    if (modal.parentElement.id !== 'theme-wrapper') document.getElementById('theme-wrapper').appendChild(modal);
+    renderSetupChecklist();
+    modal.style.display = 'flex';
+};
+
+window.closeSetupChecklist = function () {
+    const modal = document.getElementById('setup-checklist-modal');
+    if (modal) modal.style.display = 'none';
+    setupChecklistClient = null;
+};
+
+function setupStepAutoCheck(step) {
+    const tpl = (globalStageTemplates || []).find(t => t.stage === step.stage
+        && String(t.task_title || '').trim().toLowerCase() === String(step.title || '').trim().toLowerCase());
+    return tpl?.auto_check || null;
+}
+
+function setupChecklistHtml(clientName) {
+    const groups = setupGroupsFor(clientName);
+    const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+    const current = row?.current_stage || 'Onboarding';
+    if (!groups.length) {
+        return '<p class="text-sm" style="color:var(--t2); line-height:1.6;">No checklist for this client yet. It is created when their onboarding is finished, and when they enter Campaign Building. Clients who finished earlier do not have one.</p>';
+    }
+    const today = new Date().toISOString().split('T')[0];
+    return groups.map(g => {
+        let lastLabel = null;
+        const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+        const steps = g.steps.map(s => {
+            const { label, name } = setupStepParts(s.title);
+            const head = label && label !== lastLabel ? `<div class="ge-label" style="margin:14px 0 4px; color:var(--gold);">${escapeAttr(label)}</div>` : '';
+            lastLabel = label || lastLabel;
+            const done = s.status === 'Complete';
+            const late = !done && s.due && s.due < today;
+            const auto = setupStepAutoCheck(s);
+            const meta = [s.assignee ? escapeAttr(s.assignee) : '', s.due ? (late ? `<span style="color:var(--neg);">late, due ${escapeAttr(s.due)}</span>` : `due ${escapeAttr(s.due)}`) : ''].filter(Boolean).join(' &middot; ');
+            return `${head}<div class="setup-step" style="display:flex; gap:12px; align-items:flex-start; padding:7px 0; border-top:1px solid var(--line);">
+                <button type="button" role="checkbox" aria-checked="${done}" aria-label="${escapeAttr(name)}" onclick="toggleSetupStep('${s.id}')"
+                    style="flex:none; width:18px; height:18px; margin-top:2px; border-radius:2px; border:1.5px solid ${done ? 'var(--pos)' : 'var(--line)'}; background:${done ? 'var(--pos)' : 'transparent'}; color:var(--bg, #0b0907); cursor:pointer; font-size:11px; line-height:1;">${done ? '&#10003;' : ''}</button>
+                <div style="min-width:0; flex:1;">
+                    <div style="font-size:13.5px; color:${done ? 'var(--t3)' : 'var(--t1)'}; ${done ? 'text-decoration:line-through;' : ''}">${escapeAttr(stripSlashEscapes(name))}${auto ? ' <i class="fa-solid fa-bolt" style="color:var(--pos); font-size:10px;" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}</div>
+                    ${meta ? `<div class="text-xs" style="margin-top:2px; color:var(--t3);">${meta}</div>` : ''}
+                    ${s.notes ? `<details style="margin-top:3px;"><summary class="text-xs" style="color:var(--t3); cursor:pointer;">Details</summary><p class="text-xs" style="margin-top:4px; color:var(--t2); line-height:1.55; white-space:pre-wrap;">${escapeAttr(stripSlashEscapes(s.notes))}</p></details>` : ''}
+                </div>
+                <button type="button" onclick="openSetupStepTask('${s.id}')" class="text-xs" style="flex:none; background:none; border:none; color:var(--t3); cursor:pointer;" title="Open as a task: assign someone, change the due date or add notes">Edit</button>
+            </div>`;
+        }).join('');
+        const here = g.stage === current ? '<span class="ge-label" style="margin-left:10px; color:var(--gold);">current stage</span>' : `<span class="ge-label" style="margin-left:10px; color:var(--t3);">${escapeAttr(g.stage)}</span>`;
+        return `<section style="margin-bottom:22px;">
+            <div class="flex items-baseline justify-between gap-3"><h3 class="ge-title" style="font-size:16px;">${escapeAttr(g.group)}${here}</h3><span class="text-xs ge-num" style="color:var(--t2);">${g.done} of ${g.total}</span></div>
+            <div style="height:5px; border-radius:3px; background:var(--inset); margin:8px 0 4px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--goldSolid);"></div></div>
+            ${steps}
+        </section>`;
+    }).join('');
+}
+
+function renderSetupChecklist() {
+    const body = document.getElementById('setup-checklist-body');
+    const title = document.getElementById('setup-checklist-client');
+    if (!body || !setupChecklistClient) return;
+    if (title) title.innerText = setupChecklistClient;
+    const scroll = body.scrollTop;
+    body.innerHTML = setupChecklistHtml(setupChecklistClient);
+    body.scrollTop = scroll;
+}
+
+function refreshSetupViews() {
+    if (setupChecklistClient) renderSetupChecklist();
+    if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+}
+
+window.toggleSetupStep = async function (id) {
+    if (currentUserRole !== 'admin') return;
+    const step = (globalSetupSteps || []).find(t => String(t.id) === String(id));
+    if (!step) return;
+    const next = step.status === 'Complete' ? 'Not Started' : 'Complete';
+    // Ticked on screen first; put back if the database refuses (row-level security refuses with no error)
+    const was = step.status;
+    step.status = next;
+    refreshSetupViews();
+    const { data, error } = await supabaseClient.from('tasks')
+        .update({ status: next, updated_at: new Date().toISOString() }).eq('id', step.id).select('id');
+    if (error || !data?.length) {
+        step.status = was;
+        refreshSetupViews();
+        return alert('Could not save that step: ' + (error?.message || 'the database refused the change'));
+    }
+    await syncSetupSummaries();
+    // The last step of a group can be what lets a client move on
+    const moved = await runLifecycleCatchUp();
+    refreshSetupViews();
+    if (moved && typeof renderStageProgress === 'function') renderStageProgress();
+};
+
+// A step is a task underneath, so the ordinary task drawer edits it (owner, due date, notes)
+window.openSetupStepTask = function (id) {
+    window.closeSetupChecklist();
+    openTaskDrawer(isNaN(Number(id)) ? id : Number(id));
+};
+
 async function runAutoChecks() {
     if (currentUserRole !== 'admin') return 0;
     const { data, error } = await supabaseClient.rpc('reconcile_auto_checks');
@@ -11231,7 +12567,8 @@ async function runAutoChecks() {
         return 0;
     }
     (data || []).forEach(r => {
-        const task = globalTasksData.find(t => String(t.id) === String(r.task_id));
+        const task = globalTasksData.find(t => String(t.id) === String(r.task_id))
+            || globalSetupSteps.find(t => String(t.id) === String(r.task_id));
         if (task) task.status = 'Complete';
         console.log(`[LIFECYCLE ENGINE] ${r.client}: "${r.title}" ticked off automatically (${r.check_key}).`);
     });
@@ -11247,7 +12584,7 @@ async function reconcileAddonOnboarding(c) {
     const finished = a.services.filter(s => s.service_key !== 'base' && s.status === 'onboarding' && s.complete);
     for (const s of finished) {
         const title = addonHandoffTitle(s.service_key);
-        const exists = globalTasksData.some(t => normalize(t.client || '') === normalize(c.name)
+        const exists = tasksIncludingArchived().some(t => normalize(t.client || '') === normalize(c.name)
             && String(t.title || '').trim().toLowerCase() === title.toLowerCase());
         if (!exists) {
             const row = { ...buildOnboardingHandoffTask(c.name), title,
@@ -11264,7 +12601,7 @@ async function reconcileAddonOnboarding(c) {
         console.log(`[LIFECYCLE ENGINE] ${c.name} finished ${s.service_key} onboarding — caught up on load.`);
     }
     // Only clients with an add-on handoff task get anything; dedupes, so safe every load
-    if (globalTasksData.some(t => normalize(t.client || '') === normalize(c.name) && / onboarding complete — ready to start$/i.test(String(t.title || '').trim()))) {
+    if (tasksIncludingArchived().some(t => normalize(t.client || '') === normalize(c.name) && / onboarding complete — ready to start$/i.test(String(t.title || '').trim()))) {
         await raiseOnboardingAgencyTasks(c.name, c.current_stage);
     }
 }
@@ -11288,7 +12625,7 @@ async function autoAdvanceCompletedOnboarding() {
         if ((c.current_stage || 'Onboarding') !== 'Onboarding') return false;
         if ((c.status || 'active') !== 'active') return false;
 
-        const obTasks = globalTasksData.filter(t =>
+        const obTasks = globalTasksData.concat(globalSetupSteps).filter(t =>
             normalize(t.client || '') === normalize(c.name) && t.stage === 'Onboarding');
 
         return obTasks.length > 0 && obTasks.every(t => t.status === 'Complete');
@@ -11367,7 +12704,7 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-email').value        = c.client_email || '';
     renderClientServicePicker('edit-client-services', c.name);
     document.getElementById('edit-client-website-status').value = c.website_status || '';
-    renderContactRows(c.name);
+    renderEditClientPeopleSummary(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
     document.getElementById('edit-client-business-id').value  = c.business_id || '';
     document.getElementById('edit-client-target-cpl').value   = c.target_cpl ?? '';
@@ -11595,74 +12932,905 @@ window.testSeRankingConnection = async function() {
     }
 };
 
-// ---- Check-in contacts editor ----
-// One row per person who should receive the weekly text. Stored in client_contacts
-// rather than on the client, since several reps can report for one business.
-window.renderContactRows = function(clientName) {
-    const list = document.getElementById('edit-client-contacts-list');
-    if (!list) return;
-    const want = normalize(clientName);
-    const rows = globalContactsData.filter(c => normalize(c.client_name) === want);
-    list.innerHTML = '';
-    if (rows.length === 0) { addContactRow(); return; }
-    rows.forEach(r => addContactRow(r));
+// ---- Roster page ----
+// Every client in one filterable table, and a profile panel per client with everyone we
+// might contact there (owner, reps, office, website person…), their business details and
+// our private notes. Admin only: switchAppPage() sends anyone else to the overview.
+//
+// People live in client_contacts, the same table the weekly check-in reminder reads, with a
+// checkin_texts switch per person so a website person can be on file without being texted
+// (client_directory.sql). Business phone, website, address and notes live in client_profiles,
+// which is admin-only by RLS: the clients row is readable by clients, so notes can't go there.
+
+const ROSTER_ROLES = [
+    { key: 'owner',     label: 'Owner' },
+    { key: 'sales',     label: 'Sales' },
+    { key: 'office',    label: 'Office' },
+    { key: 'website',   label: 'Website' },
+    { key: 'marketing', label: 'Marketing' },
+    { key: 'other',     label: 'Other' },
+];
+const rosterRoleLabel = (key) => ROSTER_ROLES.find(r => r.key === key)?.label || 'Contact';
+const rosterRoleRank = (key) => { const i = ROSTER_ROLES.findIndex(r => r.key === key); return i === -1 ? ROSTER_ROLES.length : i; };
+
+let rosterState = { status: 'active', service: '', q: '', sort: 'retainer', dir: -1 };
+let rosterOpenClient = null;   // exact clients.name shown in the drawer
+let rosterEditing = null;      // 'people' | 'business' | null
+
+const rosterStatusOf = (c) => (c?.status || 'active');
+const rosterContactsFor = (name) => {
+    const want = normalize(name || '');
+    return globalContactsData.filter(c => normalize(c.client_name || '') === want);
 };
-
-window.addContactRow = function(contact) {
-    const list = document.getElementById('edit-client-contacts-list');
-    if (!list) return;
-    const row = document.createElement('div');
-    row.className = 'contact-row flex gap-2 items-start';
-    row.dataset.contactId = contact?.id || '';
-    row.innerHTML = `
-        <input type="text" class="glass-input !py-1.5 contact-name" placeholder="Name" value="${escapeAttr(stripSlashEscapes(contact?.contact_name))}">
-        <input type="text" class="glass-input !py-1.5 contact-phone" placeholder="(555) 010-9999" value="${escapeAttr(stripSlashEscapes(contact?.phone))}">
-        <input type="text" class="glass-input !py-1.5 !w-28 contact-title" placeholder="Role" value="${escapeAttr(stripSlashEscapes(contact?.title))}">
-        <button type="button" onclick="this.closest('.contact-row').remove()" class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
-            <i class="fa-solid fa-xmark"></i>
-        </button>`;
-    list.appendChild(row);
+const rosterProfileFor = (name) => globalClientProfiles.find(p => p.client_name === name) || null;
+const rosterServicesFor = (name) => {
+    const want = normalize(name || '');
+    return globalClientServices.filter(s => normalize(s.client_name || '') === want && s.status !== 'ended');
 };
+const rosterServiceName = (key) => globalServices.find(s => s.key === key)?.name || key;
+const rosterEsc = (v) => escapeAttr(stripSlashEscapes(v ?? ''));
+const rosterFmtPhone = (p) => {
+    const d = String(p || '').replace(/\D/g, '').slice(-10);
+    return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : String(p || '');
+};
+const rosterMoney = (n) => (n === null || n === undefined || n === '' || isNaN(parseFloat(n))) ? '—' : '$' + parseFloat(n).toLocaleString();
+const rosterDate = (d) => {
+    if (!d) return '—';
+    const t = new Date(String(d).length === 10 ? d + 'T12:00:00' : d);
+    return isNaN(t) ? String(d) : t.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+};
+// Only http(s) becomes a link; a bare domain gets https:// in front of it.
+const rosterWebHref = (url) => {
+    const u = String(url || '').trim();
+    if (!u || /\s/.test(u)) return null;
+    const full = /^https?:\/\//i.test(u) ? u : (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(u) ? 'https://' + u : null);
+    return full;
+};
+const ROSTER_STATUS_COLOR = { active: 'var(--pos)', paused: 'var(--warn)', archived: 'var(--t3)' };
 
-// Reconcile the edited list against what's stored: delete rows the admin removed,
-// upsert the rest. Keyed on phone, which is also what the inbound webhook matches on.
-async function saveClientContacts(clientName) {
-    const rows = [...document.querySelectorAll('#edit-client-contacts-list .contact-row')];
+// The person to name under a client in the table: their Owner contact, else the contact
+// name on the client record.
+function rosterPrimaryName(c) {
+    const owner = rosterContactsFor(c.name).find(p => p.role === 'owner');
+    return owner?.contact_name || c.contact_name || '';
+}
 
-    const entered = rows.map(r => ({
-        id: r.dataset.contactId || null,
-        contact_name: r.querySelector('.contact-name').value.trim() || null,
-        phone: normalizePhone(r.querySelector('.contact-phone').value),
-        title: r.querySelector('.contact-title').value.trim() || null
-    })).filter(c => c.phone);
+// Admins and VAs (member logins). VAs see only their assigned clients (fetchAllGlobalData already
+// scopes the data), and in a client's profile only the people and the check-ins: no billing,
+// notes, connections or editing people. Contacts are readable to them by RLS; client_profiles
+// (notes) is admin-only, so it never even loads for them.
+function rosterAllowed() { return currentUserRole === 'admin' || currentUserRole === 'member'; }
 
-    const phones = entered.map(c => c.phone);
-    const dupes = phones.filter((p, i) => phones.indexOf(p) !== i);
-    if (dupes.length) throw new Error(`The same number is listed twice: ${dupes[0]}`);
-
-    const want = normalize(clientName);
-    const existing = globalContactsData.filter(c => normalize(c.client_name) === want);
-
-    const keptIds = new Set(entered.map(c => c.id).filter(Boolean));
-    const removed = existing.filter(c => !keptIds.has(c.id));
-    if (removed.length) {
-        const { error } = await supabaseClient.from('client_contacts').delete().in('id', removed.map(c => c.id));
-        if (error) throw error;
+// ---- The logo ----
+// One click goes to the overview. Seven quick clicks (admins only) open the easter egg:
+// egg.js, fetched only then, asks for a code and runs a small first-person mission.
+// Best times go in egg_runs (supabase/sql/egg_runs.sql).
+let geLogoClicks = [];
+window.geLogoClick = function() {
+    const now = Date.now();
+    geLogoClicks = geLogoClicks.filter(t => now - t < 2500);
+    geLogoClicks.push(now);
+    if (geLogoClicks.length === 1) navTo('goldeneye');
+    if (geLogoClicks.length >= 7 && currentUserRole === 'admin') {
+        geLogoClicks = [];
+        openGeEgg();
     }
+};
 
-    if (entered.length) {
-        const payload = entered.map(c => ({
-            ...(c.id ? { id: c.id } : {}),
-            client_name: clientName,
-            contact_name: c.contact_name,
-            phone: c.phone,
-            title: c.title,
-            active: true
-        }));
-        const { error } = await supabaseClient.from('client_contacts').upsert(payload, { onConflict: 'phone' });
-        if (error) throw error;
+function geEggOptions() {
+    return {
+        playerEmail: clientEmail,
+        loadScores: () => supabaseClient.from('egg_runs')
+            .select('player_email, player_name, time_ms, kills, accuracy, created_at')
+            .order('time_ms', { ascending: true }).limit(300),
+        saveScore: (run) => supabaseClient.from('egg_runs').insert([{
+            ...run,
+            player_email: clientEmail,
+            player_name: (currentUserFullName || (currentUserName !== 'User' ? currentUserName : '') || String(clientEmail || '').split('@')[0]).trim().split(/\s+/)[0],
+        }]),
+    };
+}
+
+function openGeEgg() {
+    if (window.GEEgg) { window.GEEgg.start(geEggOptions()); return; }
+    const s = document.createElement('script');
+    s.src = `${GE_ASSET_BASE}/egg.js?v=${Date.now()}`;
+    s.onload = () => window.GEEgg && window.GEEgg.start(geEggOptions());
+    s.onerror = () => console.error('Golden Eye: could not load egg.js from ' + s.src);
+    document.body.appendChild(s);
+}
+
+// ---- Easter egg #2: type 5min ----
+// Four keys in a row, under a second apart, anywhere except inside a text box, and only for admins.
+// speedlead.js is fetched only then. Best scores go in speed_lead_runs (supabase/sql/speed_lead_runs.sql).
+const SL_SEQUENCE = '5min', SL_GAP_MS = 1000;
+let slKeys = [];
+
+function slTypingInBox(target) {
+    const el = target && target.nodeType === 1 ? target : null;
+    if (!el) return false;
+    const tag = String(el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable === true;
+}
+
+// True on the key that completes the sequence. Pure apart from the buffer, so it can be tested.
+function slKeyPressed(e, now) {
+    if (!e || e.ctrlKey || e.metaKey || e.altKey || e.repeat || typeof e.key !== 'string' || e.key.length !== 1) return false;
+    if (slTypingInBox(e.target)) { slKeys = []; return false; }
+    slKeys = slKeys.filter(k => now - k.t < SL_GAP_MS);
+    slKeys.push({ c: e.key.toLowerCase(), t: now });
+    if (slKeys.length > SL_SEQUENCE.length) slKeys.shift();
+    if (slKeys.map(k => k.c).join('') === SL_SEQUENCE) { slKeys = []; return true; }
+    return false;
+}
+
+function speedLeadOptions() {
+    return {
+        playerEmail: clientEmail,
+        loadScores: () => supabaseClient.from('speed_lead_runs')
+            .select('player_email, player_name, score, avg_reply_ms, created_at')
+            .order('score', { ascending: false }).limit(300),
+        saveScore: (run) => supabaseClient.from('speed_lead_runs').insert([{
+            ...run,
+            player_email: clientEmail,
+            player_name: (currentUserFullName || (currentUserName !== 'User' ? currentUserName : '') || String(clientEmail || '').split('@')[0]).trim().split(/\s+/)[0],
+        }]),
+    };
+}
+
+function openSpeedLead() {
+    if (window.GESpeedLead) { window.GESpeedLead.start(speedLeadOptions()); return; }
+    const s = document.createElement('script');
+    s.src = `${GE_ASSET_BASE}/speedlead.js?v=${Date.now()}`;
+    s.onload = () => window.GESpeedLead && window.GESpeedLead.start(speedLeadOptions());
+    s.onerror = () => console.error('Golden Eye: could not load speedlead.js from ' + s.src);
+    document.body.appendChild(s);
+}
+
+window.addEventListener('keydown', (e) => {
+    if (currentUserRole !== 'admin') return;
+    if (document.getElementById('ge-egg') || document.getElementById('ge-sl')) return;
+    if (slKeyPressed(e, Date.now())) openSpeedLead();
+});
+
+// The sidebar tab (and its phone icon) for admins and VAs, badged with how many clients still
+// owe last week's numbers
+function updateRosterNav() {
+    const ok = rosterAllowed();
+    ['nav-roster', 'm-nav-roster'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !ok));
+    const badge = document.getElementById('nav-badge-roster');
+    if (badge) {
+        const missing = ok ? (globalClientsData || []).filter(c => rosterCheckinStatus(c).state === 'missing').length : 0;
+        badge.innerText = missing ? String(missing) : '';
+        badge.title = missing ? `${missing} client${missing === 1 ? '' : 's'} still owe last week's numbers` : '';
     }
 }
+const rosterIsAdmin = () => currentUserRole === 'admin';
+
+// `admin` columns are hidden from VAs. Widths become the row grid, so header and rows match.
+const ROSTER_COLUMNS = [
+    { key: 'name',     label: 'Client',       w: 'minmax(0,1.6fr)' },
+    { key: 'status',   label: 'Status',       w: '92px' },
+    { key: null,       label: 'Services',     w: 'minmax(0,1.2fr)', admin: true },
+    { key: 'stage',    label: 'Stage',        w: '120px' },
+    { key: 'checkin',  label: 'Check-in',     w: '112px' },
+    { key: 'health',   label: 'Health',       w: '84px', right: true, admin: true },
+    { key: 'retainer', label: 'Retainer',     w: '96px', right: true, admin: true },
+    { key: 'payment',  label: 'Payment',      w: '84px', admin: true },
+    { key: 'end',      label: 'Contract end', w: '96px', admin: true },
+];
+const rosterColumns = () => ROSTER_COLUMNS.filter(c => !c.admin || rosterIsAdmin());
+const rosterGridStyle = () => `grid-template-columns:${rosterColumns().map(c => c.w).join(' ')};`;
+
+// This reporting week's check-in, the one VAs collect by text. "Expected" is the same rule the
+// old reminder texts used: active clients past Onboarding.
+function rosterCheckinStatus(c) {
+    const week = reportingWeekStart();
+    const rows = checkinsForClient(c.name).filter(r => r.week_start === week);
+    if (rows.length) {
+        const byStaff = rows.some(r => r.source === 'staff');
+        return { state: 'in', label: byStaff ? 'Logged' : 'Client sent', rank: 2 };
+    }
+    const expected = isActiveClient(c) && (c.current_stage || 'Onboarding') !== 'Onboarding';
+    return expected ? { state: 'missing', label: 'Missing', rank: 0 } : { state: 'na', label: '—', rank: 3 };
+}
+
+function rosterSortValue(c, key) {
+    switch (key) {
+        case 'checkin':  return rosterCheckinStatus(c).rank;
+        case 'name':     return String(c.name || '').toLowerCase();
+        case 'status':   return ['active', 'paused', 'archived'].indexOf(rosterStatusOf(c));
+        case 'stage':    return String(c.current_stage || '').toLowerCase();
+        case 'health':   return c.current_score || 0;
+        case 'retainer': return parseFloat(c.monthly_retainer || 0);
+        case 'payment':  return String(c.payment_status || '');
+        case 'end':      return c.contract_end_date || '9999-12-31';
+        default:         return 0;
+    }
+}
+
+window.rosterSetStatus = function(s) { rosterState.status = s; renderRoster(); };
+window.rosterSetService = function(s) { rosterState.service = s; renderRoster(); };
+window.rosterSetSearch = function(q) { rosterState.q = q; renderRoster(); };
+window.rosterSortBy = function(key) {
+    if (rosterState.sort === key) rosterState.dir *= -1;
+    else { rosterState.sort = key; rosterState.dir = (key === 'name' || key === 'stage' || key === 'end') ? 1 : -1; }
+    renderRoster();
+};
+
+window.renderRoster = function() {
+    const list = document.getElementById('roster-list');
+    if (!list) return;
+
+    const all = globalClientsData.slice();
+    const counts = { all: all.length, active: 0, paused: 0, archived: 0 };
+    all.forEach(c => { const s = rosterStatusOf(c); if (counts[s] !== undefined) counts[s]++; });
+
+    document.getElementById('roster-stat-active').innerText = counts.active;
+    document.getElementById('roster-stat-paused').innerText = counts.paused;
+    document.getElementById('roster-stat-archived').innerText = counts.archived;
+
+    document.getElementById('roster-status-filter').innerHTML = ['all', 'active', 'paused', 'archived'].map(s =>
+        `<button type="button" class="roster-seg${rosterState.status === s ? ' on' : ''}" onclick="rosterSetStatus('${s}')">
+            ${s === 'all' ? 'All' : s[0].toUpperCase() + s.slice(1)} <span class="ge-num" style="opacity:.7;">${counts[s]}</span>
+        </button>`).join('');
+
+    const svcSel = document.getElementById('roster-service-filter');
+    if (svcSel) {
+        svcSel.innerHTML = `<option value="">All services</option>`
+            + globalServices.map(s => `<option value="${escapeAttr(s.key)}">${rosterEsc(s.name)}</option>`).join('')
+            + `<option value="__base">Base only (no add-ons)</option>`;
+        svcSel.value = rosterState.service;
+    }
+
+    const q = rosterState.q.trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, '');
+    let rows = all.filter(c => {
+        if (rosterState.status !== 'all' && rosterStatusOf(c) !== rosterState.status) return false;
+        if (rosterState.service) {
+            const svcs = rosterServicesFor(c.name);
+            if (rosterState.service === '__base' ? svcs.length : !svcs.some(s => s.service_key === rosterState.service)) return false;
+        }
+        if (q) {
+            const people = rosterContactsFor(c.name);
+            const hay = [c.name, c.contact_name, c.client_email, c.industry,
+                         ...people.flatMap(p => [p.contact_name, p.email, p.title])]
+                        .filter(Boolean).join(' ').toLowerCase();
+            const phoneHit = qDigits.length >= 3 && people.some(p => String(p.phone || '').replace(/\D/g, '').includes(qDigits));
+            if (!hay.includes(q) && !phoneHit) return false;
+        }
+        return true;
+    });
+
+    const { sort, dir } = rosterState;
+    rows.sort((a, b) => {
+        const va = rosterSortValue(a, sort), vb = rosterSortValue(b, sort);
+        return (va < vb ? -1 : va > vb ? 1 : 0) * dir || String(a.name).localeCompare(String(b.name));
+    });
+
+    const head = document.getElementById('roster-head');
+    head.setAttribute('style', `padding:10px 16px; ${rosterGridStyle()}`);
+    head.innerHTML = rosterColumns().map(col => {
+        if (!col.key) return `<span>${col.label}</span>`;
+        const arrow = sort === col.key ? (dir === 1 ? ' ↑' : ' ↓') : '';
+        return `<span class="roster-sort" style="${col.right ? 'text-align:right;' : ''}${sort === col.key ? ' color:var(--gold);' : ''}" onclick="rosterSortBy('${col.key}')">${col.label}${arrow}</span>`;
+    }).join('');
+
+    const wrapCs = getComputedStyle(document.getElementById('theme-wrapper'));
+    const tok = (n, f) => (wrapCs.getPropertyValue(n) || '').trim() || f;
+    const pos = tok('--pos', '#8fae90'), warn = tok('--warn', '#d9a84e'), neg = tok('--neg', '#cb8b76'), t3 = tok('--t3', '#968c7a');
+
+    list.innerHTML = rows.map(c => {
+        const status = rosterStatusOf(c);
+        const primary = rosterPrimaryName(c);
+        const svcs = rosterServicesFor(c.name);
+        const svcHtml = svcs.length
+            ? svcs.map(s => `<span class="roster-chip"${s.status === 'onboarding' ? ' style="color:var(--gold);" title="Onboarding"' : ''}>${rosterEsc(rosterServiceName(s.service_key))}</span>`).join(' ')
+            : `<span class="roster-chip" style="color:var(--t3);">Base</span>`;
+        const score = c.current_score || 0;
+        const sc = score === 0 ? t3 : score < 40 ? neg : score < 70 ? warn : pos;
+        let payLabel = 'Unpaid', payColor = 'var(--t3)';
+        if (c.payment_status === 'paid') { payLabel = 'Paid'; payColor = 'var(--pos)'; }
+        else if (c.payment_status === 'overdue') { payLabel = 'Overdue'; payColor = 'var(--neg)'; }
+        const months = c.months_remaining !== null && c.months_remaining !== undefined && c.contract_end_date
+            ? `<div class="ge-label" style="margin-top:3px;">${c.months_remaining} mo left</div>` : '';
+
+        const ck = rosterCheckinStatus(c);
+        const ckColor = { in: 'var(--pos)', missing: 'var(--warn)', na: 'var(--t3)' }[ck.state];
+
+        const cells = {
+            name: `<div style="min-width:0; display:flex; align-items:center; gap:10px;">
+                <i class="fa-solid fa-chevron-right roster-chev"></i>
+                <div style="min-width:0;">
+                    <div style="font-size:13.5px; font-weight:500; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${rosterEsc(c.name)}</div>
+                    <div style="font-size:12px; color:var(--t2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${primary ? rosterEsc(primary) : '<span style="color:var(--t3);">No contact on file</span>'}</div>
+                </div>
+            </div>`,
+            status: `<span class="ge-label" style="color:${ROSTER_STATUS_COLOR[status] || 'var(--t3)'};">${status}</span>`,
+            Services: `<div style="display:flex; flex-wrap:wrap; gap:4px; min-width:0;">${svcHtml}</div>`,
+            stage: `<span class="text-sm" style="color:var(--t2);">${rosterEsc(c.current_stage || '—')}</span>`,
+            checkin: `<span class="ge-label" data-checkin="${ck.state}" style="color:${ckColor};" title="Numbers for ${escapeAttr(weekRangeLabel(reportingWeekStart()))}">${ck.state === 'in' ? '<i class="fa-solid fa-check mr-1"></i>' : ''}${ck.label}</span>`,
+            health: `<div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+                <div class="score-bar-bg" style="width:30px; height:3px;"><div class="score-bar-fill" style="width:${score}%; background:${sc};"></div></div>
+                <span class="ge-num text-xs" style="color:var(--t2); width:18px; text-align:right;">${score || '—'}</span>
+            </div>`,
+            retainer: `<span class="ge-num" style="text-align:right; color:var(--t1); font-size:14px;">${rosterMoney(c.monthly_retainer)}</span>`,
+            payment: `<span class="ge-label" style="color:${payColor};">${payLabel}</span>`,
+            end: `<div class="text-xs ge-num" style="color:var(--t2);">${c.contract_end_date ? rosterDate(c.contract_end_date) : '—'}${months}</div>`,
+        };
+
+        const isOpen = c.name === rosterOpenClient;
+        return `<div class="roster-grid roster-row${isOpen ? ' open' : ''}" style="${rosterGridStyle()}" data-client="${escapeAttr(c.name)}" onclick="rosterToggle(this.dataset.client)" aria-expanded="${isOpen}">
+            ${rosterColumns().map(col => cells[col.key || col.label]).join('')}
+        </div>${isOpen ? `<div class="roster-detail" id="roster-detail">${rosterProfileHtml(c)}</div>` : ''}`;
+    }).join('');
+
+    document.getElementById('roster-empty').classList.toggle('hidden', rows.length > 0);
+};
+
+// ---- Profile (opens under the client's row) ----
+// One client open at a time. Clicking the open row closes it; clicking another switches.
+
+window.rosterToggle = function(name) {
+    if (!rosterAllowed()) return;
+    rosterOpenClient = rosterOpenClient === name ? null : name;
+    rosterEditing = null;
+    renderRoster();
+};
+
+// Opens a client's profile and brings it into view (from Edit client's "Manage people").
+window.openRosterProfile = function(name) {
+    if (!rosterAllowed()) return;
+    rosterOpenClient = name;
+    rosterEditing = null;
+    // A filter that hides this client would hide its profile too
+    const c = globalClientsData.find(x => x.name === name);
+    if (c && rosterState.status !== 'all' && rosterStatusOf(c) !== rosterState.status) rosterState.status = 'all';
+    rosterState.service = '';
+    rosterState.q = '';
+    const search = document.getElementById('roster-search');
+    if (search) search.value = '';
+    renderRoster();
+    document.querySelector('#roster-list .roster-row.open')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+};
+
+window.rosterEdit = function(section) { rosterEditing = section; renderRosterDetail(); };
+
+function rosterKv(pairs) {
+    return `<dl class="rd-kv">${pairs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
+}
+
+function rosterSectionHead(title, editKey) {
+    const edit = editKey && rosterEditing !== editKey
+        ? `<button type="button" class="ge-label" style="color:var(--gold); cursor:pointer;" onclick="rosterEdit('${editKey}')">Edit</button>` : '';
+    return `<div class="flex justify-between items-center mb-4"><h3 class="ge-title" style="font-size:15px;">${title}</h3>${edit}</div>`;
+}
+
+function rosterPeopleView(c) {
+    const people = rosterContactsFor(c.name).slice()
+        .sort((a, b) => rosterRoleRank(a.role) - rosterRoleRank(b.role) || String(a.contact_name || '').localeCompare(String(b.contact_name || '')));
+
+    const rows = people.map(p => {
+        const initials = String(p.contact_name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+        const digits = String(p.phone || '').replace(/\D/g, '').slice(-10);
+        const phone = digits.length === 10 ? `<a href="tel:+1${digits}" style="color:var(--t1);">${rosterFmtPhone(p.phone)}</a>` : (p.phone ? rosterEsc(p.phone) : '');
+        const email = p.email ? `<a href="mailto:${escapeAttr(p.email)}" style="color:var(--gold);">${rosterEsc(p.email)}</a>` : '';
+        const texts = p.checkin_texts !== false && p.active !== false && digits.length === 10
+            ? `<span class="roster-chip" style="color:var(--gold);" title="Who our team texts for the weekly numbers">Check-in contact</span>` : '';
+        const role = rosterRoleLabel(p.role);
+        const roleLine = [role, p.title && String(p.title).trim().toLowerCase() !== role.toLowerCase() ? p.title : null]
+            .filter(Boolean).map(rosterEsc).join(' · ');
+        return `<div class="rd-person">
+            <div class="ge-num" style="width:34px; height:34px; flex-shrink:0; border-radius:3px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; letter-spacing:.04em; color:var(--gold);">${rosterEsc(initials)}</div>
+            <div style="min-width:0; flex:1;">
+                <div class="flex flex-wrap items-center gap-2"><span style="font-size:14px; font-weight:500; color:var(--t1);">${rosterEsc(p.contact_name || 'Unnamed')}</span>${texts}</div>
+                <div class="ge-label" style="margin-top:3px;">${roleLine}</div>
+                <div class="flex flex-wrap gap-x-4 gap-y-1" style="font-size:13px; margin-top:5px;">${phone}${email}</div>
+            </div>
+        </div>`;
+    }).join('');
+
+    // The client record's own contact name and sign-in emails, shown when no contact
+    // row covers them, so a client with nothing in client_contacts still shows someone.
+    const emails = String(c.client_email || '').split(',').map(e => e.trim()).filter(Boolean);
+    const accountLine = (c.contact_name || emails.length)
+        ? `<div class="text-xs" style="color:var(--t2); margin-top:${people.length ? '14px' : '0'};">
+               <span class="ge-label">On the client record</span><br>
+               ${c.contact_name ? rosterEsc(c.contact_name) : ''}${c.contact_name && emails.length ? ' · ' : ''}${emails.map(e => `<a href="mailto:${escapeAttr(e)}" style="color:var(--gold);">${rosterEsc(e)}</a>`).join(', ')}
+               ${emails.length ? '<span style="color:var(--t3);"> (portal sign-in)</span>' : ''}
+           </div>` : '';
+
+    return rosterSectionHead('people.', rosterIsAdmin() ? 'people' : null)
+        + (rows || `<p class="text-sm" style="color:var(--t2);">No one on file yet. Add the owner, their sales reps, and anyone else you deal with.</p>`)
+        + accountLine;
+}
+
+function rosterPersonEditRow(p) {
+    const roleOpts = `<option value="">Role…</option>` + ROSTER_ROLES.map(r =>
+        `<option value="${r.key}"${p?.role === r.key ? ' selected' : ''}>${r.label}</option>`).join('');
+    const texts = p ? p.checkin_texts !== false : false;
+    return `<div class="rd-edit-row" data-id="${escapeAttr(p?.id || '')}">
+        <input type="text" class="glass-input !py-1.5 rd-p-name" placeholder="Name" value="${rosterEsc(p?.contact_name)}">
+        <select class="glass-input !py-1.5 rd-p-role">${roleOpts}</select>
+        <input type="tel" class="glass-input !py-1.5 rd-p-phone" placeholder="Mobile" value="${rosterEsc(p?.phone)}">
+        <input type="email" class="glass-input !py-1.5 rd-p-email" placeholder="Email" value="${rosterEsc(p?.email)}">
+        <input type="text" class="glass-input !py-1.5 rd-p-title" placeholder="Title (optional)" value="${rosterEsc(p?.title)}">
+        <div class="flex items-center justify-between gap-2">
+            <label class="flex items-center gap-2 text-xs" style="color:var(--t2); cursor:pointer;">
+                <input type="checkbox" class="rd-p-texts" style="accent-color:var(--goldSolid);"${texts ? ' checked' : ''}> Check-in contact
+            </label>
+            <button type="button" onclick="this.closest('.rd-edit-row').remove()" class="text-xs" style="color:var(--neg);">Remove</button>
+        </div>
+    </div>`;
+}
+
+window.rosterAddPerson = function() {
+    const list = document.getElementById('rd-people-edit');
+    if (list) list.insertAdjacentHTML('beforeend', rosterPersonEditRow(null));
+};
+
+function rosterPeopleEdit(c) {
+    const people = rosterContactsFor(c.name);
+    return rosterSectionHead('people.', null) + `
+        <div id="rd-people-edit" class="flex flex-col gap-3">${people.map(rosterPersonEditRow).join('')}</div>
+        <button type="button" onclick="rosterAddPerson()" class="text-xs mt-3" style="color:var(--gold); font-weight:600;"><i class="fa-solid fa-plus mr-1"></i> Add person</button>
+        <p class="text-[11px] mt-2" style="color:var(--t3);">Check-in contact: who our team texts for the weekly numbers. Needs a mobile number. Leave it off for a website person or bookkeeper.</p>
+        <p id="rd-people-error" class="text-sm hidden mt-3" style="color:var(--neg);"></p>
+        <div class="flex gap-2 mt-4">
+            <button type="button" id="rd-people-save" onclick="rosterSavePeople()" class="btn-primary btn text-sm">Save people</button>
+            <button type="button" onclick="rosterEdit(null)" class="btn-secondary btn text-sm">Cancel</button>
+        </div>`;
+}
+
+function rosterBusinessView(c, prof) {
+    const href = rosterWebHref(prof?.website_url);
+    const site = prof?.website_url ? (href ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener" style="color:var(--gold);">${rosterEsc(prof.website_url)}</a>` : rosterEsc(prof.website_url)) : '—';
+    const d = String(prof?.business_phone || '').replace(/\D/g, '').slice(-10);
+    const phone = prof?.business_phone ? (d.length === 10 ? `<a href="tel:+1${d}" style="color:var(--t1);">${rosterFmtPhone(prof.business_phone)}</a>` : rosterEsc(prof.business_phone)) : '—';
+    const siteStatus = { new_build: "We're building their site", existing: 'Has their own site', none: 'No website' }[c.website_status] || '—';
+    return rosterSectionHead('business.', clientProfilesReady ? 'business' : null) + rosterKv([
+        ['Phone', phone],
+        ['Website', site],
+        ['Address', prof?.address ? rosterEsc(prof.address).replace(/\n/g, '<br>') : '—'],
+        ['Industry', rosterEsc(c.industry || '—')],
+        ['Website setup', siteStatus],
+        ['Client since', rosterDate(c.client_since || c.created_at)],
+    ]) + (clientProfilesReady ? '' : `<p class="text-[11px] mt-3" style="color:var(--t3);">Phone, website, address and notes can be saved once supabase/sql/client_directory.sql has been run.</p>`);
+}
+
+function rosterBusinessEdit(c, prof) {
+    return rosterSectionHead('business.', null) + `
+        <div class="flex flex-col gap-3">
+            <div><label class="modal-label">Business phone</label><input type="tel" id="rd-b-phone" class="glass-input" value="${rosterEsc(prof?.business_phone)}"></div>
+            <div><label class="modal-label">Website</label><input type="text" id="rd-b-website" class="glass-input" placeholder="example.com" value="${rosterEsc(prof?.website_url)}"></div>
+            <div><label class="modal-label">Address</label><textarea id="rd-b-address" class="glass-input" rows="2">${rosterEsc(prof?.address)}</textarea></div>
+            <p class="text-[11px]" style="color:var(--t3);">Industry and website setup are edited in Edit client.</p>
+        </div>
+        <p id="rd-business-error" class="text-sm hidden mt-3" style="color:var(--neg);"></p>
+        <div class="flex gap-2 mt-4">
+            <button type="button" id="rd-business-save" onclick="rosterSaveBusiness()" class="btn-primary btn text-sm">Save details</button>
+            <button type="button" onclick="rosterEdit(null)" class="btn-secondary btn text-sm">Cancel</button>
+        </div>`;
+}
+
+function rosterAnswersHtml(c) {
+    const want = normalize(c.name);
+    const rows = globalOnboardingAnswers.filter(a => normalize(a.client_name || '') === want);
+    const items = rows.flatMap(r => Object.values(r.answers || {}))
+        .filter(a => a && a.label && a.value !== undefined && a.value !== null && String(a.value).trim() !== '')
+        .map(a => [rosterEsc(a.label), rosterEsc(Array.isArray(a.value) ? a.value.join(', ') : a.value).replace(/\n/g, '<br>')]);
+    if (!items.length) return '';
+    return `<div class="rd-section">${rosterSectionHead('onboarding answers.', null)}${rosterKv(items)}</div>`;
+}
+
+// ---- Check-ins on the Roster (supabase/sql/staff_checkins.sql) ----
+// Clients aren't texted for their numbers any more. VAs text the client's check-in contact and
+// log the answer here, as a `staff` row: contact_name / contact_phone are who they texted,
+// entered_by is the VA, raw_reply is what the client said. One row per person per week, the same
+// shape as a client's own portal entry, so every total, the health score, the leaderboard and the
+// weekly report read it unchanged.
+
+let rosterCheckinWeek = null;     // week being logged (YYYY-MM-DD Monday)
+let rosterCheckinWho = '';        // contact id, or '__other'
+
+function rosterCheckinWeeks() {
+    const out = [];
+    const d = new Date();
+    for (let i = 1; i <= 4; i++) {
+        const x = new Date(d); x.setDate(x.getDate() - 7 * i);
+        out.push(weekStartMonday(x));
+    }
+    return out;
+}
+
+const rosterCheckinPeople = (c) => rosterContactsFor(c.name)
+    .filter(p => isCheckinContact(p))
+    .sort((a, b) => rosterRoleRank(a.role) - rosterRoleRank(b.role) || String(a.contact_name || '').localeCompare(String(b.contact_name || '')));
+
+function rosterCheckinWhoSel(c) {
+    const people = rosterCheckinPeople(c);
+    if (rosterCheckinWho === '__other') return { name: '', phone: '' };
+    const p = people.find(x => x.id === rosterCheckinWho) || people[0];
+    return p ? { name: p.contact_name || '', phone: normalizePhone(p.phone) || '' } : { name: '', phone: '' };
+}
+
+// The staff row for this person and week, if one was already logged (to edit, not duplicate).
+function rosterStaffRowFor(c, week, who) {
+    const digits = normalizePhone(who.phone);
+    return checkinsForClient(c.name).find(r => r.week_start === week && r.source === 'staff' && (
+        digits ? normalizePhone(r.contact_phone) === digits
+               : String(r.contact_name || '').trim().toLowerCase() === String(who.name || '').trim().toLowerCase())) || null;
+}
+
+function rosterCheckinRowLabel(r) {
+    const who = stripSlashEscapes(r.contact_name || (r.source === 'portal' ? 'Client' : 'Someone'));
+    const by = r.source === 'staff'
+        ? `logged by ${stripSlashEscapes(String(r.entered_by || 'our team').split('@')[0])}`
+        : r.source === 'portal' ? 'sent by the client' : `by ${r.source || 'text'}`;
+    return `${who}, ${by}`;
+}
+
+function rosterCheckinTotals(w) {
+    const parts = [];
+    if (w.reportedEstimates) parts.push(`${w.estimates_count} estimate${w.estimates_count === 1 ? '' : 's'}`);
+    if (w.reportedCloses) parts.push(`${w.closes_count} job${w.closes_count === 1 ? '' : 's'}`);
+    if (w.reportedRevenue) parts.push(money0(w.revenue_total));
+    return parts.length ? parts.join(' · ') : 'no numbers';
+}
+
+function rosterCheckinsHtml(c) {
+    if (rosterEditing === 'checkin') return rosterCheckinForm(c);
+    const thisWeek = reportingWeekStart();
+    const weeks = checkinsByWeek(c.name).filter(w => w.week_start !== 'Unknown').slice(0, 6);
+    const ck = rosterCheckinStatus(c);
+    const head = `<div class="flex justify-between items-center mb-4"><h3 class="ge-title" style="font-size:15px;">check-ins.</h3>
+        <button type="button" class="btn-primary btn text-xs" onclick="rosterStartCheckin()"><i class="fa-solid fa-plus mr-1"></i>Log check-in</button></div>`;
+    const banner = ck.state === 'missing'
+        ? `<p class="text-sm mb-3" style="color:var(--warn);"><i class="fa-solid fa-circle-exclamation mr-1"></i>Numbers for ${escapeAttr(weekRangeLabel(thisWeek))} aren't in yet.</p>` : '';
+    const list = weeks.length ? weeks.map(w => `
+        <div style="padding:10px 0; border-top:1px solid var(--line);">
+            <div class="flex justify-between gap-3 text-sm">
+                <span style="color:var(--t1);">${escapeAttr(weekRangeLabel(w.week_start))}</span>
+                <span class="ge-num" style="color:var(--t2);">${escapeAttr(rosterCheckinTotals(w))}</span>
+            </div>
+            <div class="text-xs mt-1" style="color:var(--t3);">${w.contributors.map(r => escapeAttr(rosterCheckinRowLabel(r))).join(' · ')}</div>
+        </div>`).join('')
+        : `<p class="text-sm" style="color:var(--t2);">No check-ins yet.</p>`;
+    return head + banner + list;
+}
+
+function rosterCheckinForm(c) {
+    const weeks = rosterCheckinWeeks();
+    if (!rosterCheckinWeek || !weeks.includes(rosterCheckinWeek)) rosterCheckinWeek = weeks[0];
+    const people = rosterCheckinPeople(c);
+    if (!rosterCheckinWho || (rosterCheckinWho !== '__other' && !people.some(p => p.id === rosterCheckinWho))) {
+        rosterCheckinWho = people[0]?.id || '__other';
+    }
+    const who = rosterCheckinWhoSel(c);
+    const existing = rosterCheckinWho === '__other' ? null : rosterStaffRowFor(c, rosterCheckinWeek, who);
+    const sameWeek = checkinsForClient(c.name).filter(r => r.week_start === rosterCheckinWeek && r !== existing);
+
+    const weekOpts = weeks.map(w => `<option value="${w}"${w === rosterCheckinWeek ? ' selected' : ''}>${escapeAttr(weekRangeLabel(w))}</option>`).join('');
+    const whoOpts = people.map(p => `<option value="${escapeAttr(p.id)}"${p.id === rosterCheckinWho ? ' selected' : ''}>${rosterEsc(p.contact_name || 'Unnamed')}${p.phone ? ' · ' + escapeAttr(rosterFmtPhone(p.phone)) : ''}</option>`).join('')
+        + `<option value="__other"${rosterCheckinWho === '__other' ? ' selected' : ''}>Someone else…</option>`;
+
+    const warn = sameWeek.length ? `<div class="text-xs p-3 mb-3" style="background:var(--inset); border-radius:3px; color:var(--t2);">
+            <i class="fa-solid fa-circle-info mr-1" style="color:var(--warn);"></i>Already in for this week: ${sameWeek.map(r => escapeAttr(rosterCheckinRowLabel(r))).join(' · ')}.
+            Each person's numbers are added together, so only log someone not listed here.</div>` : '';
+
+    return `<div class="flex justify-between items-center mb-4"><h3 class="ge-title" style="font-size:15px;">log check-in.</h3></div>
+        <div class="flex flex-col gap-3 mb-4">
+            <div><label class="modal-label">Week</label>
+                <select id="rd-ck-week" class="glass-input" onchange="rosterCheckinPick()">${weekOpts}</select></div>
+            <div><label class="modal-label">Who you texted</label>
+                <select id="rd-ck-who" class="glass-input" onchange="rosterCheckinPick()">${whoOpts}</select>
+                ${people.length ? '' : `<p class="text-[11px] mt-1" style="color:var(--t3);">No check-in contact on file. ${rosterIsAdmin() ? 'Add one under people.' : 'Ask an admin to add one.'}</p>`}</div>
+            ${rosterCheckinWho === '__other' ? `<div class="grid grid-cols-2 gap-2">
+                <input type="text" id="rd-ck-name" class="glass-input" placeholder="Name">
+                <input type="tel" id="rd-ck-phone" class="glass-input" placeholder="Mobile (optional)"></div>` : ''}
+        </div>
+        ${warn}
+        ${existing ? `<p class="text-xs mb-3" style="color:var(--t2);">You're editing what was logged for ${rosterEsc(who.name)} this week.</p>` : ''}
+        ${weeklyCheckinFormHtml('staff', { existing, submitCall: 'rosterSaveCheckin()', submitLabel: existing ? 'Save changes' : 'Log check-in',
+            beforeSubmit: `<div><label class="modal-label">What they said <span style="color:var(--t3);">(optional, the client can see this)</span></label>
+                <textarea id="rd-ck-reply" class="glass-input" rows="2" placeholder="Paste their text">${rosterEsc(existing?.raw_reply)}</textarea></div>` })}
+        <button type="button" onclick="rosterEdit(null)" class="btn-secondary btn text-sm w-full mt-3">Cancel</button>`;
+}
+
+window.rosterStartCheckin = function() {
+    rosterCheckinWeek = null;
+    rosterCheckinWho = '';
+    rosterEditing = 'checkin';
+    renderRosterDetail();
+    updateCheckinSourceTotal('staff');
+};
+
+window.rosterCheckinPick = function() {
+    rosterCheckinWeek = document.getElementById('rd-ck-week')?.value || rosterCheckinWeek;
+    rosterCheckinWho = document.getElementById('rd-ck-who')?.value || rosterCheckinWho;
+    renderRosterDetail();
+    updateCheckinSourceTotal('staff');
+};
+
+function rosterCheckinSaveError(error) {
+    const msg = `${error?.message || ''} ${error?.details || ''}`;
+    if (error?.code === '23505') return 'That person already has numbers logged for this week. Pick them in the list to edit what was logged.';
+    if (error?.code === 'PGRST204' || /entered_by/.test(msg)) return 'Run supabase/sql/staff_checkins.sql in the SQL Editor first, then try again.';
+    if (error?.code === '42501' || /row-level security/i.test(msg)) return "You can't log check-ins for this client. If they're yours, ask an admin to give you access in Settings → Users, or if someone else logged this person's numbers, only they or an admin can change them.";
+    return error?.message || String(error);
+}
+
+window.rosterSaveCheckin = async function() {
+    const c = globalClientsData.find(x => x.name === rosterOpenClient);
+    if (!c || !rosterAllowed()) return;
+    const err = document.getElementById('wc-error-staff');
+    const show = (m) => { if (err) { err.innerText = m; err.classList.remove('hidden'); } };
+    if (err) err.classList.add('hidden');
+
+    const form = readCheckinForm('staff');
+    if (form.error) return show(form.error);
+
+    let who = rosterCheckinWhoSel(c);
+    if (rosterCheckinWho === '__other') {
+        who = { name: (document.getElementById('rd-ck-name')?.value || '').trim(), phone: normalizePhone(document.getElementById('rd-ck-phone')?.value) };
+        if (!who.name) return show('Add the name of who you texted.');
+        if (who.phone && who.phone.length !== 10) return show("That mobile number doesn't look complete.");
+    }
+    if (!who.name && !who.phone) return show('Pick who you texted.');
+
+    const week = rosterCheckinWeek || reportingWeekStart();
+    const existing = rosterCheckinWho === '__other' ? null : rosterStaffRowFor(c, week, who);
+    const reply = (document.getElementById('rd-ck-reply')?.value || '').trim() || null;
+
+    const btn = document.getElementById('wc-submit-staff');
+    if (btn) { btn.disabled = true; btn.innerText = 'Saving…'; }
+    try {
+        const values = { ...form.row, raw_reply: reply };
+        let error;
+        if (existing?.id) {
+            // RLS refuses an update by matching nothing rather than with an error, so check a row came back
+            const res = await supabaseClient.from('weekly_checkins').update(values).eq('id', existing.id).select('id');
+            error = res.error || (!res.data?.length ? { code: '42501', message: 'not allowed' } : null);
+        } else {
+            ({ error } = await supabaseClient.from('weekly_checkins').insert([{
+                ...values,
+                client_name: c.name,
+                week_start: week,
+                source: 'staff',
+                contact_name: who.name || null,
+                contact_phone: who.phone || null,
+                entered_by: clientEmail || null,
+                // Typed from the client's answer, not parsed by a machine
+                parse_confidence: 'high',
+            }]));
+        }
+        if (error) throw error;
+        const { data } = await supabaseClient.from('weekly_checkins').select('*').order('week_start', { ascending: false });
+        if (data) globalCheckinsData = data;
+        rosterEditing = null;
+        renderRoster();
+        updateRosterNav();
+    } catch (e) {
+        show(rosterCheckinSaveError(e));
+        if (btn) { btn.disabled = false; btn.innerText = existing ? 'Save changes' : 'Log check-in'; }
+    }
+};
+
+// Re-renders just the open profile, so editing doesn't redraw (and re-sort) the table.
+function renderRosterDetail() {
+    const el = document.getElementById('roster-detail');
+    const c = globalClientsData.find(x => x.name === rosterOpenClient);
+    if (el && c) el.innerHTML = rosterProfileHtml(c);
+    else renderRoster();
+}
+
+function rosterProfileHtml(c) {
+    const prof = rosterProfileFor(c.name);
+    const svcs = rosterServicesFor(c.name);
+    const svcHtml = [`<span class="roster-chip">Base</span>`].concat(svcs.map(s =>
+        `<span class="roster-chip"${s.status !== 'active' ? ' style="color:var(--gold);"' : ''}>${rosterEsc(rosterServiceName(s.service_key))}${s.status !== 'active' ? ' · ' + rosterEsc(s.status) : ''}</span>`)).join(' ');
+
+    const set = (v) => v ? `<span class="ge-num">${rosterEsc(v)}</span>` : '<span style="color:var(--t3);">Not set</span>';
+    const pay = { paid: 'Paid', overdue: 'Overdue' }[c.payment_status] || 'Unpaid';
+
+    // A VA's view: who to text, and the check-ins. Nothing about billing, connections or notes.
+    if (!rosterIsAdmin()) {
+        return `
+        <div class="rd-grid">
+            <div><div class="rd-section">${rosterPeopleView(c)}</div></div>
+            <div><div class="rd-section">${rosterCheckinsHtml(c)}</div></div>
+        </div>`;
+    }
+
+    // Two columns on a wide screen: who and where on the left (people, business, notes),
+    // the account itself on the right, check-ins first since they're weekly. They stack on a
+    // narrow one.
+    return `
+        <div class="flex flex-wrap gap-2" style="padding:16px 0 4px;">
+            <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="goToClient(this.dataset.client)">Open account</button>
+            <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="rosterOpenEditClient(this.dataset.client)">Edit client</button>
+        </div>
+        <div class="rd-grid">
+        <div>
+        <div class="rd-section">${rosterEditing === 'people' ? rosterPeopleEdit(c) : rosterPeopleView(c)}</div>
+        <div class="rd-section">${rosterEditing === 'business' ? rosterBusinessEdit(c, prof) : rosterBusinessView(c, prof)}</div>
+        <div class="rd-section">
+            ${rosterSectionHead('notes.', null)}
+            <p class="ge-label" style="margin-bottom:8px;">Only admins see this</p>
+            <textarea id="rd-notes" class="glass-input" rows="4" placeholder="Anything worth remembering about this client"${clientProfilesReady ? '' : ' disabled'}>${rosterEsc(prof?.notes)}</textarea>
+            <p id="rd-notes-msg" class="text-xs hidden mt-2"></p>
+            <button type="button" id="rd-notes-save" onclick="rosterSaveNotes()" class="btn-secondary btn text-xs mt-3"${clientProfilesReady ? '' : ' disabled'}>Save notes</button>
+        </div>
+        </div>
+        <div>
+        <div class="rd-section">${rosterCheckinsHtml(c)}</div>
+        <div class="rd-section">${rosterSectionHead('contract & billing.', null)}${rosterKv([
+            ['Retainer', `<span class="ge-num">${rosterMoney(c.monthly_retainer)}</span> / mo`],
+            ['Payment', pay + (c.last_payment_date ? ` · last paid ${rosterDate(c.last_payment_date)}` : '')],
+            ['Payment due', rosterDate(c.payment_deadline)],
+            ['Contract', rosterEsc(c.contract_type || '—')],
+            ['Start', rosterDate(c.contract_start_date)],
+            ['End', rosterDate(c.contract_end_date) + (c.months_remaining !== null && c.months_remaining !== undefined && c.contract_end_date ? ` · ${c.months_remaining} mo left` : '')],
+            ['SEO fee', c.seo_monthly_fee ? `<span class="ge-num">${rosterMoney(c.seo_monthly_fee)}</span> / mo` : '—'],
+            ['Target CPL', c.target_cpl ? `<span class="ge-num">${rosterMoney(c.target_cpl)}</span>` : '—'],
+        ])}</div>
+
+        <div class="rd-section">${rosterSectionHead('services.', null)}<div class="flex flex-wrap gap-1.5">${svcHtml}</div></div>
+
+        <div class="rd-section">${rosterSectionHead('connections.', null)}${rosterKv([
+            ['Meta ad account', set(c.ad_account_id)],
+            ['Business ID', set(c.business_id)],
+            ['GHL location', set(c.ghl_location_id)],
+            ['Search Console', set(c.gsc_property)],
+            ['GA4 property', set(c.ga4_property_id)],
+            ['SE Ranking', set(c.seranking_site_id)],
+            ['Business Profile', set(c.seranking_local_id)],
+        ])}</div>
+        ${rosterAnswersHtml(c)}
+        </div>
+        </div>`;
+}
+
+// Edit client works on the selected account, so select this one first.
+window.rosterOpenEditClient = function(name) {
+    cSelectedAccount = name;
+    openEditClientModal();
+};
+
+// Edit client's People line links here, since this is the only place that edits every field.
+window.openRosterFromEditClient = function() {
+    const name = document.getElementById('edit-client-original-name').value;
+    document.getElementById('edit-client-modal').style.display = 'none';
+    navTo('roster');
+    openRosterProfile(name);
+};
+
+function renderEditClientPeopleSummary(name) {
+    const el = document.getElementById('edit-client-people-summary');
+    if (!el) return;
+    const people = rosterContactsFor(name);
+    if (!people.length) { el.innerText = 'No one on file yet.'; return; }
+    const texted = people.filter(p => p.checkin_texts !== false && p.active !== false && String(p.phone || '').replace(/\D/g, '').length >= 10).length;
+    el.innerText = people.map(p => p.contact_name || p.email || p.phone).map(stripSlashEscapes).join(', ')
+        + ` · ${texted} check-in contact${texted === 1 ? '' : 's'}`;
+}
+
+// A save that fails because client_directory.sql hasn't run yet says so, rather than
+// showing PostgREST's column error.
+function rosterSaveError(error) {
+    const msg = `${error?.message || ''} ${error?.details || ''}`;
+    if (error?.code === 'PGRST204' || error?.code === '42703' || error?.code === '42P01' || /checkin_texts|client_profiles|column .* does not exist/i.test(msg)) {
+        return 'Run supabase/sql/client_directory.sql in the SQL Editor first, then try again.';
+    }
+    if (error?.code === '23505') return 'That mobile number is already on file for another person. Each number can only be listed once per client.';
+    return error?.message || String(error);
+}
+
+async function rosterReloadContacts() {
+    const { data, error } = await supabaseClient.from('client_contacts').select('*');
+    if (!error && data) globalContactsData = data;
+}
+
+window.rosterSavePeople = async function() {
+    const name = rosterOpenClient;
+    const errEl = document.getElementById('rd-people-error');
+    const show = (m) => { errEl.innerText = m; errEl.classList.remove('hidden'); };
+    errEl.classList.add('hidden');
+
+    const entered = [...document.querySelectorAll('#rd-people-edit .rd-edit-row')].map(r => ({
+        id: r.dataset.id || null,
+        contact_name: r.querySelector('.rd-p-name').value.trim(),
+        role: r.querySelector('.rd-p-role').value || null,
+        title: r.querySelector('.rd-p-title').value.trim() || null,
+        phone: normalizePhone(r.querySelector('.rd-p-phone').value) || null,
+        email: r.querySelector('.rd-p-email').value.trim().toLowerCase() || null,
+        checkin_texts: r.querySelector('.rd-p-texts').checked,
+    })).filter(p => p.contact_name || p.phone || p.email);
+
+    for (const p of entered) {
+        if (!p.contact_name) return show('Every person needs a name.');
+        if (!p.phone && !p.email) return show(`Add a mobile number or an email for ${p.contact_name}.`);
+        if (p.phone && p.phone.length !== 10) return show(`That number for ${p.contact_name} doesn't look complete.`);
+        if (p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) return show(`That email for ${p.contact_name} doesn't look right.`);
+        if (p.checkin_texts && !p.phone) return show(`${p.contact_name} needs a mobile number to be a check-in contact.`);
+    }
+    const phones = entered.map(p => p.phone).filter(Boolean);
+    const dupe = phones.find((ph, i) => phones.indexOf(ph) !== i);
+    if (dupe) return show(`The same number is listed twice: ${rosterFmtPhone(dupe)}`);
+
+    const btn = document.getElementById('rd-people-save');
+    btn.disabled = true; btn.innerText = 'Saving…';
+    try {
+        const existing = rosterContactsFor(name);
+        const kept = new Set(entered.map(p => p.id).filter(Boolean));
+        const removed = existing.filter(e => !kept.has(e.id));
+        if (removed.length) {
+            const { error } = await supabaseClient.from('client_contacts').delete().in('id', removed.map(r => r.id));
+            if (error) throw error;
+        }
+        // Updated by id rather than upserted on phone, so a person can be saved without one
+        for (const p of entered.filter(p => p.id)) {
+            const { id, ...fields } = p;
+            const { error } = await supabaseClient.from('client_contacts').update(fields).eq('id', id);
+            if (error) throw error;
+        }
+        const fresh = entered.filter(p => !p.id).map(({ id, ...fields }) => ({ ...fields, client_name: name, active: true }));
+        if (fresh.length) {
+            const { error } = await supabaseClient.from('client_contacts').insert(fresh);
+            if (error) throw error;
+        }
+        rosterEditing = null;
+    } catch (e) {
+        show(rosterSaveError(e));
+    } finally {
+        // Reload either way, so the panel shows what's actually stored after a partial save
+        await rosterReloadContacts();
+        btn.disabled = false; btn.innerText = 'Save people';
+    }
+    if (rosterEditing === null) renderRoster();
+};
+
+async function rosterUpsertProfile(fields) {
+    const row = { client_name: rosterOpenClient, ...fields, updated_at: new Date().toISOString(), updated_by: clientEmail || null };
+    const { data, error } = await supabaseClient.from('client_profiles').upsert(row, { onConflict: 'client_name' }).select();
+    if (error) throw error;
+    const saved = data?.[0] || row;
+    globalClientProfiles = globalClientProfiles.filter(p => p.client_name !== saved.client_name).concat(saved);
+}
+
+window.rosterSaveBusiness = async function() {
+    const errEl = document.getElementById('rd-business-error');
+    errEl.classList.add('hidden');
+    const btn = document.getElementById('rd-business-save');
+    btn.disabled = true; btn.innerText = 'Saving…';
+    try {
+        await rosterUpsertProfile({
+            business_phone: document.getElementById('rd-b-phone').value.trim() || null,
+            website_url: document.getElementById('rd-b-website').value.trim() || null,
+            address: document.getElementById('rd-b-address').value.trim() || null,
+        });
+        rosterEditing = null;
+        renderRosterDetail();
+    } catch (e) {
+        errEl.innerText = rosterSaveError(e);
+        errEl.classList.remove('hidden');
+        btn.disabled = false; btn.innerText = 'Save details';
+    }
+};
+
+window.rosterSaveNotes = async function() {
+    const msg = document.getElementById('rd-notes-msg');
+    const btn = document.getElementById('rd-notes-save');
+    btn.disabled = true;
+    try {
+        await rosterUpsertProfile({ notes: document.getElementById('rd-notes').value.trim() || null });
+        msg.style.color = 'var(--pos)'; msg.innerText = 'Saved.';
+    } catch (e) {
+        msg.style.color = 'var(--neg)'; msg.innerText = rosterSaveError(e);
+    }
+    msg.classList.remove('hidden');
+    btn.disabled = false;
+};
 
 window.saveClientEdits = async function(e) {
     e.preventDefault();
@@ -11756,9 +13924,9 @@ window.saveClientEdits = async function(e) {
         }
         if (error) throw error;
 
-        // After the rename, so contacts and add-ons are filed under the client's current name.
+        // After the rename, so add-ons are filed under the client's current name.
         // rename_client() has already moved client_services, so the old rows sit under newName.
-        await saveClientContacts(newName);
+        // People are no longer edited here (see openRosterFromEditClient).
         await applyClientServiceChanges(newName, servicePlan);
 
         document.getElementById('edit-client-modal').style.display = 'none';
@@ -11769,6 +13937,7 @@ window.saveClientEdits = async function(e) {
         await fetchAllGlobalData(globalAllowedClients);
         initClientsPage();
         if (!document.getElementById('page-goldeneye').classList.contains('hidden')) renderGoldenEye();
+        if (!document.getElementById('page-roster')?.classList.contains('hidden')) renderRoster();
     } catch (err) {
         alert("Could not save changes: " + err.message);
     } finally {
@@ -11960,7 +14129,7 @@ window.executeStageTransition = async function() {
 
         // 3. Trigger UI Refresh
         const transitionBtn = document.getElementById('btn-stage-transition');
-        const chip = document.getElementById("c-stage-chip"); if(chip) chip.innerText = targetStage;
+        const chip = document.getElementById("c-stage-chip"); if(chip) chip.innerText = targetStage; if (typeof renderStageProgress === 'function') renderStageProgress();
         
         // 4. Conditional Generation — from the stage's checklist template
         if (generateTasks) {

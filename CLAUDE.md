@@ -703,9 +703,71 @@ Two traps worth knowing:
 - **The prompt must permit an empty section.** Forcing three populated columns every
   morning guarantees invention on a quiet day.
 
-`clients.target_cpl` is read if present and degrades to "no CPL target set". Without it
-the model can only compare a client to their own past, so it cannot tell a good $60 CPL
-from a terrible one.
+**`clients.target_cpl` (set in Edit Client, added 2026-09-21) is the yardstick when present.**
+Without one, the audit compares a client to their own last 28 days and cannot tell a good
+$60 CPL from a terrible one, and a client whose own history is poor reads as fine for being
+consistently poor. `supabase/sql/target_cpl.sql` is the migration; the column already existed.
+- **The bad side (CRITICAL / WATCH) is judged against the target.** Expected leads = recent spend
+  ÷ target, and `cplDelta` is against the target. The baseline-leads floor doesn't apply, since a
+  target is a given rather than an estimate. `signal.yardstick` / `yardstickKind` say which was used.
+- **The good side (IMPROVING / SCALE_CANDIDATE) always uses their own baseline.** Beating a target
+  isn't the same as improving, and using it there would call every client with an easy target a
+  scale candidate every morning. The driver decomposition also stays against their own past.
+- **The spend rule** (`burnCplMultiple` 2×, `burnMinSpend` $200): CPL at least double the
+  yardstick on $200+ of spend is CRITICAL with **no significance test**, and it runs *before* the
+  volume gate. That gate is what made a $300-a-week account unreadable: at that size 3 leads
+  against 7 expected is one bad week, however much it cost. Zero leads on $200+ counts. Its note
+  reads "…is 2.3× the $45 target" and the model is told to call it a week that cost too much, not a
+  proven decline.
+- **What it costs in texts.** A 7-day window slides daily, so a bad week stays CRITICAL for several
+  weekday mornings, and each one texts both admins. Small accounts also swing (3Sixty's last 8
+  weekly CPLs: $32, 48, 280, 44, 47, 105, 42, 103), so expect the occasional luck-driven text.
+- **Tested 2026-09-21** on the real weekly figures (26 checks): 3Sixty and SimpliBlinds go CRITICAL,
+  PANDEN stays STABLE with no target, and with one goes WATCH at $45 and CRITICAL at $40.
+
+### Per-ad flags in the morning audit (built 2026-10-12, `morning-audit/ads.js`)
+
+Which individual ads are at or over their client's `target_cpl`, appended to the saved card. Needs
+**meta-sync data** and a **target CPL** on the client. Alerts only: nothing is paused or changed.
+- **Decided in code, never by the model.** `computeAdFlags` builds the list and `renderAdFlagsHtml`
+  appends it after the model's text, so the model never sees an ad name or an ad figure (its prompt
+  still says it has account-level data only). Ad and ad set names are escaped.
+- **The rules** (last 7 days, the audit's own window): an ad is flagged when it spent at least
+  `targetMultiple` × target **and** either has no leads or its CPL is at least that. Skipped: an ad
+  under 4 days old (still learning), and one with no spend in the last 2 days (already off).
+- **`AD_ALERT_CONFIG.targetMultiple` is 1 (at target), the team's choice on 2026-10-12.** A 90-day look
+  back at the real ad data, with suggested targets, found that of ads flagged at 1× about 22% were
+  back under target the next week, at 2× about 14%; the money spent on ads that stayed bad the
+  following week was $5,803 at 1× against $867 at 2×. Raise it to 1.5 or 2 to flag fewer ads: it
+  moves both tests at once.
+- **Leads are Meta's, scaled to the daily pull.** Meta's lead count runs well above Make's for some
+  accounts (Anxiety Solutions, Oct 5-11: Meta 37 and Meta's own Ads Manager 37, Make 15; the other
+  clients line up). GHL is the source of truth for leads, and Make's pull is what the audit uses, so
+  each ad's Meta leads are multiplied by (the pull's leads ÷ Meta's leads for the account), within 0 to
+  1.5 and only when the pull covered 80% of the window. The card says when it did this.
+- **Read through the same lens as the rest of the audit:** one yardstick for the account and its ads.
+- **What the card says about clients it skipped:** no target CPL (named, so it nudges), no ad data
+  synced yet, or data more than 2 days behind the audit window (meta-sync late).
+- **ADS OFF (`applyAdsOff`, same file).** Make writes no row for a day with no spend, so a client whose ads
+  are switched off looked exactly like a broken pull and was reported as "the daily pull looks broken".
+  A DATA STALE or DATA GAPS client becomes **ADS OFF** when meta-sync ran for it within 48 hours without
+  an error, covered the audit's window, and Meta shows no spend for the last 3 days of it. The note
+  gives the last day with spend, and the model is told to say the data is fine and ask the team to
+  confirm it is intended. Anything meta-sync could not check (an error, no recent run, no sync record)
+  keeps its old verdict, so a real broken pull is never hidden. Ads running with rows missing (Sunset's
+  4 of 7 days) stays DATA GAPS. ADS OFF is a calm marker, never a text, and the dashboard's
+  Intelligence card ignores it. First seen 2026-10-13: Alta Vista (ads off since Sep 29).
+- **No new texts.** The critical-alert text is unchanged. The chat's context (`mode: "context"`) also
+  carries the flagged ads.
+- **Fails safe:** if `meta_ad_daily` is missing or unreadable the section is left out and the card is
+  saved as before. Rows are read per client and paged past PostgREST's 1000-row cap.
+- **Not built:** automatic pausing. When it is, per the plan: a second System User with its own token
+  (the sync's stays view-only), a separate function that only sets an ad to paused, a per-client switch,
+  a log of every pause, never an ad under about 4 days old or a client's last running ad, and a dry-run
+  period first. The look-back found little to gain: about $870 in three months at 2×.
+- **Tests:** `ads.test.mjs` (node), 46 checks on the flags, the scaling, the rendering and ADS OFF, with 20
+  deliberate breakages all caught; `loader.test.mjs` (node with `--experimental-strip-types`) runs the real
+  loader against a fake database, including paging and its fallbacks; `index.ts` type-checks.
 
 ### Meta restates the past — checked, and it does not bite us
 
@@ -1061,6 +1123,15 @@ that folder, then `supabase/sql/rename_client.sql`, then deploy.
   midasmediafirm.com on 2026-09-11:** a real Google search, then the site, then Book, arrived
   tagged `utm_source=google&utm_medium=organic&src_restored=1`. A client without the snippet
   shows a high `self_referral` rate, which is the signal to install it.
+- **`clients.lead_hosts` (2026-10-12, `supabase/sql/lead_hosts.sql`) narrows "on the client's own site"
+  to an allow-list of hosts.** Midas's domain also hosts client landing pages
+  (`everoakcabinetry.midasmediafirm.com`, `astrarealestate.midasmediafirm.com`), and the domain
+  rule filed their paid leads under Midas Media: 42 of its 43 rows. Midas now lists
+  `midasmediafirm.com` and `goldeneye.midasmediafirm.com` (its booking host). Empty or null keeps the
+  whole-domain rule, so other clients are unchanged. **Run the SQL before deploying the function**; the
+  function falls back to asking without the column, but the list does nothing until it exists.
+  The SQL also deletes the 42 mislabeled rows. The log line now carries the GHL `location` id.
+  12 checks run the real `decide()`, including the column-missing fallback.
 - **Every new SEO client needs one real Google-search test lead** before their organic count is
   trusted, because each site's form or booking setup decides whether the source survives.
 - **Security.** `verify_jwt = false` for this one function, because GHL can't send the gateway
@@ -1682,6 +1753,305 @@ real client data; see the Known gaps entry on that.
   `seranking-sync`'s sync, with no admin-side add/retire form yet, even though its RLS already
   allows admin writes. The changelog isn't in the weekly report or the client portal yet either.
 
+## Deck calculator → QuickBooks estimates (built 2026-10-01, NOT live yet)
+
+3Sixty's Deck Calculator tab gets a **Create QuickBooks estimate** panel: a rep builds the deck, enters
+the customer, clicks once, and an estimate lands in 3Sixty's QuickBooks with one line per priced item.
+The client-facing plan (what 3Sixty must supply) is claude.ai/code/artifact/dc852f18-0f20-4598-a696-84c490663274.
+
+- **Pieces:**
+  - **The calculator** (`snippets/3sixty-deck-estimator.html`) posts `{deckEstimate}` to this page on
+    every render: line items, totals, deck fields, notes. Only this copy does (`postEstimateToParent:
+    true`); the public GHL embeds send height only. **It is generated, never hand-edited:** the
+    source is `estimator.html` in the deck calculator folder beside this repo, and
+    `node build-ghl-embed.js` there writes this file. Commit it from here.
+  - **app.js** (`deckQbRefresh` / `deckQbCreate` / `deckQbLoadHistory`, after `ensureDeckCalcLoaded`):
+    the panel `#cp-deckcalc-qb` in body.html, hidden unless the function answers `ready` for the
+    current client. Messages are accepted only from the calculator's own frame. A client switch
+    clears the cached deck, so one client's deck can't be sent under another.
+  - **`supabase/functions/deck-estimate/`**: checks the caller with `client_row_visible()` **asked as
+    the caller** (3Sixty has no `user_client_access` rows; they get in by `client_email`), validates
+    every field, stores a `deck_estimates` row, calls that client's Make hook, records what comes
+    back. Its header holds the full Make contract.
+  - **`deck_estimates`** (`supabase/sql/deck_estimates.sql`): written only by the function
+    (service_role, no write policies), read via `client_row_visible`. Holds the customer's name,
+    email, phone and address on purpose. In `rename_client.sql`.
+- **Why not make-relay:** it accepts admins only, and the people clicking are client staff. Widening
+  it would widen every hook it carries; this opens one action for the clients named in a secret.
+- **Hooks live in a secret, not the repo:** `DECK_ESTIMATE_HOOKS = {"<exact clients.name>": "<Make
+  hook URL>"}`. Each client goes to its own scenario because each is connected to that client's
+  QuickBooks. A client not in the map gets `ready:false` and a hidden panel. Renaming a client
+  means updating its key here too.
+- **Statuses:** `created` (QuickBooks number recorded), `failed` (refused; safe to retry),
+  `unconfirmed` (timed out, or Make answered without an estimate number: it may exist, so the rep
+  is told to check QuickBooks before retrying). A repeat within 60 seconds for the same client,
+  customer email and total returns the first one instead of creating a second.
+- **QuickBooks access (decided 2026-10-01):** 3Sixty adds us as a **Company admin** user. Intuit only
+  lets primary or company admins connect an app, and the connection belongs to the user who made it,
+  so that user must stay. An accountant invite was rejected because Intuit doesn't confirm it can
+  connect apps.
+- **Go-live order** (deploy before pushing, same rule as make-relay):
+  1. `supabase/sql/deck_estimates.sql`, then re-run `supabase/sql/rename_client.sql`.
+  2. Deploy `deck-estimate`. With no `DECK_ESTIMATE_HOOKS` it answers `ready:false`, so pushing the
+     app.js/body.html/snippet change next is safe: nothing visible changes.
+  3. Connect 3Sixty's QuickBooks in Make, build the scenario from the contract (filter on `secret`
+     first; exact-email customer match, never a fuzzy search result), test with a fake customer.
+  4. `supabase secrets set DECK_ESTIMATE_HOOKS=...` and the panel appears.
+- **Unverified until the first real estimate:** whether QuickBooks takes the negative adjustment as
+  an ordinary line or needs a discount line, and how it rounds qty × rate on fractional square feet.
+- **Tests:** 30 node checks on the function (validation, access, hook scoping, every Make outcome,
+  double clicks), with mutations of the access check and hook routing confirmed caught; 12 jsdom
+  checks on the real panel markup and app.js code; strict `tsc` on `validate.ts`/`handler.ts`; and
+  an end-to-end run of the real snippet posting its deck to a parent page, with the public GHL build
+  confirmed to post height only.
+
+## Ad-level data and the change log: meta-sync (built 2026-10-05, NOT live until set up)
+
+`supabase/functions/meta-sync/` pulls, per non-archived client with an `ad_account_id`, Meta's
+per-ad daily insights (`level=ad`, `time_increment=1`) into `meta_ad_daily` and the account's
+change history (`/activities`) into `meta_activity`. `daily_reports` (Make) stays the source for
+account totals and the morning audit; this adds what it can't say: which ad, and what changed.
+- **Token:** `META_ACCESS_TOKEN`, a System User token with `ads_read` only, in Supabase secrets.
+  Never logged: Meta's paging links carry it, so every error passes through `scrubToken`. The Meta
+  token in Make is separate and untouched.
+- **Runs:** daily at 15:30 UTC (`schedule.sql`), the last 8 days each time, upserted, because Meta
+  keeps attributing leads to the click day for 7 days. Backfill (up to 180 days) and a token
+  check run from the SQL Editor with the cron secret (`schedule.sql` has both). Every mode only
+  reads Meta and writes these tables, which is why the cron secret may run all of them.
+  One client's error lands in `meta_sync_state.last_error`; a Meta rate limit (code 4/17/…) stops
+  the run and tomorrow re-pulls the window.
+- **Shared ad account:** Midas and Sunset share one; `pickAccounts` gives it to Sunset.
+- **Leads:** one figure per row (`lead`, else `onsite_conversion.lead_grouped`, else the pixel
+  lead), never summed across types. Not yet compared with `daily_reports` on real data: do that
+  after the first backfill.
+- **The change log has no id**, so `event_key` is an FNV-1a hash of account, time, type, object
+  and the kept details. Re-pulls upsert onto it.
+- **extra_data is scrubbed:** on real SimpliBlinds data Meta's own entries carried IP addresses,
+  machine cookies, SSL fingerprints and request ids. Only `type`, `old_value`, `new_value`,
+  `currency` and `campaign_id` (Meta's legacy name for the ad SET id) are kept, long strings cut.
+- **`category` / `significant`** (in `parse.ts`): budget, bid, targeting, creative, schedule,
+  created and rejections count; a status change counts only when it lands somewhere ("Active",
+  "Inactive"…), not "Pending Process", and Meta's own status flips count only for disapprovals.
+  Audiences, the image library and renames don't. Re-run a backfill to recompute after a rule change.
+- **Admin-only RLS** on all three tables, by the user's choice: the log names who made each change.
+  Clients see only what a report says. All three are in `rename_client.sql`.
+- **In the weekly report:** `buildReportAdActivityBlock` → `computeAdActivityFacts` (app.js) hands
+  the model the period's changes (one per object per kind per day, latest 8) with each one's effect
+  on the ads it covers (7 days before vs after, per-day spend and leads, "too early to tell" under 3
+  days of results, "spend stopped" when it went to zero, "since it started" for new ads), plus each
+  ad's spend, leads and cost per lead. Never a person's name: "we", or "Meta" for Meta's own
+  changes. Budget amounts are shown only when the entry says they're money (minor units / 100).
+  No rows, no block, and the report reads as before.
+- **Connecting a client (learned 2026-10-12, took most of a day).** The System User and the Meta app must
+  live in the **Midas Media LLC** Business (ID `1729931754111310`), the one that owns the agency's own ad
+  accounts. The first attempt was made with 3Sixty's Business selected in the picker, so the app and System
+  User were created there and only 3Sixty's account could be assigned. Now: the app is **Golden Eye
+  Internal** (`1081732768027916`, Marketing API use case, `ads_read`), assigned to the System User
+  `Golden Eye Sync` with Manage app (a second admin has to approve that), and the token never expires.
+  Each client then does two things: **their** Business shares the ad account with Midas Media LLC (Business
+  Settings → Users → Partners → Add → the ID above → the ad account, View performance only), and in
+  **Midas Media LLC** the account is assigned to `Golden Eye Sync` (Ad Accounts → the account → Add People →
+  System Users, View performance). "No permissions available" on Generate Token means the app is not
+  assigned to the System User or lacks the Marketing API. "Ad account owner has NOT grant ads_management or
+  ads_read" in a check means the sharing has not happened yet. Connected 2026-10-12: 3Sixty, PANDEN,
+  Caliber, Anxiety Solutions, Alta Vista, Sunset. Astra waits on its owner's approval; KLH and SimpliBlinds
+  are skipped on purpose. Check with `{"mode":"check"}` and read `net._http_response`.
+- **Meta sometimes refuses a big request** with `OAuthException 2: Service temporarily unavailable`
+  (Caliber Cabinets, at 30 and 90 days, while its 8-day daily pull worked). `syncAccount` now tries the
+  whole window first, and on a refusal pulls it in 7-day pieces (`windowsInChunks`), each retried once. A
+  piece that still fails is skipped and named in `meta_sync_state.last_error` as `partial: …`, the rest
+  load, a rate limit stops everything at once, and nothing loading at all raises the last error as before.
+  `chunks.test.mjs` (node with `--experimental-strip-types`) runs the real code against a fake Meta that
+  refuses anything over 8 days; 24 checks, 9 breakages caught.
+  **Time:** Meta's refusal of the big request itself takes about a minute, and each piece about 14 seconds, so
+  a 90-day load of a refused account does not fit in one 150-second call (Caliber loaded back to Sep 1 and
+  was cut off). No piece starts past 135 seconds from the start of the request, and any left over are named
+  as "out of time" in the sync state instead of the call being killed. For such an account use
+  `{"mode":"backfill","days":90,"client":"<name>","chunked":true,"skip_days":42}`: `chunked` goes straight to
+  pieces, and `skip_days` leaves out the newest days already loaded. A run with `skip_days` does not touch
+  `last_window`, so the sync still reads as current to the audit's ADS OFF check.
+- **Meta's lead counts are not the daily pull's.** For the same week, Anxiety Solutions: Meta's own Ads
+  Manager 37 leads, meta-sync 37, Make 15. Spend matches within 1%, and the other clients' leads line up
+  (Sunset 59 vs 59). **GHL is the source of truth for leads and Make's feed was deliberately left alone**, so
+  anything that mixes the two scales Meta's per-ad leads to the account's daily-pull total (see per-ad flags).
+- **Setup order:** `schema.sql` → `rename_client.sql` → set the token → deploy → `schedule.sql` →
+  check → backfill. app.js can ship before any of it.
+- **Tests:** 37 parser checks (real SimpliBlinds extra_data), 14 PGlite checks (schema, RLS,
+  rename), 22 jsdom checks on the report block (5 mutations, all caught), strict `tsc`.
+
+## Text the assignee (built 2026-10-13)
+
+"Text the assignee" in the task drawer (existing tasks only) texts whoever a task is assigned to.
+`supabase/sql/task_notify.sql` adds `notify_task_assignee(task_id)` and `team_contacts` (name, phone).
+- **No Make change:** it posts to scenario #6's hook with `event: client_request`, `kind: task_nudge`, a
+  one-person recipients list and the Vault secret, so route 1 sends it like any admin alert.
+- **Who it reaches:** `team_contacts` first, then `admin_alert_recipients` (active only), by full or first
+  name. "Tenny, Aidan" / "&" / "and" texts both. "Client", blank and unknown names come back as "no number
+  on file", never an error. **KJ is seeded in `team_contacts`** (+63, Philippines: a number typed with a leading `+` keeps its
+  country code, anything else is treated as US). The account manager still needs a row (example at the bottom of the SQL file).
+- **Message:** one line, no quotes or backslashes (Make's raw-text module), title + client + due date.
+  Notes are never sent. Admin only (checked inside the function); anon has no EXECUTE.
+- The database reads the saved assignee, so app.js refuses while the drawer has an unsaved change.
+- **Tests:** 23 PGlite checks (one mutation caught), 7 handler checks.
+
+## Activity panel on the Ads tab (built 2026-10-13)
+
+`#ad-activity-panel` under the charts, admin only, drawn by `renderAdActivityPanel(s, e)` after the KPI strip.
+- **Two halves:** the change timeline (`meta_activity`, significant rows only, one per object per kind per day, newest
+  first) and the ads table (`meta_ad_daily`: spend, share of spend, Meta leads, CPL). CPL is red at or over `target_cpl`,
+  the same 1x rule as the audit; an ad with spend and no leads counts when its spend alone reaches the target.
+- **Same wording as the weekly report** through `describeAdChange` / `adChangeEffect`. The panel passes the person's name
+  (`actorLabel`); the report never does and still says "we". No SQL, no deploy.
+- **Hidden** for All, non-admins, a client with no ad account, nothing synced, or a failed query. A render token drops
+  stale responses. The range is clamped to 120 days; ad rows are paged past the 1000-row cap.
+- **Tests:** 20 checks (one mutation caught) plus a check that the report's wording is unchanged.
+
+## The setup checklist: "Our checklist" (built 2026-10-14)
+
+What we do after a client finishes onboarding, for Base and Ads. Data: `supabase/sql/setup_checklist.sql` (generated by a script, so
+the quoting is never by hand). UI: the **Our checklist** button in the Health tab's Journey box and on the highlighted
+Onboarding Progress row, opening `#setup-checklist-modal`.
+- **Groups are ordinary tasks, steps are hidden tasks.** Three groups: **Get ready for GHL** (11 steps) and **Set up GHL** (31,
+  A2P right after the account, tests last) are our agency steps in the Onboarding stage, and **Launch ads** (5) is a Campaign
+  Building checklist item. Each step is a task with `type = 'Setup step'` and `checklist_group` = its group's name. The board shows
+  only the group tasks. **Steps and group tasks are `client_visible = false`**, so clients never see them (enforced by RLS).
+- **Where the definitions live:** steps are `stage_templates` rows (`task_type = 'Setup step'`), including stage `Onboarding`, which
+  the Templates > Stage Checklists picker now offers as "Onboarding (our setup steps)". The two onboarding groups are the existing
+  agency rows in `onboarding_steps`, renamed in place. Steps are tagged like everything else: untagged = Base, `ads` = Ads only.
+  A step title is `Section — Step`; the checklist draws the section as a small label.
+- **Not on the board query.** `fetchAllGlobalData` and the portal load skip `type = 'Setup step'`; `loadSetupSteps()` loads them
+  separately (admins only, paged past 1000) into `globalSetupSteps`. That keeps about 40 tasks per client off every board, report
+  and feed, and out of the 1000-row cap. `openTaskDrawer` also finds them, so "Edit" assigns someone or changes a date.
+- **Raised with the agency tasks** (`generateStageTasks`, Onboarding branch) for the services being onboarded, and with the
+  Campaign Building checklist on entering that stage. A group's task is hidden from the client by title match.
+- **A group ticks itself** (`syncSetupSummaries`): In Progress once a step is done, Complete when the last is. Forward only, so a
+  mis-click never reopens a finished group. It runs in the lifecycle catch-up, before the stage advance.
+- **The stage advance counts the steps.** `autoAdvanceCompletedOnboarding` also waits for every Onboarding-stage step, so a client
+  reaches Campaign Building when GHL is set up, not when ads are live. **That moved "Build and launch ads" out of Onboarding**
+  (the row is switched off); launching is now the Campaign Building group "Launch ads", and **Move Stage to Campaign Learning stays manual**.
+- **Auto-ticks:** three steps carry an existing auto-check (ad account saved, GHL location saved, ad data flowing). The next ones to
+  add are "target CPL set", "meta-sync ran without error", and whatever the GHL API setup can prove, as new keys in
+  `onboarding_auto_checks`. When the GHL account is created through the API, its steps become auto-checks the same way.
+- **Clients already past Onboarding** show our onboarding steps as done in Onboarding Progress (`agencyStepImplicitlyDone`): they
+  predate these steps, so no task was ever raised for them, and the stage move itself means that work was finished. Not the steps of an
+  add-on they are still onboarding (those need their task). Their own client steps are ticked with the existing **Mark client steps done** button.
+- **Existing clients** do not get one: the steps are raised when onboarding finishes or Campaign Building starts. The overview chat
+  ignores steps (`tasks` and `onboarding` tools).
+- **Tests:** 22 PGlite checks on the SQL (re-runnable, tags, order, group names match their task), 42 on the checklist logic and
+  drawer, 15 on generation and the advance rule (5 breakages caught), 71 on the chat tools.
+
+## Loading screen (built 2026-10-14)
+
+`#ge-preload` at the top of `#theme-wrapper` in body.html: logo, name, progress bar and a status line. It is in the markup, so it is up the
+moment body.html lands, and **it fixed the sign-in card flashing on every load** (that card is visible by default until `initApp`
+finds a session).
+- **`gePreload` in app.js** (defined before `geStartupMark`, which drives it): the startup marks move the bar forward and never back
+  (`app.js running` 12%, `signed in` 28, `role checked` 42, `15 tables loaded` 72, `onboarding rules loaded` 88, `data loaded` 94).
+  It comes down in `initApp` after the first page is drawn, after the portal, on the pending screen, when there is no session (the
+  sign-in card becomes the page), and `fail()` shows a message and a Reload button if `initApp` throws. A 20 second watchdog offers a
+  reload if it is still up. Signing in reloads the page, so it shows again.
+- **`goldeneye.html` also paints a plain boot screen** (`#ge-boot`, colors written out because the tokens do not exist yet) before
+  body.html is fetched, and removes it when body.html is injected, since the two look the same. **That half only works once the
+  updated loader is re-pasted into GHL**; the dashboard half needs no re-paste.
+- 16 checks on the controller and its wiring (one breakage caught); the layout was checked in a browser.
+
+## Make pull limit notice (built 2026-10-14)
+
+Make's daily ads pull (scenario #1) fetches active clients with a Supabase Search Rows step **limited to 10**, kept at 10 on
+purpose because a higher limit once caused an error. `showMakeLimitNotice()` (Overview, admins only) warns at exactly 10 active
+clients with an ad account and goes red above 10 ("N of them are getting no new ad data"). Raise the limit in that module
+(and re-test the scenario) before adding the 11th. Counted: `status` active and a non-empty `ad_account_id`; paused and
+archived clients are not. It assumes the Make filter is the same, which has not been read this session. 6 checks.
+
+## Ask Golden Eye: the Overview chat (built 2026-10-13)
+
+`supabase/functions/overview-chat/` and `#ov-chat` at the bottom of the Overview page. Admin only.
+- **Looks things up instead of loading everything.** The model (`gpt-5.6-sol`, Responses API, low reasoning effort, `store: false`)
+  gets ten read-only tools (`tools.ts`): clients, ad performance (daily pull), per-ad breakdown, ad changes, tasks, check-ins,
+  website leads, SEO, onboarding, latest audit. At most 8 model rounds and 115 s; each result is capped (14,000 characters,
+  60 rows). Code computes every figure, the model quotes them.
+- **Runs as the signed-in admin.** Lookups use the caller's own JWT with the anon key, never the service key, so RLS applies as in
+  the dashboard. The caller is checked with `_shared/admin-auth.ts` (same rule as `ai-chat`) and Golden Eye's origins only.
+- **Read-only by construction:** no tool writes, and a test fails if `tools.ts` ever calls insert, update, upsert or delete.
+- **Deliberately not exposed:** task notes, check-in replies, client emails and phones, Stripe ids, ad account ids, credentials.
+  Client-typed text can still arrive in a task title, so the prompt says tool results are data, never instructions.
+- **Leads:** the prompt tells it the daily pull is the working figure, GHL the truth, and per-ad leads are Meta's own count.
+- **UI:** the browser sends only user and assistant text (the function refuses any other role), keeps at most 20 turns, shows
+  "Looked at: ..." under each answer, and drops a failed question from the history. Replies go through `formatChatReply`.
+- **Adding a lookup** means a runner and a `TOOL_DEFS` entry in `tools.ts`, plus a label in `OV_CHAT_SOURCES` in app.js.
+- **Deploy before pushing app.js.** The existing Client Intelligence Agent chat (`ai-chat`, gpt-4o-mini) is unchanged.
+- **Not tested live:** the OpenAI call shape (tools plus encrypted reasoning items with `store: false`) follows the Responses API
+  documentation but has only run against a scripted model. The first real question is the proof.
+- **Tests:** 69 checks on the tools, validation and loop against a fake database and a scripted model (3 breakages caught),
+  21 on the browser side, strict `tsc` on the three modules.
+
+## Tasks page filters (2026-10-02)
+
+- **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first
+  name appears in `assignee` (`myTaskName()`: `user_profiles.full_name`, then the Google name, then
+  the email). Assignees are free text and can list several people ("Tenny, Aidan"), so
+  `taskAssignees()` splits on commas, &, / and "and". Midas = tasks whose client is Midas Media.
+- **Person and client selects** narrow any tab. People: admins from `user_profiles`
+  (`globalTeamProfiles`) first, then every other assignee found on tasks ("KJ", "Media Buyer").
+- **`taskMatchesFilters()` is the one rule** for the board, the list, the stat strip (which ignores
+  the search box) and list-view select-all, which now selects only visible rows so a bulk delete
+  can't reach hidden tasks. Client onboarding pseudo-tasks show only under All and Client.
+- All three filters are remembered per browser (`ge-task-owner`, `ge-task-person`,
+  `ge-task-client`); a remembered client or person that no longer exists resets.
+- **Tests:** 29 jsdom checks (plus 4 mutations, 3 caught; the fourth was redundant code).
+
+- **Phone is unique per client** (`uniq_client_contacts_client_phone`), not table-wide, so one
+  website person can be listed at two clients. The portal team step upserts on
+  `client_name,phone` and falls back to `phone` (error 42P10) if the SQL hasn't run.
+- **People are edited only on the Roster.** Edit client shows a summary and links there. Its old
+  editor kept only rows with a phone and deleted the rest, which would have wiped email-only people.
+  The Roster saves by id: delete removed, update kept, insert new.
+- **`client_profiles`** (business phone, website, address, private notes) is **admin-only by RLS**
+  and keyed on exact `clients.name`, so it's in `rename_client.sql`. Not `clients` columns: the
+  clients row is readable by clients.
+- **RLS fixed in the same SQL:** `client_contacts` had `Auth manage contacts` = `for all using
+  (true)`, so any signed-in user could read, change or delete every client's contacts. Now admin
+  full access, and client select/insert/update via `client_row_visible()` (the email fallback is
+  what lets most clients save the team step). No client delete.
+- **Tests:** 64 jsdom checks on the real markup and app.js (filters, sorting, escaping, profile,
+  saving, validation, the 42P10 fallback, admin gating), 6 deliberate mutations all caught; 27
+  PGlite checks on the SQL against the live policy/index shape, including RLS as a client signing
+- **Done column paging (2026-10-05):** newest-finished first, 8 cards, then "View N more" in steps
+  of 20 (`TASK_DONE_CAP`, `TASK_DONE_STEP`); the column count stays the total. Sortable only drags
+  `.kanban-card`, so the button can't be dragged into a column.
+- **Archive instead of delete (2026-10-05), `supabase/sql/task_archive.sql`:** `tasks.archived_at`
+  / `archived_by`. `fetchAllGlobalData` (and the portal load) splits archived rows into
+  `globalArchivedTasks`, so every board, count, report, the portal and the stage-advance rule
+  ignore them as if deleted. **The row is kept on purpose:** task generation dedupes on title
+  against the database, so an archived onboarding or checklist task isn't recreated, where a
+  deleted one would be. `reconcile_auto_checks()` skips archived rows (re-run
+  `auto_check_reconcile.sql`), and `client-summary` leaves them out (deploy after the SQL).
+  Tasks → **Archived** is the list view of archived rows (filters still apply) with Restore and
+  Delete forever; delete forever only ever touches archived ids. Admin only, like delete was.
+  Client RLS doesn't filter archived rows: the portal hides them in app.js, and they were readable
+  by that client before archiving anyway.
+- **List view escapes task titles and client names now.** It printed them raw, and Client Request
+  titles are typed by clients, so one could run script on our dashboard. The board already escaped.
+  in through the email fallback.
+
+## Roster (built 2026-10-02)
+
+`page-roster`, opened by **View all** on the overview's Active roster. Admin only: `switchAppPage`
+sends anyone else to the overview, and `rosterToggle`/`openRosterProfile` refuse them.
+`renderRoster` (filters: status, opening on Active, service incl. "Base only", search over client and people; no MRR,
+by the user's choice) lives in app.js after the Roster comment block.
+- **A client's profile opens under its own row** (`rosterToggle`, one open at a time;
+  `rosterProfileHtml` builds it, `renderRosterDetail` redraws just it while editing). It sits in
+  the horizontally scrolling table, so `.roster-detail` is `position: sticky; left: 0` with the
+  visible width, and the table's wrapper is `overflow: clip`, not `hidden` (hidden would become
+  the scroll container and break the sticky). It replaced a side drawer on 2026-10-02.
+
+- **People are `client_contacts`**, the table the check-in reminder reads. `client_directory.sql`
+  added `email`, `role` (owner/sales/office/website/marketing/other) and **`checkin_texts`**
+  (default true, so existing rows kept texting). `send_weekly_checkin_reminders()` now skips rows
+  with it off, and `isCheckinContact()` in app.js applies the same rule to the portal team step,
+  profile and reporter counts. The Roster's new-person rows default it off.
+  `checkin_reminder_secret.sql` is superseded for the function; don't re-run its function body.
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -1705,6 +2075,65 @@ stays null when no row has a value, so "not reported" still differs from a repor
 locked until the week's numbers are in. Reminder recipients come from `client_contacts`,
 which the `team` onboarding step writes to.
 
+**VAs collect the numbers now, not automated texts (2026-10-06).** The `checkin-reminder-am/pm`
+cron jobs are switched off (scenario #5 no longer runs). VAs text each client's check-in contacts
+themselves and log the answers on the Roster. `supabase/sql/staff_checkins.sql`:
+- **Our VAs are admin logins** (decided 2026-10-06), so they see the full Roster. The `member`
+  path also works, for a VA ever limited to some clients (`user_client_access` rows): members get the Roster tab (sidebar + phone header) trimmed to people and check-ins: no billing,
+  health, notes, connections, and no editing people. Investors still get no Roster.
+- **Log check-in** (a client's Roster profile) saves `source = 'staff'`: `contact_name` /
+  `contact_phone` are who was texted, `entered_by` the VA, `raw_reply` what they said (optional,
+  client-visible). It reuses the portal form (`weeklyCheckinFormHtml(suffix, opts)`,
+  `readCheckinForm`), so totals and `closes_by_source` are identical. Picking a person who already
+  has a staff row that week edits it by id; others' entries for the week are listed as a warning,
+  because every row is added into the total.
+- **The portal treats a staff-logged week as done**: no popup, reports unlock, and the check-in tab
+  shows what was logged instead of a blank form (a client entry on top would double the week).
+- **RLS:** "Auth read checkins" was `using (true)`, so any signed-in user read every client's revenue.
+  Now reads go through `client_row_visible`; clients insert/update only their own `portal` rows
+  (and the email fallback finally lets most clients save them: the old policies used
+  `user_has_client_access()` alone); staff (`current_user_is_staff()`: admin or member) insert
+  `staff` rows as themselves for clients they can see and edit only their own; delete is admin only.
+  An update RLS refuses matches nothing rather than erroring, so `rosterSaveCheckin` checks a row
+  came back.
+- **Roster status column** (`rosterCheckinStatus`): Logged / Client sent / Missing (active and past
+  Onboarding with nothing for last week). The sidebar badge counts Missing.
+- **Tests:** 53 jsdom checks (8 mutations, all caught), the Roster's 74, 20 PGlite checks on the SQL.
+
+## The easter egg (built 2026-10-06)
+
+One click on the logo (sidebar or phone header) goes to the overview. **Seven clicks within 2.5 s,
+admins only**, load `egg.js` from the same place as app.js (`GE_ASSET_BASE`, read from
+`document.currentScript` at startup) and open it. Nothing is fetched until then.
+- **The code:** `ZLCLYUHFH` is SEVERNAYA moved 7 letters forward. Hints after 2 and 4 wrong tries.
+- **The game:** one 24×24 level, a canvas raycaster at 320×200. Objectives: 3 check-ins, 8 of 11
+  "CPL spikes", then the exit. Keyboard and mouse (pointer lock; arrow keys still turn if a frame
+  refuses it). Touch-only devices are told it needs a keyboard.
+- **Original work only:** art is drawn from strings and canvas shapes, sounds are WebAudio. No film or
+  game names in the art, no music, no copied assets.
+- **Leaderboard:** `egg_runs` (`supabase/sql/egg_runs.sql`), admins read and insert as themselves, no
+  updates, 10 s minimum time. The end screen shows each person's best.
+- **Local preview only:** `window.__geEggDebug` exists only on localhost, for driving the game in tests.
+- **Tests:** map connectivity and cipher in node, 9 PGlite checks on the SQL, a full run in the browser.
+
+## Easter egg #2: Speed to Lead (built 2026-10-13)
+
+Type **5min** anywhere (admins only) and `speedlead.js` loads from the same place as app.js. The keys must follow each other
+within a second, and nothing counts while the cursor is in an input, textarea, select or editable area, or with a modifier
+held (`slKeyPressed` in app.js; the listener ignores it while either game is already open).
+- **The game:** 60 seconds. Leads text in (name, service, city); type the short reply shown, and wrong keys are refused rather
+  than counted against you. Letters, digits and spaces are typed, punctuation fills itself in. Faster is worth more (100 base +
+  up to 100 for speed), x1 to x5 multiplier (+1 per 3 in a row). **Tab** dismisses spam: +40 x multiplier. Replying to spam -100,
+  dropping a real lead -100, a real lead going cold -50 (all reset the streak, the score never goes below 0). Spam that goes
+  unseen costs nothing. The first lead is never spam, about one in five is.
+- **Difficulty:** spawn gap 5.2 s to 2.8 s and patience 17 s to 10 s across the minute, at most 4 waiting.
+- **Rules are plain functions** (`newState`, `tick`, `typeKey`, `dismiss`) that take elapsed time as an argument, so they run
+  under node; the overlay only draws them. Original work: HTML and CSS, WebAudio blips, no outside assets.
+- **Leaderboard:** `speed_lead_runs` (`supabase/sql/speed_lead_runs.sql`), admins read and insert as themselves, no updates, a
+  score must be 1 to 50,000. Separate from `egg_runs`, whose time check does not fit a score. Best score per person on the board.
+- **Touch-only devices** are told it needs a keyboard. `window.__geSpeedLeadDebug` exists only on localhost.
+- **Tests:** 35 checks on the rules (5 breakages caught), 25 on the trigger and the SQL, and a real run in the browser.
+
 ## Settings → Updates (built 2026-09-15)
 
 A plain-English list of every change to Golden Eye, from **`updates.json` in the repo root**, served
@@ -1718,24 +2147,6 @@ setup step is visible without reading a chat log.
 
 - **A file, not a table.** The entry ships and rolls back with its change, needs no RLS or migration,
   and stays readable in git. Nothing writes it from the app.
-- **Write for the person using the dashboard**, not as a commit message. Say what they can now do,
-  and what it fixed if that matters.
-- **The badge** on the tab counts entries dated after the last visit, kept in `localStorage`
-  (`ge-updates-seen`) per browser, and clears when the list is opened. `renderGoldenEye()` refreshes it.
-- **Everything is escaped** (`escapeAttr`) — the file is trusted, but it renders into the dashboard.
-- **Tests:** 12 jsdom checks, including that the real `updates.json` parses and is in date order.
-
-## Conventions
-
-- Client names are compared **normalized** (lowercased, non-alphanumerics stripped) almost
-  everywhere, because Meta renames ad accounts freely. A few spots still match exactly —
-  that mismatch has caused silent misses.
-- A task belongs to the client when its **assignee is "Client"**.
-- Task generation dedupes on title within client+stage, so re-running is always safe.
-- `escapeAttr` for HTML attributes and text; `escapeHTML` is a *JS-string* escaper and is
-  only correct inside inline `onclick`. Using it in `value="..."` added a backslash before
-  every apostrophe on each save.
-
 ## Gotchas that have each cost an hour
 
 - **PGRST204 "column not found"** — PostgREST caches the schema. After any `alter table`:
@@ -1754,6 +2165,24 @@ setup step is visible without reading a chat log.
   Resume on modules that write.
 - **Make webhooks cache their data structure.** New payload fields need "Redetermine data
   structure" + a re-send.
+- **Write for the person using the dashboard**, not as a commit message. Say what they can now do,
+  and what it fixed if that matters.
+- **The badge** on the tab counts entries dated after the last visit, kept in `localStorage`
+  (`ge-updates-seen`) per browser, and clears when the list is opened. `renderGoldenEye()` refreshes it.
+- **Everything is escaped** (`escapeAttr`) — the file is trusted, but it renders into the dashboard.
+- **Tests:** 12 jsdom checks, including that the real `updates.json` parses and is in date order.
+
+## Conventions
+
+- Client names are compared **normalized** (lowercased, non-alphanumerics stripped) almost
+  everywhere, because Meta renames ad accounts freely. A few spots still match exactly —
+  that mismatch has caused silent misses.
+- A task belongs to the client when its **assignee is "Client"**.
+- Task generation dedupes on title within client+stage, so re-running is always safe.
+- `escapeAttr` for HTML attributes and text; `escapeHTML` is a *JS-string* escaper and is
+  only correct inside inline `onclick`. Using it in `value="..."` added a backslash before
+  every apostrophe on each save.
+
 - **Supabase Search Rows defaults to a limit of 10.** Cross that many clients and the rest
   silently get nothing.
 - **pg_cron runs in UTC** — reminder times shift an hour at daylight saving.
@@ -1834,6 +2263,10 @@ GitHub Pages copy but not from the GHL domain.
 - Deleting an onboarding step that has progress rows assumes the FK cascades; untested
 - Pipeline tab hidden pending a rebuild
 - Ad approvals never tested end to end with a client actually approving; pending
+- **The `clients` table's policies are all `true` for any signed-in user** (found 2026-10-02):
+  SELECT, INSERT, UPDATE and DELETE, so a client can read every client's retainer and emails and
+  change or delete any client row. Same class as the 2026-09-10 fixes; needs its own careful pass
+  (app.js writes to `clients` from a few places, including the auto-overdue update on load).
   approvals aren't surfaced in the dashboard notification feed yet
 - The onboarding form chain has broken twice on email identity and hasn't been
   re-tested since the hidden-field fix
@@ -1847,9 +2280,11 @@ GitHub Pages copy but not from the GHL domain.
   they affect nothing — but they will mislead anyone who greps
 - The audit returns raw HTML injected with `innerHTML`; JSON plus client-side rendering
   would be cheaper, safer, and restyleable without re-running the model
-- No ad-level performance data exists anywhere — `daily_reports` is account-level, so
-  "which ad should we turn off" is unanswerable until the Make pull fetches Insights at
-  `level=ad`
+- Ad-level data now comes from meta-sync (`meta_ad_daily`), connected 2026-10-12 for 3Sixty, PANDEN,
+  Anxiety Solutions, Alta Vista, Sunset and (once its rerun lands) Caliber. **Astra Real Estate** is
+  waiting on its owner's approval. `daily_reports` (Make) is still the source for account totals.
+  Meta's lead counts differ from Make's for some accounts (Anxiety Solutions: Meta, and Meta's own
+  Ads Manager, count about 2.5× Make's). GHL is the source of truth; Make's feed was left alone.
 - **A `client_email` value had 2 bytes of hidden trailing whitespace** (length 23 for a
   21-character address — almost certainly `\r\n`), discovered while testing the `tasks`
   RLS fix below. Only confirmed on that one row, but `client_email` is what several

@@ -2,12 +2,179 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-14",
+      "area": "Onboarding",
+      "title": "Older clients no longer show our onboarding steps as outstanding",
+      "what": "A client who has moved past Onboarding now shows our own onboarding steps (Get ready for GHL, Set up GHL) as done in their Onboarding Progress, instead of \"No task yet\". For their own steps, use Mark client steps done at the top of that box."
+    },
+    {
+      "date": "2026-10-14",
+      "area": "Data",
+      "title": "A loading screen",
+      "what": "Golden Eye now shows a loading screen with the logo and a progress bar while it signs you in and loads your clients, instead of flashing the sign-in card first. If something is slow it says so and offers a Reload button.",
+      "note": "The dashboard's own half of this is live as soon as it is pushed. To also cover the first second, before the dashboard arrives, paste the updated goldeneye.html into the GHL page again.",
+      "action": "Optional: re-paste goldeneye.html into the GHL page to cover the very first second."
+    },
+    {
+      "date": "2026-10-14",
+      "area": "Onboarding",
+      "title": "Our checklist for every new client",
+      "what": "Everything we do after a client finishes onboarding is now a checklist: getting ready for GHL (answers, Facebook access, Meta sync, target CPL), setting up GHL (account, A2P first, funnel, workflows, people, tests) and launching ads. On the board it shows as three tasks per client. Open a client's Health tab and press Our checklist, in the Journey box or on the highlighted onboarding row, to see every step, tick them off, or open one as a task to assign someone. A group ticks itself when its last step is done, and a few steps tick themselves.",
+      "note": "Steps are tagged Base or Ads, so a Base-only client skips the Meta and funnel steps. They are hidden from the client's portal. A client now reaches Campaign Building once GHL is set up, and launching ads is the Campaign Building checklist, instead of an onboarding task. Clients who finished earlier do not get one.",
+      "action": "Run supabase/sql/setup_checklist.sql. Then redeploy the overview chat so it ignores the steps: supabase functions deploy overview-chat --project-ref hugnttsqucetldllfgoi"
+    },
+    {
+      "date": "2026-10-14",
+      "area": "Data",
+      "title": "A warning when you reach Make's client limit",
+      "what": "Make's daily ads pull reads clients ten at a time, so the eleventh client with an ad account would silently get no ad data. The Overview now shows a notice when you reach ten active clients with an ad account, and a red one if you go past it, so you know to raise the limit in that Make scenario first."
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Data",
+      "title": "A second hidden game",
+      "what": "There is another secret. Admins who find it can race against the clock to answer leads. Faster replies score more, and the best scores are kept on a leaderboard.",
+      "note": "It is not documented here on purpose.",
+      "action": "Run supabase/sql/speed_lead_runs.sql so scores can be saved."
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Data",
+      "title": "Ask Golden Eye: a chat on the Overview page",
+      "what": "Ask anything about your clients in plain English, such as which ads are over their target CPL, what is overdue and who owns it, or how a client did against last week. It looks the numbers up live in ads, tasks, check-ins, website leads, SEO, onboarding and the morning audit, and shows which of those it used. It can only read, never change anything, and only admins see it.",
+      "note": "It does not see task notes or check-in replies. Each question uses the same OpenAI model as the morning audit, so a heavy question costs a little more than the old client chat.",
+      "action": "Deploy the function first: supabase functions deploy overview-chat --project-ref hugnttsqucetldllfgoi"
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Data",
+      "title": "An activity panel on each client's Ads tab",
+      "what": "Below the charts, a client with synced ad data now shows what changed in their account (turned on or off, budget, targeting, creative, new ads), who did it, and what the affected ads did 7 days before and after. Next to it is every ad with its spend, share of spend, leads and cost per lead, with the CPL in red when it is at or over the client's target.",
+      "note": "Only admins see it. It follows the date range at the top, up to the last 120 days. Leads are Meta's own count, which can run higher than the daily pull for some clients."
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Onboarding",
+      "title": "A journey bar on each client's Health tab",
+      "what": "Between Weekly Check-ins and Onboarding there is now a bar showing how close the client is to their next stage. In Onboarding it counts the same steps as the Onboarding list below it. In every later stage it counts that stage's checklist tasks, and a full bar says the client is ready to move on. You still move them with Move Stage."
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Tasks",
+      "title": "Text whoever a task is assigned to",
+      "what": "Open a task and press Text the assignee to send them a one-line text with the task, client and due date. It works for Aidan and Tenny now; \"Tenny, Aidan\" texts both. Someone with no number on file (KJ, the account manager) is named in the reply instead of failing.",
+      "note": "KJ's number (Philippines, +63) is included, so he can be texted too. The account manager still needs a number.",
+      "action": "Run supabase/sql/task_notify.sql in the SQL Editor."
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Reports",
+      "title": "The morning audit says when ads are off, not that the data is broken",
+      "what": "A client whose ads were switched off used to be reported as \"the daily pull looks broken\", because the daily pull writes nothing for days with no spend. The audit now asks Meta: if it confirms there has been no spend for the last few days, the card says the ads have been off since that day and asks you to confirm it is intended. Real data problems are still reported as before.",
+      "action": "Deploy morning-audit"
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Data",
+      "title": "Ad history loads in pieces when Meta refuses a big request",
+      "what": "Meta sometimes answers a large request for one account with \"service temporarily unavailable\". The ad sync now falls back to loading that account in one-week pieces, retries each once, and says which pieces did not load. It also stops cleanly before its time limit and names what is left, and can be told to skip straight to pieces and leave out days that are already loaded.",
+      "action": "Deploy meta-sync, then run the 90-day backfill again for Caliber Cabinets"
+    },
+    {
+      "date": "2026-10-12",
+      "area": "Reports",
+      "title": "The morning audit lists ads at or over target",
+      "what": "Each morning the audit now also lists individual ads that are at or over their client's target cost per lead over the last 7 days, with spend, leads and a link to the ad in Ads Manager. It only flags: nothing is paused or changed. An ad is skipped while it is still new (under 4 days) or once it has stopped spending. Ad-level leads come from Meta, so they are scaled to match your daily pull for that client, and the card says when it did that. Clients without a target CPL are named, so you know their ads weren't checked.",
+      "note": "The line is \"at or over target\". If that flags too many, it is one setting in the audit code to move it to 1.5x or 2x.",
+      "action": "Set Target CPL on each client in Edit Client, then deploy morning-audit"
+    },
+    {
+      "date": "2026-10-12",
+      "area": "SEO",
+      "title": "Client landing pages no longer count as Midas's own website leads",
+      "what": "Leads from client pages hosted on Midas's domain (Everoak, Astra) were being filed under Midas Media, so Midas's website leads looked like 43 when only 1 was. A client can now list which of its pages count as its own site, and Midas's list is its homepage and booking page. The mislabeled ones are removed. Other clients work as before.",
+      "action": "Run supabase/sql/lead_hosts.sql, then deploy ghl-lead-webhook"
+    },
+    {
+      "date": "2026-10-08",
+      "area": "Onboarding",
+      "title": "Archiving a finished handoff task no longer triggers a second \"onboarding complete\" alert",
+      "what": "Golden Eye treated an archived \"Onboarding complete\" task as if it had never been raised, so archiving it for a client still in Onboarding filed a fresh one and texted you again. Archived tasks now count as already done. The client's own text was never affected, since it only goes out when they finish a step."
+    },
+    {
+      "date": "2026-10-08",
+      "area": "Tasks",
+      "title": "Every admin can archive and edit tasks",
+      "what": "Only three named logins were allowed to change tasks, so for anyone else archiving, moving, editing or deleting a task could silently not save. Every admin can now manage tasks, and if a change is ever refused you now get a message instead of nothing.",
+      "action": "Run supabase/sql/tasks_admin_access.sql"
+    },
+    {
+      "date": "2026-10-06",
+      "area": "Tasks",
+      "title": "Board and List are different again, and the Board can archive",
+      "what": "Clicking List used to leave the Board showing, so the two looked the same and the List's checkboxes and Archive button were easy to miss. List now replaces the Board. The Board's Done column also has an Archive done button that archives every finished task the current filters show."
+    },
+    {
+      "date": "2026-10-06",
+      "area": "Data",
+      "title": "Classified",
+      "what": "Something is hidden in Golden Eye. Agents only. Clicking the logo once now takes you to the overview.",
+      "action": "Run supabase/sql/egg_runs.sql"
+    },
+    {
+      "date": "2026-10-06",
+      "area": "Data",
+      "title": "VAs log weekly check-ins on the Roster",
+      "what": "Clients no longer get automated texts asking for their weekly numbers. Our VAs text them instead and log the answers: Roster (now its own tab in the sidebar) → open a client → Log check-in. Pick the week and who you texted, type in their estimates, jobs and revenue by where the customer came from, and paste their reply if you like. The Roster has a Check-in column (Logged, Client sent or Missing), and the tab's badge counts clients still missing last week's numbers. When we've logged a client's week, their portal shows those numbers instead of asking again, and their reports unlock.",
+      "note": "Each check-in records which of us logged it. This also closes a gap where any signed-in user could read every client's check-in numbers, and fixes most clients being unable to save a check-in from their portal.",
+      "action": "Run supabase/sql/staff_checkins.sql"
+    },
+    {
+      "date": "2026-10-05",
+      "area": "Tasks",
+      "title": "Archive tasks instead of deleting them, and a shorter Done column",
+      "what": "The task drawer's Delete button is now Archive, and the list view's bulk Delete is Archive too. An archived task leaves every board, count, report and the client's portal, but nothing is lost: open Tasks → Archived to restore it, or delete it for good from there. The Done column now shows the 8 most recently finished tasks, with View more at the bottom, instead of growing forever.",
+      "note": "Archiving also stops an onboarding or checklist task from being created again, which deleting didn't.",
+      "action": "Run supabase/sql/task_archive.sql, then re-run supabase/sql/auto_check_reconcile.sql, then deploy client-summary"
+    },
+    {
+      "date": "2026-10-05",
+      "area": "Reports",
+      "title": "Reports say what we changed in the ads and what it did",
+      "what": "Golden Eye now keeps each ad's daily spend and leads, and Meta's change history for every client's ad account, refreshed every morning. Generate Report uses them: changes made during the week (an ad set turned off, a budget raised, a new ad launched) go in with what the affected ads did before and after, or \"too early to tell\" when it's only been a day or two, plus how each ad did. Who made a change is never named in a report.",
+      "note": "Only admins can see the change log and per-ad numbers. The Roster now opens on Active clients.",
+      "action": "Run supabase/functions/meta-sync/schema.sql and re-run supabase/sql/rename_client.sql, set META_ACCESS_TOKEN, deploy meta-sync, then run its schedule.sql"
+    },
+    {
+      "date": "2026-10-02",
+      "area": "Tasks",
+      "title": "Task filters: You, Midas, a person and a client",
+      "what": "The task page now has All, You, Ours, Client and Midas. You shows the tasks assigned to you (including ones shared with someone else), and Midas shows our own internal work. Two dropdowns narrow it further: pick a person to see their tasks, or a client to see theirs. The numbers across the top follow whatever you've picked, so You shows your own late and due-today counts. Your choice is remembered next time you open the page.",
+      "note": "Select-all in the list view now picks only the tasks on screen, so a bulk delete or status change can't touch tasks the filters are hiding. Also: the Roster opens a client's profile right under their row instead of a side panel, MRR is off the Roster, and the client portal's sales-team step asks for each person's email (optional)."
+    },
+    {
+      "date": "2026-10-02",
+      "area": "Data",
+      "title": "Roster: every client and everyone you deal with there",
+      "what": "View all on the overview's Active roster opens the Roster: every client with filters for active, paused and archived, and by service, plus search across client names and the people on file (name, email or phone). Click a client for their full profile: the owner, sales reps, office, website person and anyone else, each with a tap-to-call number and email; business phone, website and address; contract and billing; services; connections; onboarding answers; and private notes. Admins only.",
+      "note": "Each person has a Check-in texts switch. It's on for everyone already listed, so nothing changes for the weekly reminder, and off by default for new people, so a website person or bookkeeper can be on file without being texted. People are now edited on the Roster profile; Edit client shows who's on file and links there. This also closes a gap where any signed-in user could read or change any client's contacts.",
+      "action": "Run supabase/sql/client_directory.sql, then re-run supabase/sql/rename_client.sql"
+    },
+    {
       "date": "2026-10-02",
       "area": "Security",
       "title": "Client records are private to each client",
       "what": "A client signed into the portal could read every client's record (retainer, payment status, emails, ad account) and could change or delete any of them. Each client now sees only their own record, and only admins can add, edit or delete clients. Admins, the client portal and the investor's view work as before.",
       "note": "Members no longer see the Save and Log Payment buttons on the Payments tab, since only admins can change payment details. Overdue payments are still flagged on screen for everyone, and saved as overdue when an admin loads the dashboard.",
       "action": "Run supabase/sql/clients_rls_tests.sql (all 8 must pass), then supabase/sql/clients_rls.sql"
+    },
+    {
+      "date": "2026-09-21",
+      "area": "Reports",
+      "title": "Target CPL and a spend rule for the morning audit",
+      "what": "Edit Client has a new Target CPL box. Set it and the morning audit judges that client against the cost per lead you expect instead of their own last 28 days, so an account that is consistently expensive no longer reads as fine. The audit also has a new spend rule: cost per lead at double the target (or double their usual, with no target) on $200 or more of spend in a week is Critical, even when there are too few leads to prove it statistically. Small accounts like 3Sixty and SimpliBlinds used to be marked too thin to judge, which hid exactly these weeks.",
+      "note": "Critical texts both admins, and the week slides forward daily, so a bad week can text you on several mornings in a row. Small accounts also swing week to week, so expect the odd text for a week that was just unlucky. Being under a target never counts as improving; that still means better than their own past.",
+      "action": "Deploy morning-audit (supabase functions deploy morning-audit), then set Target CPL on the clients that should have one"
     },
     {
       "date": "2026-09-16",

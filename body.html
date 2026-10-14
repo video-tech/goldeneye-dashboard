@@ -12,6 +12,25 @@
            which the desktop sidebar uses, and that sidebar is hidden below md anyway. */
         @media (max-width: 767px) { html, body { overflow-x: hidden; } }
 
+        /* The loading screen. It is in the markup, so it is up the moment this file lands, and app.js takes it
+           down once the first page is drawn. Without it the sign-in card flashed on every load. */
+        #ge-preload { position: fixed; inset: 0; z-index: 100000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--bg, #16110c); transition: opacity .35s ease; }
+        #ge-preload.done { opacity: 0; pointer-events: none; }
+        #ge-preload.gone { display: none; }
+        /* The logo is a transparent PNG, so it sits straight on the screen with a faint gold glow */
+        #ge-preload .pre-mark { width: 96px; height: 96px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 6px 28px rgba(217,180,99,.28)); }
+        #ge-preload .pre-mark img { width: 96px; height: 96px; object-fit: contain; }
+        #ge-preload .pre-name { font-family: Archivo, system-ui, sans-serif; font-size: 22px; font-weight: 600; letter-spacing: .02em; color: var(--t1, #f2ece0); }
+        #ge-preload .pre-bar { width: min(240px, 60vw); height: 3px; border-radius: 2px; background: var(--inset, #241e16); overflow: hidden; }
+        #ge-preload .pre-bar i { display: block; height: 100%; width: 0%; background: var(--goldSolid, #d9b463); transition: width .5s ease; }
+        #ge-preload .pre-bar.wait i { width: 35%; animation: pre-slide 1.1s ease-in-out infinite; }
+        #ge-preload .pre-text { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--t3, #968c7a); min-height: 14px; }
+        @keyframes pre-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+        @media (prefers-reduced-motion: reduce) { #ge-preload .pre-bar.wait i { animation: none; width: 50%; } #ge-preload { transition: none; } }
+        #ge-preload .pre-slow { display: none; font-size: 12px; color: var(--t2, #a79d8c); text-align: center; max-width: 280px; line-height: 1.5; }
+        #ge-preload.slow .pre-slow { display: block; }
+        #ge-preload .pre-slow button { margin-top: 10px; background: var(--goldSolid, #d9b463); color: var(--goldInk, #2a2113); border: 0; border-radius: 2px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+
         /* Paint the canvas itself, so pinching out shows more of the same colour rather
            than white. Only <html> — the GHL containers above stay transparent, which is
            what stops the dashboard fighting the page it's pasted into. #16110c / #f7f3ec
@@ -100,6 +119,31 @@
            title with a literal trailing period, replacing the old <h1>+<p> pair. */
         .ge-page-title { font-size: 27px; line-height: 1.2; text-wrap: balance; }
         .dash-roster-row:hover { background: var(--inset); }
+        /* Roster page */
+        .roster-grid { display: grid; grid-template-columns: minmax(0,1.6fr) 92px minmax(0,1.2fr) 120px 84px 96px 84px 96px; gap: 14px; align-items: center; }
+        .roster-row { padding: 13px 16px; border-top: 1px solid var(--line); cursor: pointer; }
+        .roster-row:hover { background: var(--inset); }
+        .roster-sort { cursor: pointer; user-select: none; }
+        .roster-sort:hover { color: var(--t1); }
+        .roster-seg { padding: 7px 13px; font-size: 12px; color: var(--t2); background: transparent; border: none; border-right: 1px solid var(--line); cursor: pointer; white-space: nowrap; }
+        .roster-seg:last-child { border-right: none; }
+        .roster-seg.on { background: var(--goldWash); color: var(--gold); }
+        .roster-chip { display: inline-block; padding: 2px 7px; border-radius: 2px; background: var(--inset); color: var(--t2); font-size: 11px; white-space: nowrap; }
+        .roster-row.open { background: var(--goldWash); }
+        .roster-chev { font-size: 10px; color: var(--t3); transition: transform 0.2s; width: 10px; flex-shrink: 0; }
+        .roster-row.open .roster-chev { transform: rotate(90deg); color: var(--gold); }
+        /* The expanded profile sits inside the horizontally scrolling table, so it sticks to
+           the left edge and takes the visible width rather than the table's 900px. */
+        .roster-detail { position: sticky; left: 0; width: min(100%, calc(100vw - 48px)); box-sizing: border-box; padding: 4px 22px 22px; border-top: 1px solid var(--goldLine); background: var(--goldWash); }
+        .rd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 36px; }
+        .rd-section { padding: 20px 0; border-top: 1px solid var(--line); min-width: 0; }
+        .rd-kv { display: grid; grid-template-columns: 140px minmax(0,1fr); gap: 6px 16px; font-size: 13px; }
+        .rd-kv dt { color: var(--t3); }
+        .rd-kv dd { color: var(--t1); margin: 0; overflow-wrap: anywhere; }
+        .rd-person { display: flex; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+        .rd-person:first-child { border-top: none; padding-top: 0; }
+        .rd-edit-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; background: var(--inset); border-radius: 3px; }
+        @media (max-width: 640px) { .rd-kv { grid-template-columns: 1fr; gap: 2px; } .rd-kv dd { margin-bottom: 8px; } .rd-edit-row { grid-template-columns: 1fr; } }
         .ge-search-row:hover { background: var(--inset); }
         .kanban-card:hover { border-color: var(--t3); }
         .ge-table-row:hover { background: var(--inset); }
@@ -255,6 +299,9 @@
         .ob-chip.ob-chip-web[aria-pressed="true"] { background: rgba(143,174,144,0.15); border-color: rgba(143,174,144,0.45); color: var(--pos); }
         .ob-chip.ob-chip-off { border-style: dashed; }
         .ob-chip:focus-visible { outline: 2px solid var(--goldSolid); outline-offset: 1px; }
+        /* Class, not inline style: an inline display:grid beat .hidden, so the Board never hid when List was picked */
+        .task-kanban-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 18px; align-items: start; }
+        .task-kanban-grid.hidden { display: none; }
         .view-btn { padding: 0.4rem 1rem; font-size: 0.8rem; font-weight: bold; border-radius: 2px; transition: 0.2s; color: var(--t2); }
         .view-btn.active { background: var(--inset); color: var(--t1); border: 1px solid var(--line); }
 
@@ -314,6 +361,14 @@
 
     <div id="theme-wrapper">
 
+        <div id="ge-preload" role="status" aria-live="polite">
+            <div class="pre-mark"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" alt=""></div>
+            <div class="pre-name">Golden Eye</div>
+            <div class="pre-bar wait" id="ge-pre-bar"><i id="ge-pre-fill"></i></div>
+            <div class="pre-text" id="ge-pre-text">Starting</div>
+            <div class="pre-slow" id="ge-pre-slow"><span id="ge-pre-slow-msg">This is taking longer than usual.</span><br><button type="button" onclick="location.reload()">Reload</button></div>
+        </div>
+
         <div id="client-preview-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:10000; background:linear-gradient(90deg,#7c3aed,#2563eb); color:white; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; align-items:center; justify-content:center; gap:10px 16px; flex-wrap:wrap; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,0.4);">
             <span class="text-sm font-bold"><i class="fa-solid fa-eye mr-2"></i>Client preview &mdash; viewing as <span id="client-preview-name">Client</span></span>
             <button onclick="exitClientPreview()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white btn btn-sm text-xs transition">
@@ -324,7 +379,7 @@
         <div id="drawer-overlay" onclick="closeAllDrawers()"></div>
 
         <div id="auth-container" class="glass p-12 max-w-md mx-auto text-center mt-20">
-            <div class="bg-white w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-xl"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="w-12" alt="Logo"></div>
+            <div class="mx-auto mb-6 flex items-center justify-center" style="width:96px; height:96px; filter:drop-shadow(0 6px 28px rgba(217,180,99,.28));"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" style="width:96px; height:96px; object-fit:contain;" alt="Logo"></div>
             <h2 class="text-2xl font-bold mb-2 text-white">Midas HQ</h2>
             <p class="text-gray-400 text-sm mb-8">Sign in to access your dashboard.</p>
 
@@ -367,7 +422,7 @@
         <div id="admin-dashboard-container" class="hidden flex h-screen w-full relative z-10">
             
             <nav class="w-64 m-4 mr-0 hidden md:flex flex-col sticky top-4 h-[calc(100vh-2rem)] shrink-0" style="background:var(--panel); border:1px solid var(--line); border-radius:3px;">
-                <div style="padding:20px 20px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px;">
+                <div id="ge-logo" onclick="geLogoClick()" title="Overview" style="padding:20px 20px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; cursor:pointer; user-select:none;">
                     <img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" style="height:26px;" alt="Midas Media">
                     <div>
                         <div class="ge-title" style="font-size:20px;">golden eye.</div>
@@ -381,6 +436,7 @@
                         <button onclick="navTo('goldeneye')" id="nav-goldeneye" class="w-full nav-item active"><i class="fa-solid fa-chart-line" style="width:15px; text-align:center;"></i> Overview</button>
                         <button onclick="navTo('tasks')" id="nav-tasks" class="w-full nav-item"><i class="fa-solid fa-check-square" style="width:15px; text-align:center;"></i> Tasks<span class="ge-label" style="margin-left:auto;" id="nav-badge-tasks"></span></button>
                         <button onclick="navTo('clients')" id="nav-clients" class="w-full nav-item"><i class="fa-solid fa-users" style="width:15px; text-align:center;"></i> Accounts<span class="ge-label" style="margin-left:auto;" id="nav-badge-clients"></span></button>
+                        <button onclick="navTo('roster')" id="nav-roster" class="w-full nav-item hidden"><i class="fa-solid fa-address-book" style="width:15px; text-align:center;"></i> Roster<span class="ge-label" style="margin-left:auto;" id="nav-badge-roster"></span></button>
                         <button onclick="navTo('sales')" id="nav-sales" class="w-full nav-item hidden"><i class="fa-solid fa-sack-dollar" style="width:15px; text-align:center;"></i> Sales</button>
                         <button onclick="navTo('creatives')" id="nav-creatives" class="w-full nav-item"><i class="fa-solid fa-image" style="width:15px; text-align:center;"></i> Ad approvals<span class="ge-label" style="margin-left:auto;" id="nav-badge-creatives"></span></button>
 
@@ -410,7 +466,7 @@
 
             <main class="flex-1 flex flex-col h-screen overflow-y-auto relative pb-20 md:pb-0">
                 <header class="md:hidden flex justify-between items-center p-4 border-b border-white/10 glass m-4 mb-0 shrink-0">
-                    <div class="flex items-center shrink-0"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-7" alt="Golden Eye"></div>
+                    <div class="flex items-center shrink-0" onclick="geLogoClick()" style="cursor:pointer; user-select:none;"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="h-7" alt="Golden Eye"></div>
                     <!-- Every sidebar destination, or the pages missing here are simply
                          unreachable on a phone. Scrolls sideways rather than wrapping,
                          so the header stays one row however many there are. -->
@@ -418,6 +474,7 @@
                         <button onclick="navTo('goldeneye')" class="glass-icon-btn shrink-0" title="Goldeneye"><i class="fa-solid fa-chart-line"></i></button>
                         <button onclick="navTo('tasks')" class="glass-icon-btn shrink-0" title="Tasks"><i class="fa-solid fa-check-square"></i></button>
                         <button onclick="navTo('clients')" class="glass-icon-btn shrink-0" title="Clients"><i class="fa-solid fa-users"></i></button>
+                        <button onclick="navTo('roster')" id="m-nav-roster" class="glass-icon-btn shrink-0 hidden" title="Roster"><i class="fa-solid fa-address-book"></i></button>
                         <button onclick="navTo('sales')" class="glass-icon-btn shrink-0 hidden" title="Sales"><i class="fa-solid fa-hand-holding-dollar"></i></button>
                         <button onclick="navTo('creatives')" class="glass-icon-btn shrink-0" title="Ad Creatives"><i class="fa-solid fa-palette text-purple-400"></i></button>
                         <button onclick="navTo('templates')" id="m-nav-templates" class="glass-icon-btn shrink-0 hidden" title="Templates"><i class="fa-solid fa-layer-group"></i></button>
@@ -448,6 +505,9 @@
                 </header>
 
                 <div id="page-goldeneye" class="p-4 md:p-8 block">
+                    <!-- Make's daily ads pull reads clients through a Search Rows step limited to 10 (deliberately: a
+                         higher limit caused an error once). This tells admins when they have reached it. -->
+                    <div id="ov-make-limit" class="hidden" role="alert" style="margin-bottom:16px; padding:12px 16px; border-radius:3px; font-size:13px; line-height:1.5;"></div>
 
                     <!-- Hero band: MRR and Network Health used to be two separate panels;
                          one bordered section with a hairline between them reads as a single
@@ -507,7 +567,12 @@
                                     <span class="ge-label" style="font-size:11px;">02.</span>
                                     <span class="ge-title" style="font-size:15px;">active roster.</span>
                                 </h3>
-                                <span class="ge-label" style="background:var(--inset); padding:2px 9px; border-radius:2px;" id="dash-client-count">0 Clients</span>
+                                <div class="flex items-center gap-3">
+                                    <span class="ge-label" style="background:var(--inset); padding:2px 9px; border-radius:2px;" id="dash-client-count">0 Clients</span>
+                                    <!-- Admin only (toggled in renderGoldenEye): the roster page shows
+                                         contact details and private notes. -->
+                                    <button id="btn-roster-view-all" onclick="navTo('roster')" class="hidden ge-label" style="color:var(--gold); cursor:pointer;">View all &rarr;</button>
+                                </div>
                             </div>
                             <!-- Div-grid rows, not a <table> — matches the target design's
                                  fixed side columns (Stage/Health/MRR) with the account name
@@ -551,6 +616,66 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Ask Golden Eye: a chat that looks things up in the live data (overview-chat function).
+                         Admin only, shown by renderGoldenEye. Read-only: it can answer, never change anything. -->
+                    <div id="ov-chat" class="glass p-6 hidden" style="margin-top:24px;">
+                        <div class="flex flex-wrap items-baseline justify-between gap-2">
+                            <div>
+                                <h3 class="ge-title" style="font-size:18px;">ask golden eye.</h3>
+                                <p class="text-xs" style="margin-top:5px; color:var(--t2);">Ask about any client, ads, tasks, check-ins, SEO or onboarding. It looks the numbers up live and cannot change anything.</p>
+                            </div>
+                            <button type="button" id="ov-chat-reset" onclick="ovChatReset()" class="ge-label hidden" style="color:var(--gold); cursor:pointer; background:none; border:none;">New chat</button>
+                        </div>
+                        <div id="ov-chat-msgs" class="flex flex-col gap-3 overflow-y-auto" style="margin-top:14px; max-height:440px;"></div>
+                        <div id="ov-chat-suggest" class="flex flex-wrap gap-2" style="margin-top:12px;"></div>
+                        <form onsubmit="ovChatSubmit(event)" class="flex gap-2" style="margin-top:14px;">
+                            <input type="text" id="ov-chat-input" class="glass-input flex-1" maxlength="1000" autocomplete="off" placeholder="Which clients are over their target CPL this week?">
+                            <button type="submit" id="ov-chat-send" class="btn-primary btn text-sm shrink-0">Ask</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Roster: every client, filterable, with a profile that opens under the row (rosterProfileHtml).
+                     Admin only — contacts and private notes live here. Rendered by renderRoster()
+                     in app.js from data fetchAllGlobalData already loads, plus client_profiles. -->
+                <div id="page-roster" class="p-4 md:p-8 space-y-6 hidden">
+                    <div class="glass" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+                        <div class="p-5" style="border-right:1px solid var(--line);">
+                            <div class="ge-label">Active</div>
+                            <div class="ge-display ge-num" style="font-size:30px; margin-top:6px; color:var(--pos);" id="roster-stat-active">0</div>
+                        </div>
+                        <div class="p-5" style="border-right:1px solid var(--line);">
+                            <div class="ge-label">Paused</div>
+                            <div class="ge-display ge-num" style="font-size:30px; margin-top:6px; color:var(--warn);" id="roster-stat-paused">0</div>
+                        </div>
+                        <div class="p-5">
+                            <div class="ge-label">Archived</div>
+                            <div class="ge-display ge-num" style="font-size:30px; margin-top:6px; color:var(--t3);" id="roster-stat-archived">0</div>
+                        </div>
+                    </div>
+
+                    <div class="glass p-5 md:p-6">
+                        <div class="flex flex-wrap items-center gap-3 mb-5">
+                            <div id="roster-status-filter" class="flex" style="border:1px solid var(--line); border-radius:3px; overflow:hidden;"></div>
+                            <select id="roster-service-filter" class="glass-input" style="width:auto; min-width:170px; padding-top:7px; padding-bottom:7px;" onchange="rosterSetService(this.value)"></select>
+                            <div style="display:flex; align-items:center; gap:9px; background:var(--inset); border:1px solid var(--line); border-radius:3px; padding:7px 12px; flex:1 1 200px; max-width:320px; margin-left:auto;">
+                                <i class="fa-solid fa-magnifying-glass" style="font-size:11px; color:var(--t3);"></i>
+                                <input type="text" id="roster-search" placeholder="Search clients or people…" autocomplete="off"
+                                       style="background:transparent; border:none; outline:none; color:var(--t1); font-family:inherit; font-size:12.5px; width:100%;"
+                                       oninput="rosterSetSearch(this.value)">
+                            </div>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <!-- overflow:clip, not hidden: hidden would make this the scroll
+                                 container and stop the expanded profile sticking to the left. -->
+                            <div style="min-width:900px; border:1px solid var(--line); border-radius:3px; overflow:clip;">
+                                <div id="roster-head" class="ge-label roster-grid" style="padding:10px 16px;"></div>
+                                <div id="roster-list"></div>
+                            </div>
+                        </div>
+                        <p id="roster-empty" class="hidden text-sm" style="color:var(--t2); padding:24px 4px;">No clients match these filters.</p>
+                    </div>
                 </div>
 
                 <div id="page-tasks" class="p-4 md:p-8 space-y-6 hidden">
@@ -560,7 +685,7 @@
                     <div class="glass" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
                         <div style="padding:18px 20px; border-left:1px solid var(--line);">
                             <div class="ge-label">Open</div>
-                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--t1);" id="stat-total">0</span><span class="text-xs" style="color:var(--t3);">all accounts</span></div>
+                            <div class="flex items-baseline gap-2" style="margin-top:9px;"><span class="ge-display ge-num" style="font-size:32px; font-weight:300; color:var(--t1);" id="stat-total">0</span><span class="text-xs" style="color:var(--t3);" id="stat-total-scope">all accounts</span></div>
                         </div>
                         <div style="padding:18px 20px; border-left:1px solid var(--line);">
                             <div class="ge-label">Late</div>
@@ -590,11 +715,18 @@
                                 <i class="fa-solid fa-search" style="position:absolute; left:11px; top:50%; transform:translateY(-50%); font-size:11px; color:var(--t3);"></i>
                                 <input type="text" id="task-search-filter" placeholder="Filter&hellip;" class="glass-input" style="padding-left:30px;" onkeyup="renderActiveTaskView()">
                             </div>
+                            <!-- You = assigned to whoever is signed in; Midas = our own internal
+                                 work (client Midas Media). The two selects narrow further and
+                                 compose with these and with the search box (taskMatchesFilters). -->
                             <div style="display:flex; border:1px solid var(--line); border-radius:3px; overflow:hidden;">
                                 <button onclick="setTaskOwnerFilter('all')" id="btn-owner-all" class="view-btn active">All</button>
+                                <button onclick="setTaskOwnerFilter('you')" id="btn-owner-you" class="view-btn" style="border-left:1px solid var(--line);">You</button>
                                 <button onclick="setTaskOwnerFilter('ours')" id="btn-owner-ours" class="view-btn" style="border-left:1px solid var(--line);">Ours</button>
                                 <button onclick="setTaskOwnerFilter('theirs')" id="btn-owner-theirs" class="view-btn" style="border-left:1px solid var(--line);">Client</button>
+                                <button onclick="setTaskOwnerFilter('midas')" id="btn-owner-midas" class="view-btn" style="border-left:1px solid var(--line);">Midas</button>
                             </div>
+                            <select id="task-person-filter" class="glass-input" style="width:auto; min-width:140px; padding-top:7px; padding-bottom:7px;" onchange="setTaskPersonFilter(this.value)" title="Show one person's tasks"></select>
+                            <select id="task-client-filter" class="glass-input" style="width:auto; min-width:160px; max-width:220px; padding-top:7px; padding-bottom:7px;" onchange="setTaskClientFilter(this.value)" title="Show one client's tasks"></select>
                             <!-- Informational, not a control — the board is always sorted by
                                  priority score (renderKanban), and a dropdown implying a change
                                  of sort here would be decoration with nothing behind it. -->
@@ -605,14 +737,20 @@
                                 <button onclick="switchTaskView('kanban')" id="btn-view-kanban" class="view-btn active"><i class="fa-solid fa-table-columns mr-2"></i>Board</button>
                                 <button onclick="switchTaskView('table')" id="btn-view-table" class="view-btn" style="border-left:1px solid var(--line);"><i class="fa-solid fa-list mr-2"></i>List</button>
                             </div>
+                            <button id="btn-task-archived" onclick="setTaskArchiveView(true)" class="hidden ge-label" style="color:var(--t2); cursor:pointer;" title="Tasks you archived; restore or delete them here"><i class="fa-solid fa-box-archive mr-1"></i>Archived <span id="task-archived-count"></span></button>
                             <button id="btn-columns" onclick="openColumnDrawer()" class="glass-pill hidden !py-1.5 !px-3 !text-xs" title="Choose which columns the list shows"><i class="fa-solid fa-table-columns"></i> Columns</button>
                             <button onclick="openTaskDrawer('new')" class="btn-primary btn text-sm whitespace-nowrap"><i class="fa-solid fa-plus mr-2"></i> New task</button>
                         </div>
                     </div>
 
-                    <div id="t-bulk-bar" class="p-4 flex justify-between items-center hidden" style="background:var(--goldWash); border:1px solid var(--goldLine); border-radius:3px;"><div class="flex items-center gap-4"><span class="text-sm font-bold" style="color:var(--gold);"><span id="t-bulk-count">0</span> Selected</span><button onclick="updateSelectedStatus()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button onclick="deleteSelectedTasks()" class="text-xs font-bold" style="color:var(--neg);"><i class="fa-solid fa-trash mr-1"></i> Delete</button></div><button onclick="clearSelection()" class="text-xs" style="color:var(--t2);"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
+                    <div id="task-archive-banner" class="hidden flex flex-wrap items-center justify-between gap-3 p-4" style="background:var(--inset); border:1px solid var(--line); border-radius:3px;">
+                        <span class="text-sm" style="color:var(--t2);"><i class="fa-solid fa-box-archive mr-2" style="color:var(--gold);"></i>Archived tasks. They're off every board, report and count. Select some to restore them or delete them for good.</span>
+                        <button onclick="setTaskArchiveView(false)" class="ge-label" style="color:var(--gold); cursor:pointer;">&larr; Back to tasks</button>
+                    </div>
 
-                    <div id="view-kanban" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; align-items:start;">
+                    <div id="t-bulk-bar" class="p-4 flex justify-between items-center hidden" style="background:var(--goldWash); border:1px solid var(--goldLine); border-radius:3px;"><div class="flex items-center gap-4"><span class="text-sm font-bold" style="color:var(--gold);"><span id="t-bulk-count">0</span> Selected</span><button id="t-bulk-status" onclick="updateSelectedStatus()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-check-circle mr-1"></i> Change Status</button><button id="t-bulk-archive" onclick="archiveSelectedTasks()" class="text-xs font-bold" style="color:var(--t1);"><i class="fa-solid fa-box-archive mr-1"></i> Archive</button><button id="t-bulk-restore" onclick="restoreSelectedTasks()" class="text-xs font-bold hidden" style="color:var(--pos);"><i class="fa-solid fa-rotate-left mr-1"></i> Restore</button><button id="t-bulk-delete" onclick="deleteArchivedForever()" class="text-xs font-bold hidden" style="color:var(--neg);"><i class="fa-solid fa-trash mr-1"></i> Delete forever</button></div><button onclick="clearSelection()" class="text-xs" style="color:var(--t2);"><i class="fa-solid fa-times mr-1"></i> Clear</button></div>
+
+                    <div id="view-kanban" class="task-kanban-grid">
                         <div style="display:flex; flex-direction:column; gap:12px;">
                             <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--t3);"></span><span class="ge-label" style="font-size:10px;">To do</span><span class="ge-num text-xs" style="margin-left:auto; color:var(--t3);" id="count-todo">0</span></div>
                             <div class="kanban-col space-y-2.5" data-status="Not Started" id="col-todo" style="min-height:180px;"></div>
@@ -626,7 +764,7 @@
                             <div class="kanban-col space-y-2.5" data-status="Blocked" id="col-rev" style="min-height:180px;"></div>
                         </div>
                         <div style="display:flex; flex-direction:column; gap:12px;">
-                            <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--pos);"></span><span class="ge-label" style="font-size:10px;">Done</span><span class="ge-num text-xs" style="margin-left:auto; color:var(--t3);" id="count-done">0</span></div>
+                            <div class="flex items-center gap-2"><span style="width:5px; height:5px; border-radius:50%; background:var(--pos);"></span><span class="ge-label" style="font-size:10px;">Done</span><button type="button" id="btn-archive-done" onclick="archiveDoneTasks()" class="hidden ge-label" style="margin-left:auto; color:var(--t2); cursor:pointer; font-size:10px;" title="Archive every finished task shown by the current filters"><i class="fa-solid fa-box-archive mr-1"></i>Archive done</button><span class="ge-num text-xs" style="color:var(--t3);" id="count-done">0</span></div>
                             <div class="kanban-col space-y-2.5" data-status="Complete" id="col-done" style="min-height:180px;"></div>
                         </div>
                     </div>
@@ -789,6 +927,8 @@
                             </div>
                         </div>
 
+                        <div id="ad-activity-panel" class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden"></div>
+
                         <div id="ai-box-container" class="glass p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hidden" style="background:var(--goldWash); border-color:var(--goldLine);">
                             <div class="flex-1">
                                 <div class="flex items-center gap-2 mb-3">
@@ -867,6 +1007,21 @@
                                     <span class="text-[10px] text-gray-500 uppercase tracking-widest">Client reported by text</span>
                                 </div>
                                 <div id="c-checkins-list" class="overflow-x-auto"></div>
+                            </div>
+
+                            <div id="c-stage-box" class="glass p-6 flex flex-col hidden" style="border-left:4px solid var(--goldSolid);">
+                                <div class="flex flex-wrap justify-between items-baseline gap-2 mb-4">
+                                    <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-route mr-2" style="color:var(--gold);"></i> Journey</h3>
+                                    <div class="flex items-center gap-3">
+                                        <span id="c-stage-summary" class="text-xs" style="color:var(--t2);"></span>
+                                        <button type="button" id="c-stage-checklist" onclick="openSetupChecklist()" class="hidden btn-primary btn text-xs" style="padding:5px 12px;"><i class="fa-solid fa-list-check mr-1.5"></i><span id="c-stage-checklist-label">Our checklist</span></button>
+                                    </div>
+                                </div>
+                                <div id="c-stage-steps" class="flex items-center gap-1 mb-3 text-[10px] uppercase tracking-widest" style="color:var(--t3);"></div>
+                                <div class="w-full overflow-hidden" style="height:8px; border-radius:4px; background:var(--inset); border:1px solid var(--line);" role="progressbar" id="c-stage-bar-track" aria-valuemin="0" aria-valuemax="100">
+                                    <div id="c-stage-bar" style="height:100%; width:0%; background:var(--goldSolid); border-radius:4px; transition:width .4s ease;"></div>
+                                </div>
+                                <p id="c-stage-detail" class="text-xs mt-2" style="color:var(--t3);"></p>
                             </div>
 
                             <div id="c-onboarding-box" class="glass p-6 border-l-4 border-blue-500 flex flex-col hidden">
@@ -1970,6 +2125,20 @@
     </div>
 </div>
 
+<div id="setup-checklist-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:flex-start; justify-content:center;" onclick="if (event.target === this) closeSetupChecklist()">
+                    <div class="glass" style="max-width: 760px; width: 100%; margin: auto; padding: 2rem 2.25rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);" role="dialog" aria-label="Our checklist">
+                        <div class="flex justify-between items-start mb-5">
+                            <div>
+                                <p class="ge-label mb-1">Our checklist</p>
+                                <h2 class="ge-title" style="font-size:22px;" id="setup-checklist-client">client.</h2>
+                                <p class="text-xs" style="margin-top:5px; color:var(--t2);">Everything we do for this client after they finish onboarding. Tick a step off, or open it as a task to assign someone or change the date. The group tasks on the board tick themselves.</p>
+                            </div>
+                            <button type="button" onclick="closeSetupChecklist()" aria-label="Close" style="color:var(--t3); font-size:20px; line-height:1;">&#10005;</button>
+                        </div>
+                        <div id="setup-checklist-body" style="max-height:68vh; overflow-y:auto; padding-right:6px;"></div>
+                    </div>
+                </div>
+
 <div id="stage-transition-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
                     <div class="glass" style="max-width: 500px; width: 100%; margin: auto; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
                         <div class="flex justify-between items-start mb-6">
@@ -2495,6 +2664,32 @@
                 <div class="glass" style="overflow:hidden;">
                     <iframe id="cp-deckcalc-frame" title="Deck cost estimator" scrolling="no" style="width:100%; border:none; display:block; height:1400px;"></iframe>
                 </div>
+
+                <!-- Create a QuickBooks estimate from the deck above. Hidden until the deck-estimate
+                     edge function says this client's QuickBooks is connected (deckQbRefresh in
+                     app.js); until then the tab is exactly what it was. The deck comes from the
+                     calculator itself (postEstimateToParent), never re-typed here. -->
+                <div id="cp-deckcalc-qb" class="glass p-6 hidden">
+                    <h3 class="ge-title" style="font-size:16px;">Create a QuickBooks estimate</h3>
+                    <p style="color:var(--t2); font-size:13px; margin-top:6px;">Uses the deck above, at the top of its price range. Nothing is emailed to the customer; review and send it from QuickBooks.</p>
+                    <p id="cp-deckcalc-qb-deck" style="color:var(--t1); font-size:13px; margin-top:14px; margin-bottom:18px;">Waiting for the calculator…</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="modal-label">First name</label><input type="text" id="cp-qb-first" class="glass-input" autocomplete="off" maxlength="60"></div>
+                        <div><label class="modal-label">Last name</label><input type="text" id="cp-qb-last" class="glass-input" autocomplete="off" maxlength="60"></div>
+                        <div><label class="modal-label">Email</label><input type="email" id="cp-qb-email" class="glass-input" autocomplete="off" maxlength="254" placeholder="customer@email.com"></div>
+                        <div><label class="modal-label">Phone <span style="color:var(--t3);">(optional)</span></label><input type="tel" id="cp-qb-phone" class="glass-input" autocomplete="off" maxlength="40"></div>
+                        <div class="md:col-span-2"><label class="modal-label">Street address <span style="color:var(--t3);">(optional)</span></label><input type="text" id="cp-qb-address" class="glass-input" autocomplete="off" maxlength="200"></div>
+                        <div><label class="modal-label">City <span style="color:var(--t3);">(optional)</span></label><input type="text" id="cp-qb-city" class="glass-input" autocomplete="off" maxlength="100"></div>
+                        <div><label class="modal-label">ZIP <span style="color:var(--t3);">(optional)</span></label><input type="text" id="cp-qb-zip" class="glass-input" autocomplete="off" maxlength="10" inputmode="numeric"></div>
+                    </div>
+                    <p id="cp-qb-msg" class="text-sm hidden" style="margin-top:16px;"></p>
+                    <button id="cp-qb-create" onclick="deckQbCreate()" class="btn-primary btn text-sm" style="margin-top:16px;" disabled>Create QuickBooks estimate</button>
+
+                    <div id="cp-qb-history-wrap" class="hidden" style="margin-top:28px;">
+                        <h4 class="ge-label">Recent estimates</h4>
+                        <div id="cp-qb-history" style="margin-top:10px;"></div>
+                    </div>
+                </div>
             </div>
 
             <div id="cp-view-leaderboard" class="space-y-8 hidden">
@@ -2668,7 +2863,8 @@
             </div>
             <div class="p-6 flex flex-col gap-3" style="border-top:1px solid var(--line); background:var(--inset);">
                 <button type="submit" id="t-save-btn" class="btn-primary btn text-sm w-full">Save task</button>
-                <button type="button" id="t-delete-btn" onclick="deleteTask()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--neg); color:var(--neg);">Delete task</button>
+                <button type="button" id="t-notify-btn" onclick="notifyTaskAssignee()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--goldLine); color:var(--gold);"><i class="fa-solid fa-message mr-2"></i>Text the assignee</button>
+                <button type="button" id="t-delete-btn" onclick="archiveTask()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--line); color:var(--t2);"><i class="fa-solid fa-box-archive mr-2"></i>Archive task</button>
             </div>
         </form>
 
@@ -2860,12 +3056,14 @@
                             </select>
                         </div>
                         <div class="col-span-2">
-                            <label class="modal-label">Check-in Contacts</label>
-                            <div id="edit-client-contacts-list" class="space-y-2"></div>
-                            <button type="button" onclick="addContactRow()" class="mt-2 text-xs" style="color:var(--gold); font-weight:600;">
-                                <i class="fa-solid fa-plus mr-1"></i> Add contact
+                            <label class="modal-label">People</label>
+                            <!-- Contacts (owner, sales reps, website person…) and who gets the weekly
+                                 check-in text are edited on the client's Roster profile, the one place
+                                 that shows every field. This is a read-only summary. -->
+                            <div id="edit-client-people-summary" class="text-sm" style="color:var(--t2);"></div>
+                            <button type="button" onclick="openRosterFromEditClient()" class="mt-2 text-xs" style="color:var(--gold); font-weight:600;">
+                                Manage people &rarr;
                             </button>
-                            <p class="text-[10px] mt-1" style="color:var(--t3);">Everyone listed gets the weekly check-in text, and their replies are combined into one weekly figure for this client.</p>
                         </div>
                         <div>
                             <label class="modal-label">Meta Ad Account ID</label>

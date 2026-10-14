@@ -20,6 +20,7 @@ import {
     resolveAuditAnchor,
     todayDayNumber,
 } from "./engine.js";
+import { adFlagsContext, applyAdsOff, computeAdFlags, renderAdFlagsHtml } from "./ads.js";
 
 // Enough history for the 28-day baseline plus the 7-day window, with room to spare so
 // a few missing days never shorten the baseline.
@@ -51,6 +52,50 @@ function reportsForClient(client: any, rows: any[]) {
     });
 }
 
+// Per-ad rows from meta-sync (meta_ad_daily) for the clients that have a target CPL, over the same
+// history the audit reads. Paged, because PostgREST caps one response at 1000 rows and a busy
+// account has more than that in 45 days. Returns null instead of throwing: the ad section is an
+// extra, and a missing table (meta-sync's schema.sql not run yet) or a database hiccup must never
+// cost the day's audit card.
+async function loadAdRows(db: any, names: string[]) {
+    const cutoff = new Date(Date.now() - HISTORY_DAYS * 86400000).toISOString().split("T")[0];
+    const rows: any[] = [];
+    try {
+        for (const name of names) {
+            for (let from = 0; ; from += 1000) {
+                const { data, error } = await db
+                    .from("meta_ad_daily")
+                    .select("client_name, ad_account_id, date, ad_id, ad_name, adset_name, campaign_name, spend, leads")
+                    .eq("client_name", name)
+                    .gte("date", cutoff)
+                    .order("date", { ascending: true })
+                    .order("ad_id", { ascending: true })
+                    .range(from, from + 999);
+                if (error) throw error;
+                rows.push(...(data ?? []));
+                if (!data || data.length < 1000) break;
+            }
+        }
+    } catch (err) {
+        console.error("meta_ad_daily not read, skipping the ads section:", err);
+        return null;
+    }
+    return { rows, cutoff };
+}
+
+// Everything meta-sync knows that the audit uses: per-ad rows (for the ads section, and to tell "ads
+// are off" from "the pull is broken") and each client's sync state. Wanted for clients with a target
+// CPL and for any whose daily-pull data looks missing. Null when meta-sync's tables cannot be read.
+async function loadAdData(db: any, signals: any[]) {
+    const wanted = signals.filter((s) => parseFloat(s.targetCpl) > 0 || s.verdict === "DATA_STALE" || s.verdict === "DATA_GAPS");
+    if (!wanted.length) return { rows: [] as any[], cutoff: undefined as string | undefined, syncState: [] as any[] };
+    const loaded = await loadAdRows(db, wanted.map((s) => s.name));
+    if (!loaded) return null;
+    const { data: syncState, error } = await db.from("meta_sync_state").select("client_name, last_run_at, last_error, last_window");
+    if (error) console.error("meta_sync_state not read:", error);
+    return { rows: loaded.rows, cutoff: loaded.cutoff as string | undefined, syncState: error ? [] : (syncState ?? []) };
+}
+
 const PROMPT_INSTRUCTIONS = `
 INSTRUCTIONS:
 You are a senior media buyer briefing the team on the agency's Meta accounts.
@@ -58,7 +103,7 @@ You are a senior media buyer briefing the team on the agency's Meta accounts.
 The analysis is already done. Each client sits under a heading that states its verdict,
 and that heading is authoritative. Your job is to explain what each one means and what to
 do about it — not to reclassify anything, recompute anything, or infer a trend from the
-raw numbers. Never move a client into a section its verdict does not put it in.
+raw numbers. Never give a client a marker color or icon its own verdict does not match.
 
 Only ever mention a client that appears above. You have account-level daily totals and
 nothing else: no campaign, ad set, ad, or creative data reaches you. Never name an ad,
@@ -73,31 +118,35 @@ than inventing a cause.
 Format your response entirely in ready-to-render HTML. Do NOT use markdown code blocks
 like \`\`\`html. Just return the raw HTML string.
 
-Use this exact structure:
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-   <div class="bg-red-500/10 p-4 rounded-xl border border-red-500/20">
-      <h4 class="text-red-400 font-bold mb-2 uppercase text-[10px] tracking-widest"><i class="fa-solid fa-fire mr-1"></i> Critical Alerts</h4>
-      [Clients under CRITICAL and SPEND STOPPED. One sentence each: what happened, in real
-      numbers, and the first thing to check. Lead with the biggest spender.]
-   </div>
-   <div class="bg-green-500/10 p-4 rounded-xl border border-green-500/20">
-      <h4 class="text-green-400 font-bold mb-2 uppercase text-[10px] tracking-widest"><i class="fa-solid fa-arrow-trend-up mr-1"></i> Scale Opportunities</h4>
-      [Clients under SCALE CANDIDATES, and those under IMPROVING only if you make clear
-      their gain came with more budget rather than better efficiency.]
-   </div>
-   <div class="bg-purple-500/10 p-4 rounded-xl border border-purple-500/20">
-      <h4 class="text-purple-400 font-bold mb-2 uppercase text-[10px] tracking-widest"><i class="fa-solid fa-eye mr-1"></i> Account Watchlist</h4>
-      [Clients under WATCH. Where the note says CTR is falling, lead with that and say
-      the creative needs looking at — those are early warnings worth acting on while CPL
-      still looks fine. Then any under DATA STALE or DATA GAPS: say plainly that the pull
-      looks broken and the numbers cannot be trusted yet, rather than describing them as
-      a performance problem.]
-   </div>
-</div>
+Write one short paragraph per client worth mentioning — no grid, no boxes, no columns.
+Order them by urgency: CRITICAL and SPEND STOPPED first, then WATCH, then SCALE
+CANDIDATES and any IMPROVING client whose gain came with more budget rather than better
+efficiency, then ADS OFF, then DATA STALE / DATA GAPS. Skip a client entirely if their verdict is STABLE or INSUFFICIENT_VOLUME with
+nothing notable to say — a quiet client gets no paragraph, not a filler sentence.
 
-A quiet morning is a real and good result. If a section has no clients, write a single
-short line saying so — "Nothing critical today." — and move on. Never pad a section by
-promoting a client from a calmer verdict, and never manufacture a concern to fill space.
+Every paragraph opens with one marker line naming the client, colored and iconed for its
+verdict — exactly one of these five, matched to the client's own heading, never invented
+or mixed:
+
+<p><i class="fa-solid fa-fire" style="color:var(--neg);"></i> <strong style="color:var(--neg);">[Client name]</strong> — [sentence]</p>       for CRITICAL / SPEND STOPPED
+<p><i class="fa-solid fa-eye" style="color:var(--warn);"></i> <strong style="color:var(--warn);">[Client name]</strong> — [sentence]</p>       for WATCH
+<p><i class="fa-solid fa-arrow-trend-up" style="color:var(--pos);"></i> <strong style="color:var(--pos);">[Client name]</strong> — [sentence]</p>   for SCALE CANDIDATE / IMPROVING-on-more-budget
+<p><i class="fa-solid fa-plug-circle-exclamation" style="color:var(--t3);"></i> <strong style="color:var(--t3);">[Client name]</strong> — [sentence]</p>  for DATA STALE / DATA GAPS
+<p><i class="fa-solid fa-circle-pause" style="color:var(--t3);"></i> <strong style="color:var(--t3);">[Client name]</strong> — [sentence]</p>  for ADS OFF
+
+After the marker, write one to two plain sentences: what happened, in real numbers, and
+the first thing to check. Lead with the biggest spender within each verdict group. For a
+WATCH client whose note says CTR is falling, lead with that and say the creative needs
+looking at — that is an early warning worth acting on while CPL still looks fine. For a
+DATA STALE / DATA GAPS client, say plainly that the pull looks broken and the numbers
+cannot be trusted yet, rather than describing it as a performance problem. For an ADS OFF
+client the opposite is true: say in one sentence that their ads have not spent since the day
+the note gives, that Meta confirms it, that nothing is wrong with the data, and that the team
+should confirm it is intended. Never call it a broken pull.
+
+A quiet morning is a real and good result. If nothing needs a paragraph, write a single
+plain line saying so — "Nothing critical today." — with no icon and no color. Never
+promote a client from a calmer verdict to fill space, and never manufacture a concern.
 
 Keep the text tight and direct. Cite the actual figures you were given.`;
 
@@ -178,7 +227,10 @@ async function sendCriticalAlert(db: any, signals: any[]) {
         const pct = (s.cplDelta === Infinity || s.cplDelta === null)
             ? "" : ` (${s.cplDelta >= 0 ? "+" : ""}${Math.round(s.cplDelta * 100)}%)`;
         const driver = s.drivers?.dominant ? `, ${s.drivers.dominant.toUpperCase()} driven` : "";
-        return `${s.name}: ${cpl}${pct} on $${Math.round(s.recent.spend)} spend${driver}`;
+        // The percentage is against the target when the client has one, otherwise their
+        // own usual, so a text has to say which.
+        const vs = s.yardstick ? ` vs $${Math.round(s.yardstick)} ${s.yardstickKind === "target" ? "target" : "usual"}` : "";
+        return `${s.name}: ${cpl}${pct}${vs} on $${Math.round(s.recent.spend)} spend${driver}`;
     });
 
     // No \n here. Make's HTTPS module builds its GHL request body from raw text with
@@ -290,11 +342,22 @@ Deno.serve(async (req: Request) => {
         }
 
         const signals = await loadSignals(db);
+        const adData = await loadAdData(db, signals).catch((err) => {
+            console.error("loadAdData failed:", err);
+            return null;
+        });
+        // Where the daily pull has no rows for a client, ask meta-sync whether their ads are simply
+        // off. If Meta confirms it, the verdict becomes ADS OFF instead of "the pull looks broken".
+        if (adData) applyAdsOff(signals, adData.rows, adData.syncState);
         const context = buildAuditContext(signals);
+        // Which individual ads are at or over their client's target CPL. Decided in code (ads.js), then
+        // appended to the saved card; the model never sees an ad name or an ad figure.
+        const adResult = adData ? computeAdFlags(signals, adData.rows, undefined, adData.cutoff) : null;
 
-        // The dashboard's AI chat wants the matrix without spending a model call on it.
+        // The dashboard's AI chat wants the matrix without spending a model call on it. It also
+        // gets the flagged ads, which the card's model deliberately does not.
         if (contextOnly) {
-            return Response.json({ context, signals }, { headers: cors });
+            return Response.json({ context: context + (adResult ? adFlagsContext(adResult) : ""), signals }, { headers: cors });
         }
 
         // Idempotent by default: cron fires once, but a retry, a manual click, or a
@@ -345,8 +408,10 @@ Deno.serve(async (req: Request) => {
             throw new Error(`model stopped early: ${response.incomplete_details?.reason ?? "unknown"}`);
         }
 
-        const html = (response.output_text ?? "").trim();
-        if (!html) throw new Error("model returned no text");
+        const written = (response.output_text ?? "").trim();
+        if (!written) throw new Error("model returned no text");
+        // The per-ad section is built in code and appended, so its figures can never be reworded.
+        const html = written + (adResult ? "\n" + renderAdFlagsHtml(adResult) : "");
 
         const { data, error } = await db
             .from("morning_audits")
