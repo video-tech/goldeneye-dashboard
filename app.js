@@ -84,6 +84,7 @@
         let portalReports = [];
         let globalHealthData = {};
         let globalTasksData = [];
+        let globalSetupSteps = [];      // 'Setup step' tasks: the checklist steps, kept off the board and loaded separately
         let globalArchivedTasks = [];   // tasks with archived_at set, shown only in the Archived view
         let globalAdsData = [];
         let globalCreativesData = [];
@@ -652,7 +653,7 @@
             const results = await Promise.allSettled([
                 // Paged past the 1000-row cap; RLS still limits a client to their own rows
                 fetchAllRows('daily_reports'),
-                supabaseClient.from('tasks').select('*').in('client', allowedClients),
+                supabaseClient.from('tasks').select('*').neq('type', 'Setup step').in('client', allowedClients),
                 clientLeadsQuery,
                 supabaseClient.from('ad_approvals').select('*').in('client_name', allowedClients),
                 supabaseClient.from('seo_metrics').select('*').in('client_name', allowedClients),
@@ -3486,7 +3487,7 @@ window.submitClientRequest = async function() {
         async function fetchAllGlobalData(allowedClients, { deferCatchUp = false } = {}) {
     let clientsQ = supabaseClient.from('clients').select('*');
     let healthQ = supabaseClient.from('client_health').select('*');
-    let tasksQ = supabaseClient.from('tasks').select('*');
+    let tasksQ = supabaseClient.from('tasks').select('*').neq('type', 'Setup step');
     // Paged: PostgREST returns at most 1000 rows per request, and daily_reports passed that
     // long ago, so a single select('*') silently handed back an arbitrary 1000 of them.
     let adsQ = fetchAllRows('daily_reports');
@@ -3626,6 +3627,7 @@ window.submitClientRequest = async function() {
             // Which onboarding steps apply to each client, before anything below reads it
             await loadOnboardingApplicability(globalClientsData.map(c => c.name));
             geStartupMark('onboarding rules loaded');
+            await loadSetupSteps();
 
             // Only the first load defers this (see initApp): every other caller refetches
             // after a change and renders straight after, so it still waits for the result.
@@ -3655,6 +3657,7 @@ window.submitClientRequest = async function() {
                 await reconcileOnboardingHandoffTasks();
                 // Before the stage advance, so a task Golden Eye just ticked off can move its client on
                 await runAutoChecks();
+                await syncSetupSummaries();
                 await autoAdvanceCompletedOnboarding();
                 return lifecycleSnapshot() !== before;
             });
@@ -4037,12 +4040,36 @@ function showOverviewChat() {
     if (isAdmin) ovChatRenderSuggestions();
 }
 
+        // Make's daily ads pull fetches active clients with a Search Rows step limited to 10. Ten is fine today
+        // (the limit was lowered after an error), but the 11th client would silently get no ad data. So
+        // admins are told when they reach ten, and again, louder, if they go past it.
+        const MAKE_PULL_LIMIT = 10;
+        function makeLimitNotice(clients) {
+            const n = (clients || []).filter(c => isActiveClient(c) && normalizeAccountId(c.ad_account_id)).length;
+            if (n < MAKE_PULL_LIMIT) return null;
+            return n === MAKE_PULL_LIMIT
+                ? { level: 'warn', n, text: `You have ${n} active clients with an ad account, which is the limit on Make's daily ads pull. Raise the Search Rows limit in that scenario before you add another, or the next client will get no ad data.` }
+                : { level: 'bad', n, text: `You have ${n} active clients with an ad account, but Make's daily ads pull only reads ${MAKE_PULL_LIMIT}. ${n - MAKE_PULL_LIMIT} of them are getting no new ad data. Raise the Search Rows limit in that scenario.` };
+        }
+        function showMakeLimitNotice() {
+            const el = document.getElementById('ov-make-limit');
+            if (!el) return;
+            const note = currentUserRole === 'admin' ? makeLimitNotice(globalClientsData) : null;
+            el.classList.toggle('hidden', !note);
+            if (!note) { el.innerText = ''; return; }
+            el.innerText = note.text;
+            el.style.cssText += note.level === 'bad'
+                ? 'background:var(--inset); border:1px solid var(--neg); color:var(--neg);'
+                : 'background:var(--goldWash); border:1px solid var(--goldLine); color:var(--t1);';
+        }
+
         function renderGoldenEye() {
             // Check for a cached audit first thing!
             checkSavedAudit();
             // Puts the count of unread changes on Settings → Updates
             if (typeof checkUpdatesBadge === 'function') checkUpdatesBadge();
             showOverviewChat();
+            showMakeLimitNotice();
 
             const isLight = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isLight ? '#64748b' : 'rgba(255,255,255,0.6)';
 
@@ -4668,7 +4695,7 @@ function showOverviewChat() {
         document.getElementById('t-drawer-headline').innerText="New task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-notify-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
         if (clientToSet) checkTaskClientBox(clientToSet);
     } else { 
-        const t=globalTasksData.find(x=>x.id===id);
+        const t=globalTasksData.find(x=>x.id===id) || globalSetupSteps.find(x=>x.id===id);
         if(!t) return; activeEditId=t.id; document.getElementById('t-drawer-headline').innerText="Edit task"; document.getElementById('t-title').value=t.title; 
         if(t.client) checkTaskClientBox(t.client);
         document.getElementById('t-stage').value=t.stage||'Onboarding'; document.getElementById('t-assignee').value=t.assignee||''; document.getElementById('t-type').value=t.type||'One-off'; document.getElementById('t-due').value=t.due||'';
@@ -5587,6 +5614,13 @@ window.markOnboardingComplete = async function() {
                 const color = state === 'todo' ? 'var(--t3)' : state === 'now' ? 'var(--gold)' : 'var(--t2)';
                 return `<span style="flex:1; text-align:center; padding-bottom:4px; border-bottom:2px solid ${state === 'todo' ? 'var(--line)' : 'var(--goldSolid)'}; opacity:${state === 'done' ? 0.55 : 1}; color:${color}; font-weight:${state === 'now' ? 700 : 500};">${state === 'done' ? '✓ ' : ''}${escapeAttr(s)}</span>`;
             }).join('');
+            const checklistBtn = document.getElementById('c-stage-checklist');
+            if (checklistBtn) {
+                const groups = currentUserRole === 'admin' ? setupGroupsFor(cSelectedAccount) : [];
+                const total = groups.reduce((n, g) => n + g.total, 0), done = groups.reduce((n, g) => n + g.done, 0);
+                checklistBtn.classList.toggle('hidden', !groups.length);
+                document.getElementById('c-stage-checklist-label').innerText = groups.length ? `Our checklist · ${done} of ${total}` : 'Our checklist';
+            }
             const bar = document.getElementById('c-stage-bar');
             bar.style.width = p.pct + '%';
             const track = document.getElementById('c-stage-bar-track');
@@ -5671,7 +5705,8 @@ window.markOnboardingComplete = async function() {
                         <span class="text-sm truncate ${complete ? 'text-gray-500 line-through' : 'text-white'}">${escapeHTML(item.title)}</span>
                         ${mine && item.auto_check ? '<i class="fa-solid fa-bolt text-emerald-400/70 text-[10px] shrink-0" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}
                     </div>
-                    <div class="text-[11px] whitespace-nowrap">${state}</div>
+                    <div class="flex items-center gap-3 text-[11px] whitespace-nowrap">${mine && currentUserRole === 'admin' && setupGroupsFor(cSelectedAccount).some(g => g.stage === 'Onboarding' && String(g.group).trim().toLowerCase() === String(item.title || '').trim().toLowerCase())
+                        ? `<button type="button" onclick="openSetupChecklist()" class="${isBlocker ? 'btn-primary' : ''} btn text-xs" style="padding:3px 10px;${isBlocker ? '' : ' background:transparent; border:1px solid var(--line); color:var(--t2);'}"><i class="fa-solid fa-list-check mr-1.5"></i>Our checklist</button>` : ''}<span>${state}</span></div>
                 </div>`;
             }).join('') + clientAnswersHtml(cSelectedAccount);
         }
@@ -11636,11 +11671,10 @@ window.initStageTemplateEditor = function() {
     const picker = document.getElementById('tpl-stage-picker');
     if (!picker) return;
     if (!picker.options.length) {
-        // Onboarding lives in its own editor — it's the only stage the client takes part
-        // in, so its list mixes their steps with ours and can't be edited here.
+        // The client's own onboarding steps live in their own editor. "Onboarding" here is OUR setup
+        // steps (type Setup step), raised once the client has finished theirs.
         picker.innerHTML = lifecycleStages
-            .filter(s => s !== 'Onboarding')
-            .map(s => `<option value="${s}">${s}</option>`).join('');
+            .map(s => `<option value="${s}">${s === 'Onboarding' ? 'Onboarding (our setup steps)' : s}</option>`).join('');
     }
     renderStageTemplates();
 };
@@ -11666,7 +11700,7 @@ window.addStageTemplateRow = function(tpl) {
     const container = document.getElementById('tpl-stage-tasks-container');
     if (!container) return;
 
-    const types = ['Checklist', 'Milestone', 'One-off', 'Recurring'];
+    const types = ['Checklist', 'Setup step', 'Milestone', 'One-off', 'Recurring'];
     const row = document.createElement('div');
     row.className = 'tpl-stage-row bg-black/20 border border-white/5 rounded-xl p-2 space-y-1';
     row.dataset.tplId = tpl?.id || '';
@@ -12155,6 +12189,18 @@ async function generateStageTasks(clientName, stage, opts = {}) {
             }))
         : stageItems;
 
+    // Our setup steps for Onboarding live in stage_templates (stage 'Onboarding') and are raised with the
+    // agency tasks, for the services being onboarded.
+    if (stage === 'Onboarding') {
+        const { data: stepRows, error: stepErr } = await supabaseClient.rpc('stage_templates_for_client', { p_client: clientName, p_stage: 'Onboarding' });
+        let steps = stepErr ? [] : (stepRows || []).filter(t => t.task_type === SETUP_STEP_TYPE);
+        if (opts.onlyServices) {
+            const want = new Set(opts.onlyServices);
+            steps = steps.filter(t => (t.service_keys || []).some(k => want.has(k)));
+        }
+        templates.push(...steps);
+    }
+
     if (!templates.length) return 0;
 
     // Matched on the normalized name rather than an exact one: everything else in the
@@ -12169,6 +12215,10 @@ async function generateStageTasks(clientName, stage, opts = {}) {
         .map(t => String(t.title || '').trim().toLowerCase()));
     const toCreate = templates.filter(t => !existing.has(String(t.task_title || '').trim().toLowerCase()));
     if (!toCreate.length) return 0;
+
+    // A group's own task carries the group's name
+    const setupGroupTitles = new Set(templates.filter(t => t.task_type === SETUP_STEP_TYPE && t.checklist_group)
+        .map(t => String(t.checklist_group).trim().toLowerCase()));
 
     const now = new Date().toISOString();
     const dueFrom = days => {
@@ -12189,6 +12239,8 @@ async function generateStageTasks(clientName, stage, opts = {}) {
             status: 'Not Started',
             assignee: t.assignee || null,
             checklist_group: t.checklist_group || null,
+            // Our steps, and the group tasks that stand for them, are internal: never shown to the client
+            client_visible: t.task_type !== SETUP_STEP_TYPE && !setupGroupTitles.has(String(t.task_title || '').trim().toLowerCase()),
             p, u, e,
             score: Math.round(((p * 0.4) + (u * 0.4) + ((6 - e) * 0.2)) * 20),
             due: dueFrom(t.due_days),
@@ -12248,6 +12300,195 @@ async function reconcileOnboardingHandoffTasks() {
 // Ticks off our own tasks whose "done when" check now passes (supabase/sql/auto_check_reconcile.sql).
 // The decision is made in that SQL function, which the daily schedule also runs; this just asks
 // it on load and mirrors what it closed into the board.
+// ============================================================================
+// The setup checklist: "Our checklist" on a client's Health tab (supabase/sql/setup_checklist.sql)
+// ============================================================================
+// What we do after a client finishes onboarding is a list of steps. Each step is a task of type
+// 'Setup step', hidden from the board, the feeds and the portal, and shown only here. They roll up
+// into one ordinary task per group ("Set up GHL"), which is what the board shows, and which ticks
+// itself when its last step is done.
+const SETUP_STEP_TYPE = 'Setup step';
+
+async function loadSetupSteps() {
+    if (currentUserRole !== 'admin') { globalSetupSteps = []; return; }
+    try {
+        const rows = [];
+        for (let at = 0; at < 20000; at += 1000) {
+            const { data, error } = await supabaseClient.from('tasks').select('*')
+                .eq('type', SETUP_STEP_TYPE).is('archived_at', null).order('id').range(at, at + 999);
+            if (error) throw error;
+            rows.push(...(data || []));
+            if (!data || data.length < 1000) break;
+        }
+        globalSetupSteps = rows;
+    } catch (err) {
+        console.warn('Setup steps not loaded:', err?.message || err);
+        globalSetupSteps = [];
+    }
+}
+
+// "A2P — Buy a local number" is the section "A2P" and the step "Buy a local number"
+function setupStepParts(title) {
+    const t = String(title || '');
+    const i = t.indexOf(' — ');
+    return i > 0 ? { label: t.slice(0, i), name: t.slice(i + 3) } : { label: '', name: t };
+}
+
+// A client's groups in the order the work happens: by stage, then by the first step created
+function setupGroupsFor(clientName) {
+    const key = normalize(clientName || '');
+    const mine = (globalSetupSteps || []).filter(t => normalize(t.client || '') === key && t.checklist_group);
+    const by = new Map();
+    for (const t of mine) {
+        const k = `${t.stage}|${String(t.checklist_group).toLowerCase()}`;
+        if (!by.has(k)) by.set(k, { group: t.checklist_group, stage: t.stage, steps: [] });
+        by.get(k).steps.push(t);
+    }
+    const stageIdx = s => { const i = lifecycleStages.indexOf(s); return i < 0 ? 99 : i; };
+    const groups = [...by.values()];
+    groups.forEach(g => {
+        g.steps.sort((a, b) => Number(a.id) - Number(b.id));
+        g.total = g.steps.length;
+        g.done = g.steps.filter(s => s.status === 'Complete').length;
+        g.summary = (globalTasksData || []).find(t => normalize(t.client || '') === key && t.stage === g.stage
+            && String(t.title || '').trim().toLowerCase() === String(g.group).trim().toLowerCase()) || null;
+    });
+    groups.sort((a, b) => stageIdx(a.stage) - stageIdx(b.stage) || Number(a.steps[0].id) - Number(b.steps[0].id));
+    return groups;
+}
+
+// A group's own task follows its steps: Complete when the last one is done, In Progress once one is.
+// Only ever forward, like the automatic checks, so a mis-click on a step never reopens a finished group.
+async function syncSetupSummaries() {
+    if (currentUserRole !== 'admin') return 0;
+    let changed = 0;
+    for (const c of globalClientsData) {
+        for (const g of setupGroupsFor(c.name)) {
+            const s = g.summary;
+            if (!s) continue;
+            let next = null;
+            if (g.done === g.total && s.status !== 'Complete') next = 'Complete';
+            else if (g.done > 0 && s.status === 'Not Started') next = 'In Progress';
+            if (!next) continue;
+            const { data, error } = await supabaseClient.from('tasks')
+                .update({ status: next, updated_at: new Date().toISOString() }).eq('id', s.id).select('id');
+            if (error || !data?.length) { console.warn(`[LIFECYCLE ENGINE] Could not update "${g.group}" for ${c.name}:`, error?.message || 'refused'); continue; }
+            s.status = next;
+            changed++;
+        }
+    }
+    return changed;
+}
+
+let setupChecklistClient = null;
+
+window.openSetupChecklist = function () {
+    const name = cSelectedAccount;
+    if (!name || name === 'ALL' || currentUserRole !== 'admin') return;
+    setupChecklistClient = name;
+    const modal = document.getElementById('setup-checklist-modal');
+    if (!modal) return;
+    // Modals can sit inside the hidden portal container, so they are lifted out, like the others
+    if (modal.parentElement.id !== 'theme-wrapper') document.getElementById('theme-wrapper').appendChild(modal);
+    renderSetupChecklist();
+    modal.style.display = 'flex';
+};
+
+window.closeSetupChecklist = function () {
+    const modal = document.getElementById('setup-checklist-modal');
+    if (modal) modal.style.display = 'none';
+    setupChecklistClient = null;
+};
+
+function setupStepAutoCheck(step) {
+    const tpl = (globalStageTemplates || []).find(t => t.stage === step.stage
+        && String(t.task_title || '').trim().toLowerCase() === String(step.title || '').trim().toLowerCase());
+    return tpl?.auto_check || null;
+}
+
+function setupChecklistHtml(clientName) {
+    const groups = setupGroupsFor(clientName);
+    const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+    const current = row?.current_stage || 'Onboarding';
+    if (!groups.length) {
+        return '<p class="text-sm" style="color:var(--t2); line-height:1.6;">No checklist for this client yet. It is created when their onboarding is finished, and when they enter Campaign Building. Clients who finished earlier do not have one.</p>';
+    }
+    const today = new Date().toISOString().split('T')[0];
+    return groups.map(g => {
+        let lastLabel = null;
+        const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+        const steps = g.steps.map(s => {
+            const { label, name } = setupStepParts(s.title);
+            const head = label && label !== lastLabel ? `<div class="ge-label" style="margin:14px 0 4px; color:var(--gold);">${escapeAttr(label)}</div>` : '';
+            lastLabel = label || lastLabel;
+            const done = s.status === 'Complete';
+            const late = !done && s.due && s.due < today;
+            const auto = setupStepAutoCheck(s);
+            const meta = [s.assignee ? escapeAttr(s.assignee) : '', s.due ? (late ? `<span style="color:var(--neg);">late, due ${escapeAttr(s.due)}</span>` : `due ${escapeAttr(s.due)}`) : ''].filter(Boolean).join(' &middot; ');
+            return `${head}<div class="setup-step" style="display:flex; gap:12px; align-items:flex-start; padding:7px 0; border-top:1px solid var(--line);">
+                <button type="button" role="checkbox" aria-checked="${done}" aria-label="${escapeAttr(name)}" onclick="toggleSetupStep('${s.id}')"
+                    style="flex:none; width:18px; height:18px; margin-top:2px; border-radius:2px; border:1.5px solid ${done ? 'var(--pos)' : 'var(--line)'}; background:${done ? 'var(--pos)' : 'transparent'}; color:var(--bg, #0b0907); cursor:pointer; font-size:11px; line-height:1;">${done ? '&#10003;' : ''}</button>
+                <div style="min-width:0; flex:1;">
+                    <div style="font-size:13.5px; color:${done ? 'var(--t3)' : 'var(--t1)'}; ${done ? 'text-decoration:line-through;' : ''}">${escapeAttr(stripSlashEscapes(name))}${auto ? ' <i class="fa-solid fa-bolt" style="color:var(--pos); font-size:10px;" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}</div>
+                    ${meta ? `<div class="text-xs" style="margin-top:2px; color:var(--t3);">${meta}</div>` : ''}
+                    ${s.notes ? `<details style="margin-top:3px;"><summary class="text-xs" style="color:var(--t3); cursor:pointer;">Details</summary><p class="text-xs" style="margin-top:4px; color:var(--t2); line-height:1.55; white-space:pre-wrap;">${escapeAttr(stripSlashEscapes(s.notes))}</p></details>` : ''}
+                </div>
+                <button type="button" onclick="openSetupStepTask('${s.id}')" class="text-xs" style="flex:none; background:none; border:none; color:var(--t3); cursor:pointer;" title="Open as a task: assign someone, change the due date or add notes">Edit</button>
+            </div>`;
+        }).join('');
+        const here = g.stage === current ? '<span class="ge-label" style="margin-left:10px; color:var(--gold);">current stage</span>' : `<span class="ge-label" style="margin-left:10px; color:var(--t3);">${escapeAttr(g.stage)}</span>`;
+        return `<section style="margin-bottom:22px;">
+            <div class="flex items-baseline justify-between gap-3"><h3 class="ge-title" style="font-size:16px;">${escapeAttr(g.group)}${here}</h3><span class="text-xs ge-num" style="color:var(--t2);">${g.done} of ${g.total}</span></div>
+            <div style="height:5px; border-radius:3px; background:var(--inset); margin:8px 0 4px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--goldSolid);"></div></div>
+            ${steps}
+        </section>`;
+    }).join('');
+}
+
+function renderSetupChecklist() {
+    const body = document.getElementById('setup-checklist-body');
+    const title = document.getElementById('setup-checklist-client');
+    if (!body || !setupChecklistClient) return;
+    if (title) title.innerText = setupChecklistClient;
+    const scroll = body.scrollTop;
+    body.innerHTML = setupChecklistHtml(setupChecklistClient);
+    body.scrollTop = scroll;
+}
+
+function refreshSetupViews() {
+    if (setupChecklistClient) renderSetupChecklist();
+    if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+}
+
+window.toggleSetupStep = async function (id) {
+    if (currentUserRole !== 'admin') return;
+    const step = (globalSetupSteps || []).find(t => String(t.id) === String(id));
+    if (!step) return;
+    const next = step.status === 'Complete' ? 'Not Started' : 'Complete';
+    // Ticked on screen first; put back if the database refuses (row-level security refuses with no error)
+    const was = step.status;
+    step.status = next;
+    refreshSetupViews();
+    const { data, error } = await supabaseClient.from('tasks')
+        .update({ status: next, updated_at: new Date().toISOString() }).eq('id', step.id).select('id');
+    if (error || !data?.length) {
+        step.status = was;
+        refreshSetupViews();
+        return alert('Could not save that step: ' + (error?.message || 'the database refused the change'));
+    }
+    await syncSetupSummaries();
+    // The last step of a group can be what lets a client move on
+    const moved = await runLifecycleCatchUp();
+    refreshSetupViews();
+    if (moved && typeof renderStageProgress === 'function') renderStageProgress();
+};
+
+// A step is a task underneath, so the ordinary task drawer edits it (owner, due date, notes)
+window.openSetupStepTask = function (id) {
+    window.closeSetupChecklist();
+    openTaskDrawer(isNaN(Number(id)) ? id : Number(id));
+};
+
 async function runAutoChecks() {
     if (currentUserRole !== 'admin') return 0;
     const { data, error } = await supabaseClient.rpc('reconcile_auto_checks');
@@ -12257,7 +12498,8 @@ async function runAutoChecks() {
         return 0;
     }
     (data || []).forEach(r => {
-        const task = globalTasksData.find(t => String(t.id) === String(r.task_id));
+        const task = globalTasksData.find(t => String(t.id) === String(r.task_id))
+            || globalSetupSteps.find(t => String(t.id) === String(r.task_id));
         if (task) task.status = 'Complete';
         console.log(`[LIFECYCLE ENGINE] ${r.client}: "${r.title}" ticked off automatically (${r.check_key}).`);
     });
@@ -12314,7 +12556,7 @@ async function autoAdvanceCompletedOnboarding() {
         if ((c.current_stage || 'Onboarding') !== 'Onboarding') return false;
         if ((c.status || 'active') !== 'active') return false;
 
-        const obTasks = globalTasksData.filter(t =>
+        const obTasks = globalTasksData.concat(globalSetupSteps).filter(t =>
             normalize(t.client || '') === normalize(c.name) && t.stage === 'Onboarding');
 
         return obTasks.length > 0 && obTasks.every(t => t.status === 'Complete');
@@ -12728,6 +12970,59 @@ function openGeEgg() {
     s.onerror = () => console.error('Golden Eye: could not load egg.js from ' + s.src);
     document.body.appendChild(s);
 }
+
+// ---- Easter egg #2: type 5min ----
+// Four keys in a row, under a second apart, anywhere except inside a text box, and only for admins.
+// speedlead.js is fetched only then. Best scores go in speed_lead_runs (supabase/sql/speed_lead_runs.sql).
+const SL_SEQUENCE = '5min', SL_GAP_MS = 1000;
+let slKeys = [];
+
+function slTypingInBox(target) {
+    const el = target && target.nodeType === 1 ? target : null;
+    if (!el) return false;
+    const tag = String(el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable === true;
+}
+
+// True on the key that completes the sequence. Pure apart from the buffer, so it can be tested.
+function slKeyPressed(e, now) {
+    if (!e || e.ctrlKey || e.metaKey || e.altKey || e.repeat || typeof e.key !== 'string' || e.key.length !== 1) return false;
+    if (slTypingInBox(e.target)) { slKeys = []; return false; }
+    slKeys = slKeys.filter(k => now - k.t < SL_GAP_MS);
+    slKeys.push({ c: e.key.toLowerCase(), t: now });
+    if (slKeys.length > SL_SEQUENCE.length) slKeys.shift();
+    if (slKeys.map(k => k.c).join('') === SL_SEQUENCE) { slKeys = []; return true; }
+    return false;
+}
+
+function speedLeadOptions() {
+    return {
+        playerEmail: clientEmail,
+        loadScores: () => supabaseClient.from('speed_lead_runs')
+            .select('player_email, player_name, score, avg_reply_ms, created_at')
+            .order('score', { ascending: false }).limit(300),
+        saveScore: (run) => supabaseClient.from('speed_lead_runs').insert([{
+            ...run,
+            player_email: clientEmail,
+            player_name: (currentUserFullName || (currentUserName !== 'User' ? currentUserName : '') || String(clientEmail || '').split('@')[0]).trim().split(/\s+/)[0],
+        }]),
+    };
+}
+
+function openSpeedLead() {
+    if (window.GESpeedLead) { window.GESpeedLead.start(speedLeadOptions()); return; }
+    const s = document.createElement('script');
+    s.src = `${GE_ASSET_BASE}/speedlead.js?v=${Date.now()}`;
+    s.onload = () => window.GESpeedLead && window.GESpeedLead.start(speedLeadOptions());
+    s.onerror = () => console.error('Golden Eye: could not load speedlead.js from ' + s.src);
+    document.body.appendChild(s);
+}
+
+window.addEventListener('keydown', (e) => {
+    if (currentUserRole !== 'admin') return;
+    if (document.getElementById('ge-egg') || document.getElementById('ge-sl')) return;
+    if (slKeyPressed(e, Date.now())) openSpeedLead();
+});
 
 // The sidebar tab (and its phone icon) for admins and VAs, badged with how many clients still
 // owe last week's numbers

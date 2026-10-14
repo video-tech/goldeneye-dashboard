@@ -221,7 +221,7 @@ async function ad_changes(ctx: Ctx, args: any) {
 }
 
 async function tasks(ctx: Ctx, args: any) {
-    const rows = await pageAll((a, b) => ctx.db.from("tasks").select("id, title, client, stage, due, status, assignee, type, client_visible, archived_at").is("archived_at", null).range(a, b));
+    const rows = await pageAll((a, b) => ctx.db.from("tasks").select("id, title, client, stage, due, status, assignee, type, client_visible, archived_at").is("archived_at", null).neq("type", "Setup step").range(a, b));
     let list = rows;
     if (args?.client) {
         const f = await findClient(ctx, args.client);
@@ -237,7 +237,7 @@ async function tasks(ctx: Ctx, args: any) {
     const limit = Math.min(Math.max(Number(args?.limit) || 40, 1), MAX_ROWS);
     return {
         today: ctx.today, total_matching: list.length, counts_by_status: counts,
-        note: "Notes are not shown. A task whose assignee is Client is waiting on the client. due earlier than today and not Complete is late.",
+        note: "Notes are not shown, and the detailed setup-checklist steps are left out (the group tasks stand for them). A task whose assignee is Client is waiting on the client. due earlier than today and not Complete is late.",
         tasks: list.slice(0, limit).map((t) => ({ title: t.title, client: t.client, stage: t.stage, due: t.due, status: t.status, assignee: t.assignee, type: t.type })),
         truncated: list.length > limit ? list.length - limit : 0,
     };
@@ -315,7 +315,7 @@ async function onboarding(ctx: Ctx, args: any) {
         const { data, error } = await ctx.db.rpc("service_onboarding_status", { p_client: f.client.name });
         if (!error) out.onboarding_status = data;
     } catch (_) { /* optional */ }
-    const open = await pageAll((a, b) => ctx.db.from("tasks").select("title, status, assignee, due").eq("client", f.client.name).eq("stage", "Onboarding").is("archived_at", null).range(a, b), 2000);
+    const open = await pageAll((a, b) => ctx.db.from("tasks").select("title, status, assignee, due").eq("client", f.client.name).eq("stage", "Onboarding").is("archived_at", null).neq("type", "Setup step").range(a, b), 2000);
     out.open_onboarding_tasks = open.filter((t) => t.status !== "Complete").slice(0, MAX_ROWS);
     return out;
 }

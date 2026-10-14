@@ -478,6 +478,9 @@
                 </header>
 
                 <div id="page-goldeneye" class="p-4 md:p-8 block">
+                    <!-- Make's daily ads pull reads clients through a Search Rows step limited to 10 (deliberately: a
+                         higher limit caused an error once). This tells admins when they have reached it. -->
+                    <div id="ov-make-limit" class="hidden" role="alert" style="margin-bottom:16px; padding:12px 16px; border-radius:3px; font-size:13px; line-height:1.5;"></div>
 
                     <!-- Hero band: MRR and Network Health used to be two separate panels;
                          one bordered section with a hairline between them reads as a single
@@ -982,7 +985,10 @@
                             <div id="c-stage-box" class="glass p-6 flex flex-col hidden" style="border-left:4px solid var(--goldSolid);">
                                 <div class="flex flex-wrap justify-between items-baseline gap-2 mb-4">
                                     <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-route mr-2" style="color:var(--gold);"></i> Journey</h3>
-                                    <span id="c-stage-summary" class="text-xs" style="color:var(--t2);"></span>
+                                    <div class="flex items-center gap-3">
+                                        <span id="c-stage-summary" class="text-xs" style="color:var(--t2);"></span>
+                                        <button type="button" id="c-stage-checklist" onclick="openSetupChecklist()" class="hidden btn-primary btn text-xs" style="padding:5px 12px;"><i class="fa-solid fa-list-check mr-1.5"></i><span id="c-stage-checklist-label">Our checklist</span></button>
+                                    </div>
                                 </div>
                                 <div id="c-stage-steps" class="flex items-center gap-1 mb-3 text-[10px] uppercase tracking-widest" style="color:var(--t3);"></div>
                                 <div class="w-full overflow-hidden" style="height:8px; border-radius:4px; background:var(--inset); border:1px solid var(--line);" role="progressbar" id="c-stage-bar-track" aria-valuemin="0" aria-valuemax="100">
@@ -2091,6 +2097,20 @@
         <iframe id="seo-case-study-frame" class="w-full flex-1 rounded-lg bg-white" frameborder="0" sandbox="allow-modals"></iframe>
     </div>
 </div>
+
+<div id="setup-checklist-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:flex-start; justify-content:center;" onclick="if (event.target === this) closeSetupChecklist()">
+                    <div class="glass" style="max-width: 760px; width: 100%; margin: auto; padding: 2rem 2.25rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);" role="dialog" aria-label="Our checklist">
+                        <div class="flex justify-between items-start mb-5">
+                            <div>
+                                <p class="ge-label mb-1">Our checklist</p>
+                                <h2 class="ge-title" style="font-size:22px;" id="setup-checklist-client">client.</h2>
+                                <p class="text-xs" style="margin-top:5px; color:var(--t2);">Everything we do for this client after they finish onboarding. Tick a step off, or open it as a task to assign someone or change the date. The group tasks on the board tick themselves.</p>
+                            </div>
+                            <button type="button" onclick="closeSetupChecklist()" aria-label="Close" style="color:var(--t3); font-size:20px; line-height:1;">&#10005;</button>
+                        </div>
+                        <div id="setup-checklist-body" style="max-height:68vh; overflow-y:auto; padding-right:6px;"></div>
+                    </div>
+                </div>
 
 <div id="stage-transition-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
                     <div class="glass" style="max-width: 500px; width: 100%; margin: auto; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">

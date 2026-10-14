@@ -2,6 +2,28 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-14",
+      "area": "Onboarding",
+      "title": "Our checklist for every new client",
+      "what": "Everything we do after a client finishes onboarding is now a checklist: getting ready for GHL (answers, Facebook access, Meta sync, target CPL), setting up GHL (account, A2P first, funnel, workflows, people, tests) and launching ads. On the board it shows as three tasks per client. Open a client's Health tab and press Our checklist, in the Journey box or on the highlighted onboarding row, to see every step, tick them off, or open one as a task to assign someone. A group ticks itself when its last step is done, and a few steps tick themselves.",
+      "note": "Steps are tagged Base or Ads, so a Base-only client skips the Meta and funnel steps. They are hidden from the client's portal. A client now reaches Campaign Building once GHL is set up, and launching ads is the Campaign Building checklist, instead of an onboarding task. Clients who finished earlier do not get one.",
+      "action": "Run supabase/sql/setup_checklist.sql. Then redeploy the overview chat so it ignores the steps: supabase functions deploy overview-chat --project-ref hugnttsqucetldllfgoi"
+    },
+    {
+      "date": "2026-10-14",
+      "area": "Data",
+      "title": "A warning when you reach Make's client limit",
+      "what": "Make's daily ads pull reads clients ten at a time, so the eleventh client with an ad account would silently get no ad data. The Overview now shows a notice when you reach ten active clients with an ad account, and a red one if you go past it, so you know to raise the limit in that Make scenario first."
+    },
+    {
+      "date": "2026-10-13",
+      "area": "Data",
+      "title": "A second hidden game",
+      "what": "There is another secret. Admins who find it can race against the clock to answer leads. Faster replies score more, and the best scores are kept on a leaderboard.",
+      "note": "It is not documented here on purpose.",
+      "action": "Run supabase/sql/speed_lead_runs.sql so scores can be saved."
+    },
+    {
       "date": "2026-10-13",
       "area": "Data",
       "title": "Ask Golden Eye: a chat on the Overview page",
