@@ -1982,6 +1982,8 @@
                         </div>
 
                         <div id="office-panel" class="mb-6">
+                            <button type="button" id="office-toggle" class="px-3 py-2 text-sm text-blue-300 hover:text-blue-200 mb-2" onclick="officeToggle()" aria-expanded="false"><i class="fa-solid fa-users-viewfinder mr-1"></i> <span id="office-toggle-label">Show characters</span></button>
+                            <div id="office-body" class="hidden">
                             <div class="flex flex-wrap items-end gap-3 mb-3">
                                 <div class="flex-1 min-w-[240px]">
                                     <label class="modal-label" for="office-status-input">What are you up to?</label>
@@ -1994,6 +1996,7 @@
                             <div id="office-editor" class="hidden bg-black/20 p-4 rounded-xl border border-white/5 mb-3"></div>
                             <div id="office-scene"></div>
                             <p class="text-xs text-gray-500 mt-2">Shows teammates who have Golden Eye open. Your status clears itself after 4 hours.</p>
+                            </div>
                         </div>
 
                         <div class="bg-black/20 p-5 rounded-xl border border-white/5 mb-6">

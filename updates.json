@@ -3,9 +3,16 @@
   "updates": [
     {
       "date": "2026-10-14",
+      "area": "Data",
+      "title": "A text when the daily ad pull comes up short",
+      "what": "Each morning at 13:30 UTC (7:30 Mountain in summer) the database checks that every client who normally has ad data also has yesterday's row, and texts Tenny the names of any that are missing, so a failed Make run is caught within a couple of hours instead of by hand. The Make pull itself now carries on past one client's failure, and the Make-limit notice on the Overview now warns at 100 clients, the real limit.",
+      "action": "Run supabase/sql/daily_pull_check.sql"
+    },
+    {
+      "date": "2026-10-14",
       "area": "Settings",
       "title": "The office: who is online and what they are doing",
-      "what": "Settings → Users & Roles now opens with a little office. Make your character (My character), and when you have Golden Eye open you appear at your desk, typing, on the phone, reviewing creatives or looking at a client, depending on the page you are on. Step away and you grab a coffee, close the tab and you go to sleep in the Off duty row. Type what you are up to in the box and it shows in a speech bubble for four hours.",
+      "what": "Settings → Users & Roles has a little office, hidden until you click Show characters. Make your character (My character), and when you have Golden Eye open you appear at your desk, typing, on the phone, reviewing creatives or looking at a client, depending on the page you are on. Step away and you grab a coffee, close the tab and you go to sleep in the Off duty row. Type what you are up to in the box and it shows in a speech bubble for four hours.",
       "note": "Only admins can see it, and a client's browser never learns who is on the team.",
       "action": "Run supabase/sql/team_presence.sql"
     },

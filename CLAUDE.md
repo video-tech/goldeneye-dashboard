@@ -1957,11 +1957,26 @@ finds a session).
 
 ## Make pull limit notice (built 2026-10-14)
 
-Make's daily ads pull (scenario #1) fetches active clients with a Supabase Search Rows step **limited to 10**, kept at 10 on
-purpose because a higher limit once caused an error. `showMakeLimitNotice()` (Overview, admins only) warns at exactly 10 active
-clients with an ad account and goes red above 10 ("N of them are getting no new ad data"). Raise the limit in that module
-(and re-test the scenario) before adding the 11th. Counted: `status` active and a non-empty `ad_account_id`; paused and
-archived clients are not. It assumes the Make filter is the same, which has not been read this session. 6 checks.
+Make's daily ads pull (scenario #1, "Midas Dashboard", id 4288195) fetches clients with a Supabase Search Rows step **limited to 100**
+(read from the blueprint 2026-10-14; this section used to say 10, which was wrong). It takes every client whose status is not
+paused or archived, then skips any without an ad account and business id. `showMakeLimitNotice()` (Overview, admins only) warns at
+`MAKE_PULL_LIMIT` (100) active clients with an ad account and goes red above it. Counted: `status` active and a non-empty
+`ad_account_id`. 6 checks.
+
+**Error handling (added 2026-10-14, after a second rate-limit failure).** On 2026-10-14 Meta returned `Application request limit
+reached (4)` mid-run (8 of ~18 operations; the same failure as 2026-09-23). The Facebook Insights step and the `daily_reports` write
+now have **Ignore** handlers and the Google Sheets step a **Resume** one, so one client's failure no longer stops the clients behind it,
+and a replay skips rows that already exist (the write is still a plain insert, so the duplicate-key error is what gets ignored). Replaying
+an execution works with no manual deleting now. A replay re-runs the Sheets step, so the "master data" sheet can get duplicate rows
+for clients that had already written. **The alert (built 2026-10-14, `supabase/sql/daily_pull_check.sql`).** A Make handler can't hold the Vault secret, so `daily_pull_check()` runs in the
+database at 13:30 UTC (pg_cron `daily-pull-check`) and texts **Tenny only** (+1 801 709 8501, a constant in the function) through scenario #6, same
+payload as `notify_task_assignee`. It flags a client Make is asked to pull that has no `daily_reports` row for yesterday but had one on at least 5
+of the 7 days before (Make writes no row for a no-spend day, so ads-off or on-and-off clients would otherwise be reported daily). `select daily_pull_check(false)`
+shows what it would say without texting. 21 PGlite checks, 9 of 10 breakages caught (the tenth is an equivalent mutant).
+The blueprint
+was re-saved without Make's cached editor metadata; the original is not in the repo.
+**`meta-sync` is a backup, not a replacement.** It covers 6 clients and counts leads differently from the pull, and the audit reads
+`daily_reports` for everyone. Keep both running.
 
 ## Ask Golden Eye: the Overview chat (built 2026-10-13)
 
@@ -1998,6 +2013,7 @@ The top of Settings → Users & Roles (`#office-panel`): each admin's character 
   `officeCharacterSvg`, so stored text can never reach the markup. Default character comes from a hash of the email. Names and statuses use `escapeAttr`.
 - **Activity** comes from the page (`OFFICE_PAGES`): typing on Tasks, phone on Roster/Sales, and so on. Away = coffee, offline = asleep in Off duty.
   A status expires after 4 hours. The office polls every 20 s, only while the Users view is showing.
+- **Off by default:** a Show characters / Hide characters button (`#office-toggle`) shows the office; the choice is kept per browser in `ge-office-on`. Off means no queries and no polling, but your own heartbeat keeps going, so teammates who have it on still see you.
 - **Adding an activity** means a line in `OFFICE_PAGES`, an icon in `OFFICE_ICONS` and (if it needs a new move) a CSS animation in body.html.
 - **Tests:** 55 node checks on the helpers, heartbeat and wiring (12 mutations caught); layout checked in the browser pane.
 

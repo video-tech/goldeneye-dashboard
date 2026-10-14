@@ -4097,10 +4097,10 @@ function showOverviewChat() {
     if (isAdmin) ovChatRenderSuggestions();
 }
 
-        // Make's daily ads pull fetches active clients with a Search Rows step limited to 10. Ten is fine today
-        // (the limit was lowered after an error), but the 11th client would silently get no ad data. So
-        // admins are told when they reach ten, and again, louder, if they go past it.
-        const MAKE_PULL_LIMIT = 10;
+        // Make's daily ads pull fetches active clients with a Search Rows step limited to 100 (read from the
+        // scenario's blueprint on 2026-10-14; this said 10 until then). Past that, a client would silently get no
+        // ad data, so admins are told when they reach the limit, and again, louder, if they go past it.
+        const MAKE_PULL_LIMIT = 100;
         function makeLimitNotice(clients) {
             const n = (clients || []).filter(c => isActiveClient(c) && normalizeAccountId(c.ad_account_id)).length;
             if (n < MAKE_PULL_LIMIT) return null;
@@ -10578,10 +10578,27 @@ window.renderClientPayments = function() {
             const inp = document.getElementById('office-status-input');
             if (inp && me && document.activeElement !== inp && !inp.dataset.touched) inp.value = officeStatusText(me, Date.now());
         }
+        // The office is off until someone turns it on, and remembered per browser. Turning it off only hides it: your own
+        // presence keeps being sent, so teammates who have it on still see you.
+        function officeIsOn() { try { return localStorage.getItem('ge-office-on') === '1'; } catch (e) { return !!officeBeat.on; } }
+        function officeShowState() {
+            const on = officeIsOn();
+            const body = document.getElementById('office-body'), btn = document.getElementById('office-toggle'), lab = document.getElementById('office-toggle-label');
+            if (body) body.classList.toggle('hidden', !on);
+            if (btn) btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+            if (lab) lab.textContent = on ? 'Hide characters' : 'Show characters';
+        }
         window.officeOpen = function () {
+            officeShowState();
+            clearInterval(officeBeat.poll); officeBeat.poll = null;
+            if (!officeIsOn()) return;
             officeRender();
-            clearInterval(officeBeat.poll);
             officeBeat.poll = setInterval(officeRender, OFFICE.pollMs);
+        };
+        window.officeToggle = function () {
+            const next = !officeIsOn(); officeBeat.on = next;
+            try { localStorage.setItem('ge-office-on', next ? '1' : '0'); } catch (e) {}
+            window.officeOpen();
         };
         window.officeClose = function () { clearInterval(officeBeat.poll); officeBeat.poll = null; };
 
