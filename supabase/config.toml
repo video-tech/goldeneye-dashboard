@@ -423,3 +423,9 @@ verify_jwt = false
 # SEO_WEBHOOK_SECRET check inside the function is the gate, and it fails closed if unset.
 [functions.seo-changelog-webhook]
 verify_jwt = false
+
+# GHL sends a browser here after the Golden Eye Marketplace app is installed, with no gateway JWT.
+# The gate is inside: the one-time code only works with our client secret, and only an install on
+# our own agency (GHL_COMPANY_ID) is stored.
+[functions.app-oauth]
+verify_jwt = false

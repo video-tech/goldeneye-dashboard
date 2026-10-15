@@ -3,6 +3,20 @@
   "updates": [
     {
       "date": "2026-10-14",
+      "area": "Onboarding",
+      "title": "Master GHL account setup, first step",
+      "what": "The master GHL account (the one every client account will be copied from) now has every custom value the onboarding questionnaire will fill. 12 were added, and where Master already had its own name for one (business name, Google review link, hours and so on) that one is used instead of a duplicate. It also has lead fields (project timeline, estimated budget, how they heard about us, homeowner, financing interest), fields for two cost quizzes (kitchen remodel and home builder, ready for a quiz survey to map to), and a simple Lead Pipeline (New lead to Won or Lost) as a starting point. A behind-the-scenes function does this and only ever touches the master account, never a client's."
+    },
+    {
+      "date": "2026-10-14",
+      "area": "Onboarding",
+      "title": "Onboarding questions that pick the right video",
+      "what": "Questions steps can now show a follow-up only when an earlier answer calls for it, save answers as you type, and check phone numbers, emails and links. Two new facts on every client (do they have a Facebook page, do they want leads sent to a CRM) can now decide which onboarding videos and tasks a client gets: tag a step with the answers it is for in Templates → Client Onboarding, and try a combination in Preview a Client. Nothing changes for clients yet: the Quick start step and the tasks for us are hidden until you switch them on with supabase/sql/onboarding_quick_start_go_live.sql.",
+      "note": "Choices in a question cannot contain commas.",
+      "action": "Run supabase/sql/onboarding_facts.sql"
+    },
+    {
+      "date": "2026-10-14",
       "area": "Data",
       "title": "A text when the daily ad pull comes up short",
       "what": "Each morning at 13:30 UTC (7:30 Mountain in summer) the database checks that every client who normally has ad data also has yesterday's row, and texts Tenny the names of any that are missing, so a failed Make run is caught within a couple of hours instead of by hand. The Make pull itself now carries on past one client's failure, and the Make-limit notice on the Overview now warns at 100 clients, the real limit.",

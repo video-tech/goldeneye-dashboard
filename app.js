@@ -2136,11 +2136,87 @@ function obQuestionsFor(step, clientName) {
         .filter(q => !(q.website_statuses || []).length || (web && q.website_statuses.includes(web)));
 }
 
+// ---- question logic (pure; no page needed) ----
+// A question can depend on an earlier answer (show_if), save its answer onto the client as a fact (fact),
+// and carry a note of where it should end up in GHL later (dest). Which answers pick which video is decided
+// in SQL (onboarding_facts.sql); this only collects and saves them.
+//   show_if: {q: "<earlier question id>", any: ["Yes"]}   shown only when that question is showing and its
+//                                                         answer is one of these exact choices
+//   fact: "facebook_page" | "crm_choice" | "crm_name" | "crm_method"
+//   fact_values: one value per choice, same order, e.g. ["yes", "no", "unsure"]
+const OB_FACT_DEFAULT_VALUES = { facebook_page: ['yes', 'no', 'unsure'], crm_choice: ['no', 'yes'], crm_method: ['email', 'webhook', 'unsure'] };
+
+// The questions that are showing, given the answers so far (by question id). A question can only depend
+// on an earlier one, and a question whose parent is hidden is hidden too.
+function obVisibleQuestions(questions, values) {
+    const shown = new Set();
+    const out = [];
+    for (const q of questions || []) {
+        const c = q.show_if;
+        let ok = true;
+        if (c && c.q) {
+            const v = (values || {})[c.q];
+            const list = Array.isArray(v) ? v : (v ? [v] : []);
+            ok = shown.has(c.q) && (c.any || []).some(a => list.includes(a));
+        }
+        if (ok) { shown.add(q.id); out.push(q); }
+    }
+    return out;
+}
+
+// Tidy one answer by type. Returns {value} or {error}. Blank is fine here: "required" is checked separately.
+function obCleanAnswer(q, raw) {
+    if (q.type === 'multi') return { value: Array.isArray(raw) ? raw.filter(Boolean) : [] };
+    const v = typeof raw === 'string' ? raw.trim() : '';
+    if (!v) return { value: '' };
+    if (q.type === 'email') return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v) ? { value: v } : { error: 'Enter a valid email address' };
+    if (q.type === 'phone') {
+        const digits = v.replace(/\D/g, '');
+        return digits.length >= 10 && digits.length <= 15 ? { value: v } : { error: 'Enter a phone number with the area code' };
+    }
+    if (q.type === 'link') {
+        const withScheme = /^https?:\/\//i.test(v) ? v : 'https://' + v;
+        try {
+            const u = new URL(withScheme);
+            return u.hostname.includes('.') && !/\s/.test(v) ? { value: withScheme } : { error: 'Enter a full link, like www.example.com' };
+        } catch (e) { return { error: 'Enter a full link, like www.example.com' }; }
+    }
+    return { value: v };
+}
+
+// The client facts these answers set. `answers` is id -> value for the questions that are showing. A choice
+// is turned into its stored value by position (fact_values); a free-text answer is stored as typed. An
+// answer that was not given is left out, so it never overwrites an earlier one.
+function obFactsFromAnswers(questions, answers) {
+    const facts = {};
+    for (const q of questions || []) {
+        if (!q.fact) continue;
+        const v = (answers || {})[q.id];
+        if (v === undefined) continue;
+        const text = Array.isArray(v) ? v[0] : v;
+        if (!text) { facts[q.fact] = ''; continue; }
+        if (Array.isArray(q.fact_values) && q.fact_values.length) {
+            const i = (q.options || []).indexOf(text);
+            if (i < 0 || !q.fact_values[i]) continue;
+            facts[q.fact] = q.fact_values[i];
+        } else {
+            facts[q.fact] = text;
+        }
+    }
+    return facts;
+}
+// ---- end question logic ----
+
 function obQuestionsFormHtml(s, complete) {
     const questions = obQuestionsFor(s, currentActiveClient);
     const saved = obAnswersFor(currentActiveClient, s.id)?.answers || {};
     const valueOf = q => saved[q.id]?.value;
     const fieldId = q => `obq-${s.id}-${q.id}`;
+    const savedValues = {};
+    questions.forEach(q => { savedValues[q.id] = valueOf(q); });
+    const showing = new Set(obVisibleQuestions(questions, savedValues).map(q => q.id));
+    const INPUT_TYPES = { phone: 'tel', email: 'email', link: 'text' };
+    const PLACEHOLDERS = { phone: '(801) 555-0100', email: 'name@company.com', link: 'www.example.com' };
 
     const field = q => {
         const v = valueOf(q);
@@ -2162,14 +2238,18 @@ function obQuestionsFormHtml(s, complete) {
                 </div>
             </fieldset>`;
         }
-        return `${label}<input type="text" id="${fieldId(q)}" class="glass-input w-full" data-qid="${escapeAttr(q.id)}" value="${escapeAttr(typeof v === 'string' ? v : '')}">`;
+        const type = INPUT_TYPES[q.type] || 'text';
+        const ph = PLACEHOLDERS[q.type] ? ` placeholder="${PLACEHOLDERS[q.type]}"` : '';
+        return `${label}<input type="${type}" id="${fieldId(q)}" class="glass-input w-full" data-qid="${escapeAttr(q.id)}"${ph} value="${escapeAttr(typeof v === 'string' ? v : '')}">
+            <p class="obq-err hidden text-xs text-amber-400 mt-1" role="alert"></p>`;
     };
 
     if (!questions.length) {
         return `<p class="text-sm text-gray-500 mb-4">Nothing to answer here yet.</p>`;
     }
-    return `<form id="obq-form-${s.id}" class="space-y-4 mb-4" onsubmit="event.preventDefault(); obSubmitAnswers('${s.id}')">
-        ${questions.map(q => `<div>${field(q)}</div>`).join('')}
+    return `<form id="obq-form-${s.id}" class="space-y-4 mb-4" novalidate onsubmit="event.preventDefault(); obSubmitAnswers('${s.id}')"
+                  oninput="obqChanged('${s.id}')" onchange="obqChanged('${s.id}')">
+        ${questions.map(q => `<div data-qwrap="${escapeAttr(q.id)}" class="${showing.has(q.id) ? '' : 'hidden'}">${field(q)}</div>`).join('')}
         <div class="flex flex-wrap items-center gap-3">
             <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
                 <i class="fa-solid fa-check mr-2"></i>${complete ? 'Save changes' : 'Submit answers'}
@@ -2179,53 +2259,143 @@ function obQuestionsFormHtml(s, complete) {
     </form>`;
 }
 
+// What is typed into the form right now, by question id (raw, not tidied)
+function obReadFormValues(form, questions) {
+    const values = {};
+    questions.forEach(q => {
+        if (q.type === 'choice') {
+            values[q.id] = form.querySelector(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)?.value || '';
+        } else if (q.type === 'multi') {
+            values[q.id] = [...form.querySelectorAll(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)].map(i => i.value);
+        } else {
+            values[q.id] = form.querySelector(`[data-qid="${CSS.escape(q.id)}"]`)?.value || '';
+        }
+    });
+    return values;
+}
+
+// Read the form: which questions are showing, tidied answers for those, problems, and the client facts they set
+function obCollectAnswers(step, form) {
+    const all = obQuestionsFor(step, currentActiveClient);
+    const raw = obReadFormValues(form, all);
+    const visible = obVisibleQuestions(all, raw);
+    const answers = {};
+    const values = {};
+    const missing = [];
+    const errors = [];
+    visible.forEach(q => {
+        const cleaned = obCleanAnswer(q, raw[q.id]);
+        if (cleaned.error) { errors.push({ q, message: cleaned.error }); return; }
+        const empty = Array.isArray(cleaned.value) ? !cleaned.value.length : !cleaned.value;
+        if (q.required && empty) missing.push(q.label);
+        if (!empty) { answers[q.id] = { label: q.label, value: cleaned.value }; }
+        values[q.id] = cleaned.value;
+    });
+    return { all, visible, answers, values, missing, errors, facts: obFactsFromAnswers(visible, values) };
+}
+
+// Show and hide dependent questions as answers change, and save a draft a moment after typing stops
+const obqDraftTimers = {};
+window.obqChanged = function(stepId) {
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    const form = document.getElementById(`obq-form-${stepId}`);
+    if (!step || !form) return;
+    const all = obQuestionsFor(step, currentActiveClient);
+    const showing = new Set(obVisibleQuestions(all, obReadFormValues(form, all)).map(q => q.id));
+    all.forEach(q => form.querySelector(`[data-qwrap="${CSS.escape(q.id)}"]`)?.classList.toggle('hidden', !showing.has(q.id)));
+    form.querySelectorAll('.obq-err').forEach(e => e.classList.add('hidden'));
+    clearTimeout(obqDraftTimers[stepId]);
+    obqDraftTimers[stepId] = setTimeout(() => obSaveAnswers(stepId, { draft: true }), 1500);
+};
+
+// Writes the answers and the client facts. A draft saves whatever is filled in without asking for the
+// rest; the real submit has checked everything by the time it gets here.
+async function obSaveAnswers(stepId, { draft }) {
+    if (previewBlocksWrite('saving answers')) return { ok: false };
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    const form = document.getElementById(`obq-form-${stepId}`);
+    const status = document.getElementById(`obq-status-${stepId}`);
+    if (!step || !form) return { ok: false };
+    const c = obCollectAnswers(step, form);
+    // A half-typed email or link is not worth saving as a draft; leave the last good draft alone
+    if (draft && c.errors.length) return { ok: false };
+
+    const now = new Date().toISOString();
+    const row = { client_name: currentActiveClient, step_id: stepId, answers: c.answers, submitted_by: clientEmail || null, updated_at: now };
+    const { error } = await supabaseClient.from('onboarding_answers').upsert(row, { onConflict: 'client_name,step_id' });
+    if (error) {
+        console.error('Could not save answers:', error);
+        if (status) {
+            status.className = 'text-xs text-red-400';
+            status.innerText = draft ? "Couldn't save yet. We'll try again." : "Couldn't save your answers. Please try again, or email us if it keeps happening.";
+        }
+        return { ok: false };
+    }
+    const existing = obAnswersFor(currentActiveClient, stepId);
+    if (existing) Object.assign(existing, row); else globalOnboardingAnswers.push({ ...row, submitted_at: now });
+
+    let factsChanged = false;
+    if (Object.keys(c.facts).length) {
+        const { data, error: factErr } = await supabaseClient.rpc('set_client_onboarding_facts', { p_client: currentActiveClient, p_facts: c.facts });
+        if (factErr) {
+            // The SQL not being installed yet must not stop the answers being saved
+            console.warn('Could not save the client facts:', factErr);
+        } else if (data) {
+            const key = normalize(currentActiveClient);
+            [...portalClientRows, ...globalClientsData].filter(r => normalize(r.name) === key).forEach(r => {
+                ['facebook_page', 'crm_choice', 'crm_name', 'crm_method'].forEach(k => {
+                    if ((r[k] ?? null) !== (data[k] ?? null)) factsChanged = true;
+                    r[k] = data[k] ?? null;
+                });
+            });
+        }
+    }
+    if (status) {
+        status.className = 'text-xs text-gray-400';
+        status.innerText = draft ? 'Draft saved' : 'Saved.';
+    }
+    return { ok: true, factsChanged };
+}
+
 window.obSubmitAnswers = async function(stepId) {
     if (previewBlocksWrite('submitting answers')) return;
     const step = globalOnboardingSteps.find(s => s.id === stepId);
     const form = document.getElementById(`obq-form-${stepId}`);
     const status = document.getElementById(`obq-status-${stepId}`);
     if (!step || !form) return;
+    clearTimeout(obqDraftTimers[stepId]);
 
-    const answers = {};
-    const missing = [];
-    obQuestionsFor(step, currentActiveClient).forEach(q => {
-        let value;
-        if (q.type === 'choice') {
-            value = form.querySelector(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)?.value || '';
-        } else if (q.type === 'multi') {
-            value = [...form.querySelectorAll(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)].map(i => i.value);
-        } else {
-            value = (form.querySelector(`[data-qid="${CSS.escape(q.id)}"]`)?.value || '').trim();
-        }
-        const empty = Array.isArray(value) ? !value.length : !value;
-        if (q.required && empty) missing.push(q.label);
-        if (!empty) answers[q.id] = { label: q.label, value };
-    });
-
-    if (missing.length) {
+    const c = obCollectAnswers(step, form);
+    form.querySelectorAll('.obq-err').forEach(e => { e.classList.add('hidden'); e.innerText = ''; });
+    if (c.errors.length) {
+        c.errors.forEach(({ q, message }) => {
+            const err = form.querySelector(`[data-qwrap="${CSS.escape(q.id)}"] .obq-err`);
+            if (err) { err.innerText = message; err.classList.remove('hidden'); }
+        });
         status.className = 'text-xs text-amber-400';
-        status.innerText = `Please answer: ${missing.join('; ')}`;
+        status.innerText = 'Please fix the highlighted answers.';
+        return;
+    }
+    if (c.missing.length) {
+        status.className = 'text-xs text-amber-400';
+        status.innerText = `Please answer: ${c.missing.join('; ')}`;
         return;
     }
 
     status.className = 'text-xs text-gray-400';
     status.innerText = 'Saving…';
-    const now = new Date().toISOString();
-    const row = { client_name: currentActiveClient, step_id: stepId, answers, submitted_by: clientEmail || null, updated_at: now };
-    const { error } = await supabaseClient.from('onboarding_answers').upsert(row, { onConflict: 'client_name,step_id' });
-    if (error) {
-        console.error('Could not save answers:', error);
-        status.className = 'text-xs text-red-400';
-        status.innerText = "Couldn't save your answers. Please try again, or email us if it keeps happening.";
-        return;
+    const saved = await obSaveAnswers(stepId, { draft: false });
+    if (!saved.ok) return;
+
+    // A changed answer can change which steps this client gets, so refresh the list before showing it
+    if (saved.factsChanged) {
+        await loadOnboardingApplicability([currentActiveClient]);
+        renderGetStarted();
+        updateGetStartedTabVisibility();
     }
-
-    const existing = obAnswersFor(currentActiveClient, stepId);
-    if (existing) Object.assign(existing, row); else globalOnboardingAnswers.push({ ...row, submitted_at: now });
-
     if (onboardingProgressFor(currentActiveClient, stepId)?.completed_at) {
-        status.className = 'text-xs text-emerald-400';
-        status.innerText = 'Saved.';
+        const again = document.getElementById(`obq-status-${stepId}`);
+        if (again) { again.className = 'text-xs text-emerald-400'; again.innerText = 'Saved.'; }
         return;
     }
     // Completing re-renders the list and moves them on to the next step
@@ -11696,6 +11866,17 @@ const WEBSITE_STATUS_LABELS = {
     none: 'No website'
 };
 
+// The answers a step can depend on (onboarding_facts.sql). Unanswered counts as the first value shown here
+// for the page and "No CRM" for the CRM, so a tag on the other value never reaches someone who wasn't asked.
+const FACT_LABELS = {
+    facebook_page: { label: 'Facebook page', values: { yes: 'Has one', no: 'Needs one', unsure: 'Not sure' } },
+    crm_choice: { label: 'CRM', values: { no: 'No CRM', yes: 'Wants leads sent to one' } }
+};
+// False until onboarding_facts.sql has run, so the editor does not offer tags it could not save
+function factsSupported() {
+    return globalOnboardingSteps.some(s => 'fact_conditions' in s) || globalStageTemplates.some(t => 'fact_conditions' in t);
+}
+
 function serviceName(key) {
     return globalServices.find(s => s.key === key)?.name || key;
 }
@@ -11745,6 +11926,15 @@ function conditionEditorHtml(item) {
             title="${s.active === false ? 'Not offered any more' : 'Applies to clients with ' + escapeAttr(s.name)}">${escapeAttr(s.name)}</button>`).join('');
     const webChips = Object.entries(WEBSITE_STATUS_LABELS).map(([k, label]) => `
         <button type="button" class="ob-chip ob-chip-web" data-key="${k}" aria-pressed="${websites.includes(k)}" onclick="toggleConditionChip(this)">${label}</button>`).join('');
+    const facts = item?.fact_conditions || {};
+    const factGroup = factsSupported() ? `
+            <div class="ob-facts flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">Answered</span>
+                ${Object.entries(FACT_LABELS).map(([fk, f]) => `
+                    <span class="flex flex-wrap items-center gap-1.5"><span class="text-[10px] text-gray-500">${f.label}</span>
+                    ${Object.entries(f.values).map(([vk, vl]) => `<button type="button" class="ob-chip ob-chip-fact" data-fact="${fk}" data-key="${vk}"
+                        aria-pressed="${(facts[fk] || []).includes(vk)}" onclick="toggleConditionChip(this)">${vl}</button>`).join('')}</span>`).join('')}
+            </div>` : '';
 
     return `
         <div class="ob-conditions flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
@@ -11758,6 +11948,7 @@ function conditionEditorHtml(item) {
                 ${webChips}
                 <span class="ob-web-summary text-[10px] text-gray-500"></span>
             </div>
+            ${factGroup}
             <select class="glass-input !py-1 !text-xs !w-auto max-w-xs ob-autocheck" data-saved="${escapeAttr(item?.auto_check || '')}">${autoCheckOptions(item?.auto_check || '')}</select>
         </div>`;
 }
@@ -11779,11 +11970,19 @@ function readConditions(row) {
     // Only the step's own tag line: a Questions step's per-question website pills share the look
     const scope = row.querySelector('.ob-conditions') || row;
     const pressed = sel => [...scope.querySelectorAll(`${sel}[aria-pressed="true"]`)].map(b => b.dataset.key);
-    return {
+    const out = {
         service_keys: pressed('.ob-chip-svc'),
         website_statuses: pressed('.ob-chip-web'),
         auto_check: row.querySelector('.ob-autocheck')?.value || null
     };
+    // Only when the editor offered the tags: otherwise saving would try to write a column that is not there
+    if (scope.querySelector('.ob-facts')) {
+        out.fact_conditions = {};
+        scope.querySelectorAll('.ob-chip-fact[aria-pressed="true"]').forEach(b => {
+            (out.fact_conditions[b.dataset.fact] = out.fact_conditions[b.dataset.fact] || []).push(b.dataset.key);
+        });
+    }
+    return out;
 }
 
 // ---- Services editor (Templates → Services) ----
@@ -11882,11 +12081,16 @@ window.runOnboardingPreview = async function() {
     if (!out) return;
     const services = [...document.querySelectorAll('#ob-preview-services .ob-chip[aria-pressed="true"]')].map(b => b.dataset.key);
     const website = document.getElementById('ob-preview-website').value || null;
+    // Only sent when one is picked, so the preview still works before onboarding_facts.sql has run
+    const pickedFacts = {};
+    const pg = document.getElementById('ob-preview-page')?.value, crm = document.getElementById('ob-preview-crm')?.value;
+    if (pg) pickedFacts.facebook_page = pg;
+    if (crm) pickedFacts.crm_choice = crm;
     const seq = ++obPreviewSeq;
     out.innerHTML = '<span class="text-gray-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading…</span>';
 
     const [{ data, error }] = await Promise.all([
-        supabaseClient.rpc('onboarding_preview', { p_services: services, p_website: website }),
+        supabaseClient.rpc('onboarding_preview', { p_services: services, p_website: website, ...(Object.keys(pickedFacts).length ? { p_facts: pickedFacts } : {}) }),
         loadAutoCheckCatalog()
     ]);
     if (seq !== obPreviewSeq) return;   // a newer click already asked
@@ -12121,6 +12325,7 @@ window.saveStageTemplates = async function() {
                     website_statuses: t.website_statuses,
                     auto_check: t.auto_check
                 };
+                if (t.fact_conditions) row.fact_conditions = t.fact_conditions;
                 if (t.id) row.id = t.id;
                 return row;
             });
@@ -12257,12 +12462,22 @@ window.addOnboardingStepRow = function(step) {
 // One question in a Questions step. Its id is kept across edits, so rewording a question keeps the
 // answers already given to it. Website pills use their own class so readConditions() (the step's
 // own tags) never picks them up.
-const OB_QUESTION_TYPES = [['short', 'Short answer'], ['long', 'Long answer'], ['choice', 'Pick one'], ['multi', 'Pick any']];
+const OB_QUESTION_TYPES = [['short', 'Short answer'], ['long', 'Long answer'], ['choice', 'Pick one'], ['multi', 'Pick any'], ['phone', 'Phone'], ['email', 'Email'], ['link', 'Link']];
+// Where an answer is saved on the client. These four are what the Quick start questions use; the
+// videos and tasks that depend on them are tagged in SQL (onboarding_facts.sql).
+const OB_FACT_OPTIONS = [
+    ['', 'Not saved on the client'],
+    ['facebook_page', 'Client fact: Facebook page'],
+    ['crm_choice', 'Client fact: wants a CRM (yes/no)'],
+    ['crm_name', 'Client fact: which CRM'],
+    ['crm_method', 'Client fact: how the CRM takes leads']
+];
 
 function obQuestionRowHtml(q) {
     q = q || {};
     const id = q.id || `q_${Math.random().toString(36).slice(2, 8)}`;
     const webs = q.website_statuses || [];
+    const showIf = q.show_if || {};
     return `
         <div class="ob-q-row bg-black/20 border border-white/5 rounded-lg p-2 space-y-2" data-qid="${escapeAttr(id)}">
             <div class="flex gap-2 items-center">
@@ -12286,8 +12501,44 @@ function obQuestionRowHtml(q) {
                         onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true')">${label}</button>`).join('')}
                 <span class="text-[10px] text-gray-500">(none picked = always ask)</span>
             </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500">Only ask if</span>
+                <select class="glass-input !py-1 !text-xs !w-auto max-w-[14rem] ob-q-showq" data-saved="${escapeAttr(showIf.q || '')}" onfocus="obRefreshShowIf(this)">
+                    <option value="">always</option>${showIf.q ? `<option value="${escapeAttr(showIf.q)}" selected>${escapeAttr(showIf.q)}</option>` : ''}
+                </select>
+                <span class="text-[10px] text-gray-500">is</span>
+                <input type="text" class="glass-input !py-1 !text-xs !w-56 ob-q-showany" placeholder="exact choices, e.g. Yes, Not sure" value="${escapeAttr((showIf.any || []).join(', '))}">
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500">Saves to</span>
+                <select class="glass-input !py-1 !text-xs !w-auto max-w-[16rem] ob-q-fact" onchange="obFactChanged(this)">
+                    ${OB_FACT_OPTIONS.map(([v, l]) => `<option value="${v}" ${(q.fact || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+                </select>
+                <input type="text" class="glass-input !py-1 !text-xs !w-64 ob-q-factvals" placeholder="values, in choice order: yes, no, unsure" value="${escapeAttr((q.fact_values || []).join(', '))}" style="display:${q.fact ? '' : 'none'}">
+                <input type="text" class="glass-input !py-1 !text-xs !w-64 ob-q-dest" placeholder="Later: where it goes in GHL, e.g. custom_value:owner_name" value="${escapeAttr(q.dest || '')}">
+            </div>
         </div>`;
 }
+
+// Offer the questions above this one as the thing it depends on
+window.obRefreshShowIf = function(sel) {
+    const row = sel.closest('.ob-q-row');
+    const keep = sel.value || sel.dataset.saved || '';
+    const earlier = [];
+    for (let r = row.previousElementSibling; r; r = r.previousElementSibling) {
+        if (!r.classList.contains('ob-q-row')) continue;
+        earlier.unshift({ id: r.dataset.qid, label: r.querySelector('.ob-q-label').value.trim() || '(untitled)' });
+    }
+    sel.innerHTML = `<option value="">always</option>` + earlier.map(e => `<option value="${escapeAttr(e.id)}" ${e.id === keep ? 'selected' : ''}>${escapeAttr(e.label.slice(0, 60))}</option>`).join('')
+        + (keep && !earlier.some(e => e.id === keep) ? `<option value="${escapeAttr(keep)}" selected>(a question that is no longer above this one)</option>` : '');
+};
+
+window.obFactChanged = function(sel) {
+    const row = sel.closest('.ob-q-row');
+    const vals = row.querySelector('.ob-q-factvals');
+    vals.style.display = sel.value ? '' : 'none';
+    if (sel.value && !vals.value.trim() && OB_FACT_DEFAULT_VALUES[sel.value]) vals.value = OB_FACT_DEFAULT_VALUES[sel.value].join(', ');
+};
 
 window.addObQuestion = function(btn) {
     const list = btn.closest('.ob-questions').querySelector('.ob-q-list');
@@ -12303,16 +12554,55 @@ window.moveObQuestion = function(btn, dir) {
 };
 
 function readObQuestions(stepRow) {
-    return [...stepRow.querySelectorAll('.ob-q-row')].map(r => ({
-        id: r.dataset.qid,
-        label: r.querySelector('.ob-q-label').value.trim(),
-        type: r.querySelector('.ob-q-type').value,
-        required: r.querySelector('.ob-q-required').checked,
-        options: ['choice', 'multi'].includes(r.querySelector('.ob-q-type').value)
-            ? r.querySelector('.ob-q-options').value.split(',').map(o => o.trim()).filter(Boolean)
-            : [],
-        website_statuses: [...r.querySelectorAll('.ob-q-web[aria-pressed="true"]')].map(b => b.dataset.key)
-    })).filter(q => q.label);
+    const split = s => s.split(',').map(o => o.trim()).filter(Boolean);
+    return [...stepRow.querySelectorAll('.ob-q-row')].map(r => {
+        const type = r.querySelector('.ob-q-type').value;
+        const showQ = r.querySelector('.ob-q-showq').value || r.querySelector('.ob-q-showq').dataset.saved || '';
+        const showAny = split(r.querySelector('.ob-q-showany').value);
+        const fact = r.querySelector('.ob-q-fact').value;
+        const factValues = fact ? split(r.querySelector('.ob-q-factvals').value) : [];
+        const dest = r.querySelector('.ob-q-dest').value.trim();
+        const q = {
+            id: r.dataset.qid,
+            label: r.querySelector('.ob-q-label').value.trim(),
+            type,
+            required: r.querySelector('.ob-q-required').checked,
+            options: ['choice', 'multi'].includes(type) ? split(r.querySelector('.ob-q-options').value) : [],
+            website_statuses: [...r.querySelectorAll('.ob-q-web[aria-pressed="true"]')].map(b => b.dataset.key)
+        };
+        if (showQ) q.show_if = { q: showQ, any: showAny };
+        if (fact) q.fact = fact;
+        if (fact && factValues.length) q.fact_values = factValues;
+        if (dest) q.dest = dest;
+        return q;
+    }).filter(q => q.label);
+}
+
+// Problems with the dependency and fact settings of one step's questions, as plain sentences
+function obQuestionProblems(stepTitle, questions) {
+    const problems = [];
+    questions.forEach((q, i) => {
+        if (q.show_if) {
+            const parent = questions.slice(0, i).find(p => p.id === q.show_if.q);
+            if (!parent) problems.push(`In "${stepTitle}", "${q.label}" depends on a question that is not above it.`);
+            else if (!q.show_if.any.length) problems.push(`In "${stepTitle}", "${q.label}" needs the answer(s) that make it appear.`);
+            else if (['choice', 'multi'].includes(parent.type)) {
+                const stray = q.show_if.any.find(a => !parent.options.includes(a));
+                if (stray) problems.push(`In "${stepTitle}", "${q.label}" waits for "${stray}", which is not one of the choices of "${parent.label}".`);
+            }
+        }
+        if (q.fact && q.type === 'choice' && q.fact_values && q.fact_values.length !== q.options.length) {
+            problems.push(`In "${stepTitle}", "${q.label}" has ${q.options.length} choices but ${q.fact_values.length} saved values. They must line up one to one.`);
+        }
+        if (q.fact && OB_FACT_DEFAULT_VALUES[q.fact] && q.type === 'choice' && !(q.fact_values || []).length) {
+            problems.push(`In "${stepTitle}", "${q.label}" saves to the client but has no values listed.`);
+        }
+        if (q.fact && OB_FACT_DEFAULT_VALUES[q.fact] && q.fact_values) {
+            const stray = q.fact_values.find(v => !OB_FACT_DEFAULT_VALUES[q.fact].includes(v));
+            if (stray) problems.push(`In "${stepTitle}", "${q.label}" saves "${stray}", which the client record does not accept. Use: ${OB_FACT_DEFAULT_VALUES[q.fact].join(', ')}.`);
+        }
+    });
+    return problems;
 }
 
 // Hide a step without deleting it (its progress and tags stay), or switch a hidden one on.
@@ -12409,6 +12699,8 @@ window.saveOnboardingSteps = async function() {
             alert(`In "${s.title}", the question "${noChoices.label}" needs its choices, separated by commas.`);
             return;
         }
+        const problems = obQuestionProblems(s.title, s.questions);
+        if (problems.length) { alert(problems[0]); return; }
     }
 
     const original = btn.innerHTML;
@@ -12435,6 +12727,7 @@ window.saveOnboardingSteps = async function() {
                     service_keys: s.service_keys, website_statuses: s.website_statuses, auto_check: s.auto_check,
                     questions: s.questions
                 };
+                if (s.fact_conditions) row.fact_conditions = s.fact_conditions;
                 if (s.id) row.id = s.id;
                 return row;
             });
