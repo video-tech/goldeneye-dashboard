@@ -2056,7 +2056,7 @@ two early questions, "Do you have a Facebook page?" and "Do you have a CRM you w
 - **Seeded hidden (active = false):** the Quick start questions step (second, right after the welcome video) and four of our tasks (help create a page, confirm partner access,
   follow up if unsure, build the CRM lead send). **No new videos:** the two Facebook videos already existed as live steps, "not sure" gets the create video (which should open with
   a short "check first" part) plus our follow-up task, and a client with their own CRM is rare enough that the task covers it with no video.
-- **Going live is a decision, not part of the SQL: `supabase/sql/onboarding_quick_start_go_live.sql`.** It switches Quick start and our four answer-driven tasks on, tags the two
+- **Going live is a decision, not part of the SQL: `supabase/sql/onboarding_quick_start_go_live.sql`.** The app.js is live (pushed 2026-10-15) but this has NOT been run: the user wants it off until the whole rebuild is done, because a client is mid-onboarding. It switches Quick start and our four answer-driven tasks on, tags the two
   existing videos ("Give us access to your Facebook" for a page, "Create your Facebook Page" for no page or not sure), and removes the two dropped video placeholders if they are still
   hidden with no link. **Run it only after the new app.js is being served:** the old code shows every question and requires "Which CRM?" even after "no CRM", which would trap a
   client. 20 PGlite checks, 6 of 6 breakages caught, including a client who answers nothing (sees the access video only), "no", "not sure" and "CRM yes".
@@ -2138,7 +2138,7 @@ client has as `ghl_location_id`, refuses a fourth test account, never deletes, a
   pipelines and 19 workflows, **but `GHL_AGENCY_TOKEN` then held a token made by hand inside the test account**, not the agency
   one: it proves a per-account token reads everything, not that the agency token can. (The function reported "agency token"
   because it only knows which secret it used.) The ways in stay: a token made by hand in each new account, or a private
-  Marketplace app. Put the real agency token back in `GHL_AGENCY_TOKEN` before creating or listing again. GHL's built-in
+  Marketplace app. (`GHL_AGENCY_TOKEN` was unset 2026-10-15: with the app installed ghl-provision uses the app's key; creating an account through the app is still untested.) GHL's built-in
   `{{location.name}}`, `.phone`, `.address`, `.website`, `.email` are filled at creation, so templates using them need no
   custom value for those.
 - **What the snapshot brought, worth tidying in Master:** "5.leads to ghl" (the Golden Eye lead webhook) and "1. Missed Call
