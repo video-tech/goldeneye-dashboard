@@ -2376,6 +2376,23 @@ raised. `supabase/sql/onboarding_client_facts_fix.sql` takes the newest row (`li
 `delete_duplicate_placeholder_clients.sql` deletes the older copy of each by id. **`clients.name` has no unique constraint**:
 anything that reads one client by name as a single value must `limit 1`.
 
+### ghl-contact-check: is each client in our Midas GHL? (built 2026-10-16)
+
+Make scenario #4 (the onboarding-complete tag and text) finds the client in **our Midas GHL** by the email the onboarding
+trigger sends (the first address in `client_email`, spaces removed) and acts only on one exact match, so a missing or
+duplicated contact silently means no tag and no text. `supabase/functions/ghl-contact-check/` looks each client up the same
+way and records found / missing / duplicate / no_email / error in `client_ghl_contacts` (`supabase/sql/ghl_contact_check.sql`,
+admin-read, in `rename_client.sql`).
+- **Read only, separate key:** `GHL_MIDAS_TOKEN` is a Private Integration token on our Midas GHL account with one scope,
+  Contacts read, plus `GHL_MIDAS_LOCATION_ID`. GET requests only, through `ghlRead`. The Golden Eye app still has no contacts
+  scope. GHL's search is fuzzy (`GET /contacts/?query=`, the same kind Make's Search Contacts runs); only contacts whose own
+  email equals the client's count, and an empty email is never searched.
+- **When:** pg_cron `ghl-contact-check` at 14:00 UTC for every active client in Onboarding (`schedule.sql`), right after Add
+  client (in the background), and **Check now** (admins).
+- **Where it shows:** a warning on the client's Onboarding Progress when they aren't found exactly once, and a line at the top of
+  their Roster profile (found or not). Clients never see it.
+- **Tests:** 16 node checks on the function (3 of 3 breakages caught), 13 jsdom checks on the notices and Check now.
+
 ## Tasks page filters (2026-10-02)
 
 - **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first

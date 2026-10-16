@@ -4,6 +4,13 @@
     {
       "date": "2026-10-16",
       "area": "Onboarding",
+      "title": "Golden Eye checks each client is in our GHL",
+      "what": "The onboarding-complete text only reaches a client who is a contact in our Midas GHL with the same email. Golden Eye now checks that every morning and right after you add a client. If a client is missing, or in GHL twice, their Onboarding Progress shows a warning, and their Roster profile says either way, with a Check now button.",
+      "action": "Create a read-only Contacts key in our Midas GHL and set it as GHL_MIDAS_TOKEN (with GHL_MIDAS_LOCATION_ID), then run supabase/sql/ghl_contact_check.sql, rename_client.sql and supabase/functions/ghl-contact-check/schedule.sql"
+    },
+    {
+      "date": "2026-10-16",
+      "area": "Onboarding",
       "title": "Clients can see what we are working on",
       "what": "Our setup tasks now show in the client's portal with plain names (Set up your CRM, Register your texting number, Build your website, Set up your blog articles and the rest), so they can watch the work move along. The small steps inside each task stay ours.",
       "action": "Run supabase/sql/show_setup_tasks_to_clients.sql"

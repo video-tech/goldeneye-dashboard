@@ -2197,6 +2197,75 @@ async function loadPrivateAnswersForStaff() {
     globalPrivateAnswerKeys = keys;
 }
 
+// ---- Is the client a contact in our Midas GHL? (ghl-contact-check, supabase/sql/ghl_contact_check.sql) ----
+// The onboarding-complete tag and text only reach a client whose email matches exactly one contact in our Midas GHL.
+// The check runs every morning and after Add client; admins see the result here and can run it again.
+let globalGhlContacts = [];
+const GHL_CONTACT_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ghl-contact-check';
+
+async function loadGhlContactChecks() {
+    globalGhlContacts = [];
+    if (currentUserRole !== 'admin') return;
+    const { data, error } = await supabaseClient.from('client_ghl_contacts').select('*');
+    globalGhlContacts = error ? [] : (data || []);   // table not there yet: show nothing
+}
+
+function ghlContactFor(clientName) {
+    return globalGhlContacts.find(r => normalize(r.client_name || '') === normalize(clientName || '')) || null;
+}
+
+const GHL_CONTACT_SAYS = {
+    found: ['var(--pos)', 'fa-circle-check', 'In our GHL: the onboarding-complete text will reach them.'],
+    missing: ['var(--warn)', 'fa-triangle-exclamation', "Not in our GHL, so the onboarding-complete tag and text won't reach them. Add them as a contact with this email, or fix the email in Edit Client."],
+    duplicate: ['var(--warn)', 'fa-triangle-exclamation', 'More than one contact in our GHL has this email, so only one would get the tag. Merge them in GHL.'],
+    no_email: ['var(--warn)', 'fa-triangle-exclamation', 'No email on the client, so they can\'t be found in our GHL. Add one in Edit Client.'],
+    error: ['var(--neg)', 'fa-circle-xmark', "The check couldn't reach GHL"],
+};
+
+// opts.always: also show a quiet "found" line (the Roster profile); otherwise only problems are shown
+function ghlContactNoticeHtml(clientName, opts = {}) {
+    if (currentUserRole !== 'admin' || !clientName || clientName === 'ALL') return '';
+    const r = ghlContactFor(clientName);
+    if (!r && !opts.always) return '';
+    if (r?.status === 'found' && !opts.always) return '';
+    const [color, icon, text] = r ? (GHL_CONTACT_SAYS[r.status] || GHL_CONTACT_SAYS.error) : ['var(--t3)', 'fa-circle-question', 'Not checked against our GHL yet.'];
+    const when = r?.checked_at ? ` <span style="color:var(--t3);">Checked ${escapeAttr(new Date(r.checked_at).toLocaleDateString())}${r.email ? ' for ' + escapeAttr(r.email) : ''}.</span>` : '';
+    const detail = r?.status === 'error' && r.error ? `: ${escapeAttr(r.error)}` : '';
+    return `<div class="ghl-contact-notice text-xs" style="display:flex; gap:8px; align-items:flex-start; margin:0 0 12px; color:${color};">
+        <i class="fa-solid ${icon}" style="margin-top:2px;"></i>
+        <span style="flex:1;">${escapeAttr(text)}${detail}${when}</span>
+        <button type="button" class="text-xs font-bold" data-client="${escapeAttr(clientName)}" onclick="checkGhlContact(this.dataset.client, this)"
+            style="background:none; border:none; padding:0; color:var(--gold); cursor:pointer; white-space:nowrap;">Check now</button>
+    </div>`;
+}
+
+// Runs the check for one client and redraws what shows it. quiet: after Add client, no button to update.
+window.checkGhlContact = async function (clientName, btn, { quiet = false } = {}) {
+    if (currentUserRole !== 'admin' || !clientName) return;
+    if (btn) { btn.disabled = true; btn.innerText = 'Checking…'; }
+    try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch(GHL_CONTACT_FN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token || ''}` },
+            body: JSON.stringify({ mode: 'check', client: clientName })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `the check answered ${res.status}`);
+        (data.results || []).forEach(r => {
+            globalGhlContacts = globalGhlContacts.filter(x => normalize(x.client_name || '') !== normalize(r.client_name || ''))
+                .concat({ ...r, checked_at: new Date().toISOString() });
+        });
+        if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+        if (document.getElementById('page-roster') && !document.getElementById('page-roster').classList.contains('hidden') && typeof renderRoster === 'function') renderRoster();
+    } catch (e) {
+        if (!quiet) alert("Couldn't check GHL: " + e.message);
+        else console.warn('GHL contact check:', e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Check now'; }
+    }
+};
+
 // ---- question logic (pure; no page needed) ----
 // A question can depend on an earlier answer (show_if), save its answer onto the client as a fact (fact),
 // and carry a note of where it should end up in GHL later (dest). Which answers pick which video is decided
@@ -3927,6 +3996,7 @@ window.submitClientRequest = async function() {
     globalClientServices = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
     globalOnboardingAnswers = results[14].status === 'fulfilled' ? (results[14].value.data || []) : [];
     await loadPrivateAnswersForStaff();
+    await loadGhlContactChecks();
     // A missing table (client_directory.sql not run yet) comes back as an error with no
     // data, so this is simply empty and the roster says the details can't be saved yet.
     globalClientProfiles = results[15].status === 'fulfilled' ? (results[15].value.data || []) : [];
@@ -6039,6 +6109,9 @@ window.markOnboardingComplete = async function() {
             const done = items.filter(isDone).length;
             const summary = document.getElementById('c-onboarding-summary');
             if (summary) summary.innerText = `${done} of ${items.length} complete`;
+            // Whether the onboarding-complete tag and text can reach them (ghl-contact-check)
+            const ghlBox = document.getElementById('c-onboarding-ghl');
+            if (ghlBox) ghlBox.innerHTML = ghlContactNoticeHtml(cSelectedAccount);
 
             // Offered only where it's the right tool: a client who joined before the
             // portal existed has no progress rows at all, so every step reads outstanding
@@ -14574,6 +14647,7 @@ function rosterProfileHtml(c) {
             <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="goToClient(this.dataset.client)">Open account</button>
             <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="rosterOpenEditClient(this.dataset.client)">Edit client</button>
         </div>
+        ${ghlContactNoticeHtml(c.name, { always: true })}
         <div class="rd-grid">
         <div>
         <div class="rd-section">${rosterEditing === 'people' ? rosterPeopleEdit(c) : rosterPeopleView(c)}</div>
@@ -15174,6 +15248,8 @@ window.saveNewClient = async function(e) {
         if(!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage();
         if(!document.getElementById('page-clients').classList.contains('hidden')) filterAdsData();
         if (document.getElementById('page-roster') && !document.getElementById('page-roster').classList.contains('hidden')) renderRoster();
+        // Are they in our GHL? (so the onboarding-complete text can reach them). In the background, never blocking.
+        window.checkGhlContact(payload.name, null, { quiet: true });
 
     } catch (err) {
         alert("Error creating client: " + err.message);

@@ -45,6 +45,7 @@ async function world({ rosterOpen = true } = {}) {
         function initTasksPage() {}
         function filterAdsData() {}
         function renderRoster() { __calls.push({ roster: true }); }
+        window.checkGhlContact = (name, btn, opts) => { __calls.push({ ghl: name, quiet: opts?.quiet }); };
         window.alert = (m) => __calls.push({ alert: m });
         ${code}
     `);
@@ -64,6 +65,8 @@ const submit = async (w, name) => { w.document.getElementById('new-client-name')
     await submit(w, 'Brand New Roofing');
     ok(w.__calls.some((c) => c.insert === 'clients' && c.rows[0].name === 'Brand New Roofing'), 'a new name is created');
     ok(w.__calls.some((c) => c.roster), 'the Roster redraws when the client was added from there');
+    ok(w.__calls.some((c) => c.ghl === 'Brand New Roofing' && c.quiet === true) && !w.__calls.some((c) => c.alert && /Error creating/.test(c.alert)),
+        'a new client is checked against our GHL in the background');
 }
 {
     const w = await world({ rosterOpen: false });
