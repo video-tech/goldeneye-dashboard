@@ -51,6 +51,25 @@ function makeWorld({ role = 'admin' } = {}) {
         var selectedTaskIds = new Set(), activeCols = [], masterCols = [], currentTaskSort = 'score', taskSortDir = 'desc', taskPrioMode = 'total';
         var sortableInstances = [], globalArchivedTasks = [], globalStageTemplates = [], cSelectedAccount = 'Acme Decks';
         var lifecycleStages = ['Onboarding', 'Campaign Building', 'Campaign Learning'];
+        var globalOnboardingSteps = [
+            { id: 'about', questions: [{ id: 'a_owner', dest: 'custom_value:owner_name; a2p:representative_name' }, { id: 'a_title', dest: 'a2p:representative_title' },
+                { id: 'a_email', dest: 'ghl:email; custom_value:business_email' }, { id: 'a_street', dest: 'ghl:address' }, { id: 'a_city', dest: 'ghl:city' },
+                { id: 'a_state', dest: 'ghl:state' }, { id: 'a_zip', dest: 'ghl:postalCode' }, { id: 'a_mobile', private: true, dest: 'admin:owner_mobile; a2p:representative_phone' }] },
+            { id: 'texting', questions: [{ id: 'b_legal', private: true, dest: 'a2p:legal_name' }, { id: 'b_type', private: true, dest: 'a2p:business_type' }, { id: 'b_ein', private: true, dest: 'a2p:ein' }] },
+        ];
+        var globalOnboardingAnswers = [
+            { client_name: 'Acme Decks', step_id: 'about', answers: { a_owner: { value: 'Pat Smith' }, a_title: { value: 'Owner' }, a_email: { value: 'pat@acme.com' },
+                a_street: { value: '1 Main St' }, a_city: { value: 'Lehi' }, a_state: { value: 'UT' }, a_zip: { value: '84043' } } },
+            { client_name: 'Other Co', step_id: 'texting', answers: {} },
+        ];
+        var globalPrivateAnswers = [
+            // another client's answers first, so a missing client filter would show up as a leak
+            { client_name: 'Other Co', step_id: 'texting', answers: { b_ein: { value: '99-9999999' } } },
+            { client_name: 'Acme Decks', step_id: 'texting', answers: { b_legal: { value: 'Acme Decks LLC' }, b_type: { value: 'LLC' }, b_ein: { value: '12-3456789' } } },
+            { client_name: 'Acme Decks', step_id: 'about', answers: { a_mobile: { value: '801-555-9999' } } },
+        ];
+        window.__copied = null;
+        Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__copied = t; } }, configurable: true });
         var globalClientsData = [{ name: 'Acme Decks', current_stage: 'Onboarding' }, { name: 'Other Co', current_stage: 'Onboarding' }];
         var globalTasksData = [
             { id: 1, client: 'Acme Decks', title: 'Register their texting number', stage: 'Onboarding', status: 'Not Started', type: 'Checklist', score: 60, assignee: 'Tenny', client_visible: false },
@@ -136,6 +155,30 @@ const card = (d, id) => d.querySelector(`.kanban-card[data-id="${id}"]`);
     const { d, t } = makeWorld({ role: 'client' });
     t.renderKanban();
     ok(!d.querySelector('.task-steps-toggle'), 'non-admins get no arrow');
+}
+
+// ---- Copy A2P details ----
+{
+    const { w, d, t } = makeWorld();
+    t.steps().push({ id: 14, client: 'Acme Decks', title: 'Review — Paste the A2P details into their Business Profile', stage: 'Onboarding', status: 'Not Started', type: 'Setup step', checklist_group: 'Register their texting number' });
+    t.renderKanban();
+    card(d, 1).querySelector('.task-steps-toggle').click();
+    const btns = d.querySelectorAll('.task-steps .a2p-copy');
+    ok(btns.length === 1, 'the copy button shows on the Business Profile step only');
+    await w.copyA2pDetails(btns[0]);
+    const text = w.__copied || '';
+    ok(!w.__calls.some((x) => x.drawer), 'copying does not open the task drawer');
+    ok(text.includes('Legal business name: Acme Decks LLC') && text.includes('Business type: LLC') && text.includes('EIN: 12-3456789'), 'the private A2P answers are copied: ' + JSON.stringify(text));
+    ok(text.includes('Address: 1 Main St, Lehi, UT 84043') && text.includes('Authorized representative: Pat Smith') && text.includes('Title: Owner')
+        && text.includes('Email: pat@acme.com') && text.includes('Phone: 801-555-9999'), 'address and the representative are copied');
+    ok(text.includes('Website: (not answered)') && !text.includes('99-9999999'), "a blank answer says so; another client's answers never leak in");
+    ok(/Copied/.test(btns[0].innerHTML), 'the button says it copied');
+}
+{
+    const { w, d, t } = makeWorld({ role: 'client' });
+    const btn = d.createElement('button'); btn.dataset.client = 'Acme Decks';
+    await w.copyA2pDetails(btn);
+    ok(w.__copied === null, 'a non-admin page never copies');
 }
 
 // ---- the list view ----

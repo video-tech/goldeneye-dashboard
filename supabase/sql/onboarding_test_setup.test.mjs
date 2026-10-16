@@ -19,6 +19,7 @@ await db.exec(`
         active boolean default true, service_keys text[] not null default '{}');
     create table services (key text primary key, name text not null, description text, active boolean not null default true, sort_order int not null default 0);
     create table client_services (client_name text, service_key text references services(key) on update cascade, status text not null default 'onboarding', primary key (client_name, service_key));
+    create table ghl_accounts (client_name text primary key, location_id text, status text);
     create table client_onboarding_progress (id uuid primary key default gen_random_uuid(), client_name text not null, step_id uuid not null,
         completed_at timestamptz, completed_by text, watch_percent int default 0);
     create table tasks (id serial, client text, title text);
@@ -43,6 +44,7 @@ await db.exec(`
     insert into client_onboarding_progress (client_name, step_id, completed_at) select 'Ironshell Roofing', id, null from onboarding_steps where title = 'Welcome — how your dashboard works';
     insert into tasks (client, title) values ('GE Test Client', 'x'), ('Ironshell Roofing', 'y');
     insert into user_client_access values ('video+getest@midasmediafirm.com', 'GE Test Client');
+    insert into ghl_accounts values ('GE Test Client', 'TestLoc0000000000001', 'awaiting_install'), ('Real Client', 'RealLoc0000000000001', 'filled');
 `);
 const before = await q(`select title, active, service_keys from onboarding_steps order by title`);
 const setup = read('onboarding_test_setup.sql').replace(/notify pgrst[^;]*;/g, '');
@@ -85,6 +87,7 @@ ok((await q(`select count(*)::int n from clients where name = 'GE Test Client'`)
 ok((await q(`select count(*)::int n from clients where name = 'Ironshell Roofing'`))[0].n === 1
     && (await q(`select count(*)::int n from tasks where client = 'Ironshell Roofing'`))[0].n === 1
     && (await q(`select count(*)::int n from client_services where client_name = 'Ironshell Roofing'`))[0].n === 1, 'Ironshell and its rows are untouched');
+ok((await q(`select client_name from ghl_accounts`)).map((r) => r.client_name).join() === 'Real Client', "the test client's GHL account record goes; other clients' stay");
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

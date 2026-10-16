@@ -26,7 +26,10 @@ declare t text;
 begin
     foreach t in array array['onboarding_secret_reveals', 'onboarding_secrets', 'onboarding_private_answers', 'onboarding_answers',
                              'client_onboarding_progress', 'client_services', 'client_contacts', 'client_profiles',
-                             'client_work_summaries', 'weekly_checkins'] loop
+                             'client_work_summaries', 'weekly_checkins',
+                             -- its GHL account record (delete the account itself in GHL), so a new test client gets a new
+                             -- account. The write log is kept: it's the history of what Golden Eye did in GHL.
+                             'ghl_accounts'] loop
         if to_regclass('public.' || t) is not null then
             execute format('delete from public.%I where client_name = %L', t, 'GE Test Client');
         end if;

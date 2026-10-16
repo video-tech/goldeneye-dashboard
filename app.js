@@ -13352,11 +13352,61 @@ function setupStepRowsHtml(g) {
                     <div style="font-size:13.5px; color:${done ? 'var(--t3)' : 'var(--t1)'}; ${done ? 'text-decoration:line-through;' : ''}">${escapeAttr(stripSlashEscapes(name))}${auto ? ' <i class="fa-solid fa-bolt" style="color:var(--pos); font-size:10px;" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}</div>
                     ${meta ? `<div class="text-xs" style="margin-top:2px; color:var(--t3);">${meta}</div>` : ''}
                     ${s.notes ? `<details style="margin-top:3px;"><summary class="text-xs" style="color:var(--t3); cursor:pointer;">Details</summary><p class="text-xs" style="margin-top:4px; color:var(--t2); line-height:1.55; white-space:pre-wrap;">${escapeAttr(stripSlashEscapes(s.notes))}</p></details>` : ''}
+                    ${s.title === A2P_PROFILE_STEP ? `<button type="button" class="text-xs font-bold a2p-copy" data-client="${escapeAttr(s.client)}" onclick="copyA2pDetails(this)"
+                        style="margin-top:4px; background:none; border:none; padding:0; color:var(--gold); cursor:pointer;"><i class="fa-regular fa-copy mr-1"></i>Copy A2P details</button>` : ''}
                 </div>
                 <button type="button" onclick="openSetupStepTask('${s.id}')" class="text-xs" style="flex:none; background:none; border:none; color:var(--t3); cursor:pointer;" title="Open as a task: assign someone, change the due date or add notes">Edit</button>
             </div>`;
         }).join('');
 }
+
+// "Copy A2P details" on the Business Profile step (setup_checklist_a2p_profile.sql). GHL's API can't fill the legal name,
+// business type, EIN or authorized representative, so the client's answers are copied in the order GHL's Business Profile
+// asks for them. Found by each question's dest (a2p:legal_name, ghl:address…), so rewording a question doesn't break it.
+// Admins only: several are private answers (globalPrivateAnswers is loaded for admins only).
+const A2P_PROFILE_STEP = 'Review — Paste the A2P details into their Business Profile';
+
+function answersByDest(clientName) {
+    const key = normalize(clientName || '');
+    const questions = new Map();
+    (globalOnboardingSteps || []).forEach(st => (Array.isArray(st.questions) ? st.questions : []).forEach(q => questions.set(`${st.id}|${q.id}`, q)));
+    const rows = [...(globalOnboardingAnswers || []), ...(globalPrivateAnswers || [])].filter(r => normalize(r.client_name || '') === key);
+    const out = {};
+    rows.forEach(r => Object.entries(r.answers || {}).forEach(([qid, e]) => {
+        const q = questions.get(`${r.step_id}|${qid}`);
+        const v = Array.isArray(e?.value) ? e.value.join(', ') : String(e?.value ?? '').trim();
+        if (!q?.dest || !v) return;
+        String(q.dest).split(';').map(x => x.trim()).filter(Boolean).forEach(d => { if (!(d in out)) out[d] = v; });
+    }));
+    return out;
+}
+
+function a2pDetailsText(clientName) {
+    const d = answersByDest(clientName);
+    const get = k => d[k] || '(not answered)';
+    const address = [d['ghl:address'], d['ghl:city'], [d['ghl:state'], d['ghl:postalCode']].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    return [
+        `Legal business name: ${get('a2p:legal_name')}`,
+        `Business type: ${get('a2p:business_type')}`,
+        `EIN: ${get('a2p:ein')}`,
+        `Address: ${address || '(not answered)'}`,
+        `Website: ${get('ghl:website')}`,
+        `Authorized representative: ${get('a2p:representative_name')}`,
+        `Title: ${get('a2p:representative_title')}`,
+        `Email: ${get('ghl:email')}`,
+        `Phone: ${get('a2p:representative_phone')}`,
+    ].join('\n');
+}
+
+window.copyA2pDetails = async function (btn) {
+    if (currentUserRole !== 'admin') return;
+    try {
+        await navigator.clipboard.writeText(a2pDetailsText(btn.dataset.client));
+        btn.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Copied';
+    } catch {
+        btn.innerText = "Couldn't copy";
+    }
+};
 
 // The arrow on a task card: a task that is a checklist group ("Register their texting number") opens its steps
 // underneath, like a Roster row, and they can be ticked right there. Admins only, like the steps themselves.
@@ -14035,6 +14085,8 @@ window.rosterSortBy = function(key) {
 window.renderRoster = function() {
     const list = document.getElementById('roster-list');
     if (!list) return;
+    // Adding a client is an admin's job; members (VAs limited to some clients) see the Roster without it
+    document.getElementById('btn-roster-add-client')?.classList.toggle('hidden', currentUserRole !== 'admin');
 
     const all = globalClientsData.slice();
     const counts = { all: all.length, active: 0, paused: 0, archived: 0 };
@@ -15069,6 +15121,16 @@ window.saveNewClient = async function(e) {
         status: 'active'
     };
 
+    // clients.name has no unique constraint, and a name stored twice broke the onboarding view for every client
+    // (onboarding_client_facts_fix.sql). Archived clients count: their history is filed under the name.
+    const dupe = globalClientsData.find(c => normalize(c.name || '') === normalize(payload.name));
+    if (!payload.name || dupe) {
+        alert(payload.name ? `There's already a client called "${stripSlashEscapes(dupe.name)}"${dupe.status === 'archived' ? ' (archived)' : ''}. Use a different name, or open that client instead.` : 'Give the client a name.');
+        btn.innerHTML = 'Create Client Profile';
+        btn.disabled = false;
+        return;
+    }
+
     try {
         const { data, error } = await supabaseClient.from('clients').insert([payload]).select();
         if (error) throw error;
@@ -15113,6 +15175,7 @@ window.saveNewClient = async function(e) {
         await fetchAllGlobalData(globalAllowedClients);
         if(!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage();
         if(!document.getElementById('page-clients').classList.contains('hidden')) filterAdsData();
+        if (document.getElementById('page-roster') && !document.getElementById('page-roster').classList.contains('hidden')) renderRoster();
 
     } catch (err) {
         alert("Error creating client: " + err.message);

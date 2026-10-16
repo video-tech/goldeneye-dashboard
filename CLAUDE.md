@@ -2342,7 +2342,11 @@ client (the checklist step ticks itself), waits for the install click, then fill
   **Unconfirmed:** whether GHL emails new users, and whether editing pipeline stages needs settingsEnabled.
 - **EIN, legal name, authorized representative can't be filled:** GHL's public location API has no such fields (checked its
   OpenAPI spec 2026-10-16: name, phone, address, city, state, country, postalCode, website, timezone, prospectInfo,
-  settings, social, twilio, mailgun, snapshot). They stay a copy-paste step in A2P, from the locked answers.
+  settings, social, twilio, mailgun, snapshot). So "Connect their GHL to Golden Eye" has a step, **"Review — Paste the A2P
+  details into their Business Profile"** (`supabase/sql/setup_checklist_a2p_profile.sql`, which also adds it to clients
+  whose task is already open), with a **Copy A2P details** button (`copyA2pDetails`, admin only): legal name, business type,
+  EIN, address, website and the representative's name, title, email and phone, in the order GHL asks. Found by each
+  question's `dest` (`a2p:legal_name`, `ghl:address`…), public and private answers together, one client only.
 - **Not built:** anything in workflows (GHL's API can't).
 - **Tests:** `ghl-account.test.mjs` (node `--experimental-strip-types`), 47 checks against a fake agency and an in-memory
   database: the whole create, wait, install, fill cycle, who qualifies, the gate and its log, the switch, the lock, failures,
@@ -2425,6 +2429,11 @@ by the user's choice) lives in app.js after the Roster comment block.
   saving, validation, the 42P10 fallback, admin gating), 6 deliberate mutations all caught; 27
   PGlite checks on the SQL against the live policy/index shape, including RLS as a client signing
   in through the email fallback.
+
+- **Add client on the Roster (2026-10-16):** `#btn-roster-add-client` beside the filters opens the same Add Client form
+  (admins only; members don't see it). After saving from there the Roster redraws. **`saveNewClient` now refuses a name that
+  normalizes to an existing client, archived ones included** (a duplicated name broke the onboarding view; see "Duplicate
+  client names"). `tests/add-client.test.mjs`, 9 checks.
 
 ## Weekly check-in
 

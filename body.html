@@ -726,6 +726,9 @@
                         <div class="flex flex-wrap items-center gap-3 mb-5">
                             <div id="roster-status-filter" class="flex" style="border:1px solid var(--line); border-radius:3px; overflow:hidden;"></div>
                             <select id="roster-service-filter" class="glass-input" style="width:auto; min-width:170px; padding-top:7px; padding-bottom:7px;" onchange="rosterSetService(this.value)"></select>
+                            <button id="btn-roster-add-client" type="button" onclick="openAddClientModal()" class="hidden btn-primary btn text-xs transition whitespace-nowrap">
+                                <i class="fa-solid fa-plus mr-2"></i>Add client
+                            </button>
                             <div style="display:flex; align-items:center; gap:9px; background:var(--inset); border:1px solid var(--line); border-radius:3px; padding:7px 12px; flex:1 1 200px; max-width:320px; margin-left:auto;">
                                 <i class="fa-solid fa-magnifying-glass" style="font-size:11px; color:var(--t3);"></i>
                                 <input type="text" id="roster-search" placeholder="Search clients or people…" autocomplete="off"

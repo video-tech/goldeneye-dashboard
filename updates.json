@@ -4,6 +4,13 @@
     {
       "date": "2026-10-16",
       "area": "Onboarding",
+      "title": "Copy A2P details, and Add client on the Roster",
+      "what": "The \"Connect their GHL to Golden Eye\" task has a new step for the Business Profile fields GHL won't let Golden Eye fill (legal business name, business type, EIN, authorized representative): its Copy A2P details button puts the client's answers on your clipboard in the order GHL asks for them. The Roster page has an Add client button, and adding a client now stops you if that name is already taken, even by an archived client.",
+      "action": "Run supabase/sql/setup_checklist_a2p_profile.sql"
+    },
+    {
+      "date": "2026-10-16",
+      "area": "Onboarding",
       "title": "Their team gets GHL logins",
       "what": "The team step in onboarding now starts with the owner and asks, for each person, whether they should get a login. Everyone who says yes is added as a user on the client's new GHL account when Golden Eye fills it: they can work their leads, conversations, calendar and pipeline, but not workflows or settings. They set their own password with \"Forgot password\". Also fixed: our setup tasks were not being created for a client who finished onboarding, because two old archived clients were stored twice.",
       "action": "Run supabase/sql/onboarding_client_facts_fix.sql, supabase/sql/delete_duplicate_placeholder_clients.sql and supabase/sql/team_ghl_logins.sql"
