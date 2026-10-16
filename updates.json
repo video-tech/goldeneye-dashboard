@@ -3,6 +3,20 @@
   "updates": [
     {
       "date": "2026-10-16",
+      "area": "Onboarding",
+      "title": "Their team gets GHL logins",
+      "what": "The team step in onboarding now starts with the owner and asks, for each person, whether they should get a login. Everyone who says yes is added as a user on the client's new GHL account when Golden Eye fills it: they can work their leads, conversations, calendar and pipeline, but not workflows or settings. They set their own password with \"Forgot password\". Also fixed: our setup tasks were not being created for a client who finished onboarding, because two old archived clients were stored twice.",
+      "action": "Run supabase/sql/onboarding_client_facts_fix.sql, supabase/sql/delete_duplicate_placeholder_clients.sql and supabase/sql/team_ghl_logins.sql"
+    },
+    {
+      "date": "2026-10-16",
+      "area": "Onboarding",
+      "title": "Golden Eye makes the client's GHL account",
+      "what": "When a client finishes onboarding with the new questions, Golden Eye creates their GHL account from MasterV.1 within 10 minutes, with their business name, phone, address and time zone, and saves its location ID. Install the Golden Eye app on the new account (the one click GHL requires) and within 10 minutes every custom value is filled from their answers. Clients who started on the old forms, and every existing client, are never touched, and every change Golden Eye makes in GHL is logged.",
+      "action": "Run supabase/sql/ghl_accounts.sql, then rename_client.sql, then supabase/functions/ghl-account/schedule.sql"
+    },
+    {
+      "date": "2026-10-16",
       "area": "Tasks",
       "title": "Setup tasks open into their steps",
       "what": "Our setup work after onboarding is now ten clear tasks instead of two huge ones: Connect Meta, Connect their GHL to Golden Eye, Register their texting number, Build their website, Build the funnel and survey, Turn on automations and add their team, Final check and test, Set up SEO tracking, Set up Cuppa, and Launch ads. Each shows \"2 of 5 steps\" on its card: click the arrow to open the steps right there and tick them off, and the task moves along on its own. SEO's separate tasks (Search Console, SE Ranking, Cuppa and the rest) now live inside the two SEO tasks, and steps that ticked themselves still do.",

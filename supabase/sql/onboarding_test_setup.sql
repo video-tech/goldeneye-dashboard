@@ -11,8 +11,9 @@
 --   2. Saves the current on/off and tags of every new onboarding piece in onboarding_test_backup, then switches them on
 --      tagged qtest only: the six questionnaire steps, Quick start, our four answer-driven tasks and the SEO password task.
 --      Nobody else has qtest, so nobody else sees them. Ironshell is untouched.
---   3. Marks every OTHER client step done for the test client (completed_by 'backfilled', which never texts), so what is
---      left in their Get Started is exactly the new steps. Delete those rows to walk the whole onboarding instead.
+--   3. Marks the three old GHL form steps done for the test client (completed_by 'backfilled', which never texts): go-live
+--      switches those off, so a real client never sees them. Everything else (welcome, setup call, Facebook videos, the
+--      team step, the SEO steps) stays, so the test walks the onboarding a real client will get.
 --
 -- Undo with onboarding_test_teardown.sql. Safe to re-run: the backup keeps the first originals it saw.
 
@@ -61,12 +62,12 @@ on conflict (id) do nothing;
 update public.onboarding_steps s set active = true, service_keys = array['qtest']
   from test_pieces p where s.id = p.id;
 
--- 3. Every other client step counts as done for the test client
+-- 3. The three GHL form steps go-live switches off count as done for the test client
 insert into public.client_onboarding_progress (client_name, step_id, completed_at, completed_by, watch_percent)
 select 'GE Test Client', s.id, now(), 'backfilled', 100
   from public.onboarding_steps s
- where s.owner = 'client' and coalesce(s.active, true)
-   and s.id not in (select id from test_pieces)
+ where s.owner = 'client' and s.step_type = 'form'
+   and s.title in ('Tell us about your business', 'Your service area and hours', 'Offers and preferences')
    and not exists (select 1 from public.client_onboarding_progress p where p.client_name = 'GE Test Client' and p.step_id = s.id);
 
 commit;

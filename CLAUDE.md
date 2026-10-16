@@ -2306,6 +2306,59 @@ for a token to any sub-account, so Golden Eye can create an account and fill it 
 - **Tests:** `app-oauth/app-oauth.test.mjs`, 31 checks (encryption, the install's guards, renewal and the race, location
   tokens, scrubbing, ghl-provision on the app); 3 of 3 breakages caught.
 
+### ghl-account: Golden Eye makes each new client's GHL account (built and deployed 2026-10-16)
+
+`supabase/functions/ghl-account/`, the real version of what ghl-provision proved. A pg_cron sweep every 10 minutes
+(`schedule.sql`) creates a client's sub-account from MasterV.1 with their business details, saves the location ID on the
+client (the checklist step ticks itself), waits for the install click, then fills every custom value from their answers.
+- **Who qualifies, checked every time:** active, in Onboarding, no `ghl_location_id`, onboarding finished (the handoff task
+  exists), answered the new questionnaire (About your business with a business name), and no `ghl_accounts` row. Clients on
+  the old GHL forms (Ironshell) and every existing client never qualify. `{"mode":"status"}` says why each one waits.
+- **The only manual step is the install click.** GHL won't install the app on a new account. The sweep checks
+  `/oauth/installedLocations` and fills as soon as it appears (`GHL_APP_INSTALL_URL` is shown in the report and the step).
+- **What goes in:** `dest` on each question: `ghl:<field>` builds the account (name, phone in +1 format, email, address,
+  city, state, zip, website; the time zone comes from the state, Mountain when unknown), `custom_value:<key>` fills values,
+  matched through `plan.ts` aliases (`facebook_url` fills Master's `facebook_page_url`). "Yes" to the texting window becomes
+  "8am to 8pm, every day". **Private and encrypted answers never go to GHL.** The fill report lists keys the snapshot lacks.
+- **The rules for the app's key, built:** every write goes through `_shared/ghl-write.ts`, whose allow-list is create a
+  sub-account and fill a custom value, nothing else. Every write is logged in `ghl_write_log` *before* it is sent (no log, no
+  write), with a summary, never a token or a value. Writes only reach accounts Golden Eye created, until they are filled;
+  never Master. A location ID typed into Edit Client meanwhile is never overwritten.
+- **Safety:** the `ghl_accounts` row is written before the account is created, so its primary key stops a second account;
+  at most 2 per sweep; `GHL_AUTO_CREATE=on` is the switch (off: the sweep reports who it would create). A failed creation
+  is never retried by the schedule; an admin runs `{"mode":"retry","client":…,"confirm":true}`, allowed only when no account
+  was made.
+- **Setup:** `supabase/sql/ghl_accounts.sql` (tables, admin-read RLS, updated step notes), `rename_client.sql`, deploy, then
+  `schedule.sql` (copies the anon key from the meta-sync job). Secrets: `GHL_SNAPSHOT_ID` (MasterV.1, `XySR40RNsweVul9Gxtlp`)
+  and `GHL_AUTO_CREATE=on` set 2026-10-16; `GHL_APP_INSTALL_URL` optional.
+- **The client's team becomes GHL users (added 2026-10-16).** The onboarding team step lists the owner first (`role`
+  'owner', can't be removed) and asks per person "Give them a login", which needs an email (`supabase/sql/team_ghl_logins.sql`
+  adds `client_contacts.ghl_login` and `ghl_user_id`; app.js saves without them until it runs). When the account is filled,
+  each person with a login and no `ghl_user_id` is added with `POST /users/` (on the allow-list): role user, this account
+  only, permissions `TEAM_PERMISSIONS` (contacts, conversations, calls, calendar, reviews, opportunities on; workflows,
+  triggers, settings, payments off: workflows hold the Golden Eye webhook secret). The password GHL requires is random and
+  never stored, logged or returned; people set their own with "Forgot password". A refused person is reported, never
+  retried by the schedule; `{"mode":"add_users","client":…}` (admin, filled accounts only) adds people added later.
+  **Unconfirmed:** whether GHL emails new users, and whether editing pipeline stages needs settingsEnabled.
+- **EIN, legal name, authorized representative can't be filled:** GHL's public location API has no such fields (checked its
+  OpenAPI spec 2026-10-16: name, phone, address, city, state, country, postalCode, website, timezone, prospectInfo,
+  settings, social, twilio, mailgun, snapshot). They stay a copy-paste step in A2P, from the locked answers.
+- **Not built:** anything in workflows (GHL's API can't).
+- **Tests:** `ghl-account.test.mjs` (node `--experimental-strip-types`), 47 checks against a fake agency and an in-memory
+  database: the whole create, wait, install, fill cycle, who qualifies, the gate and its log, the switch, the lock, failures,
+  retries, callers and team users. 63 checks, 24 of 24 deliberate breakages caught. `tests/team-step.test.mjs` (jsdom), 13
+  checks on the team step, 4 of 4 caught.
+
+### Duplicate client names broke the admin onboarding view (found and fixed 2026-10-16)
+
+`onboarding_client_facts()` read `(select … from clients where name = p_client)` as one value. Two archived August placeholders
+("Custom Professional Renovations", "SUNDARA Medical") were stored twice, so every admin load's `onboarding_steps_for_clients`
+call failed with "more than one row returned by a subquery used as an expression" (500, found in postgres_logs), probably since
+onboarding_facts.sql ran. app.js then fell back to "every step applies to everyone", so a finished client's tasks were never
+raised. `supabase/sql/onboarding_client_facts_fix.sql` takes the newest row (`limit 1`), and
+`delete_duplicate_placeholder_clients.sql` deletes the older copy of each by id. **`clients.name` has no unique constraint**:
+anything that reads one client by name as a single value must `limit 1`.
+
 ## Tasks page filters (2026-10-02)
 
 - **All · You · Ours · Client · Midas** (`taskOwnerFilter`). You = the signed-in person's first

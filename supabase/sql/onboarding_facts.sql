@@ -74,7 +74,10 @@ set search_path = public
 as $$
     select onboarding_fact_defaults() || coalesce(
         (select jsonb_strip_nulls(jsonb_build_object('facebook_page', c.facebook_page, 'crm_choice', c.crm_choice))
-         from clients c where c.name = p_client), '{}'::jsonb);
+         from clients c where c.name = p_client
+         -- a name stored twice must not break every client's list (onboarding_client_facts_fix.sql)
+         order by c.created_at desc nulls last
+         limit 1), '{}'::jsonb);
 $$;
 
 -- Do these fact conditions hold for these facts? Every key with a non-empty list must have the client's

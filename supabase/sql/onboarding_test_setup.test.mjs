@@ -69,8 +69,8 @@ ok(cs.length === 1 && cs[0].client_name === 'GE Test Client' && cs[0].status ===
 const cl = (await q(`select current_stage, status from clients where name = 'GE Test Client'`))[0];
 ok(cl.current_stage === 'Onboarding' && cl.status === 'active', 'the test client is put in Onboarding, active');
 const prog = await q(`select s.title, p.completed_by from client_onboarding_progress p join onboarding_steps s on s.id = p.step_id where p.client_name = 'GE Test Client'`);
-ok(prog.map((p) => p.title).sort().join('|') === ['Tell us about your business', 'Tell us about your business for SEO', 'Welcome — how your dashboard works'].sort().join('|')
-    && prog.every((p) => p.completed_by === 'backfilled'), 'every other live client step is backfilled for the test client only, once');
+ok(prog.map((p) => p.title).join('|') === 'Tell us about your business'
+    && prog.every((p) => p.completed_by === 'backfilled'), 'only the old GHL form steps go-live switches off are ticked for the test client, once; the rest stay real');
 ok((await q(`select count(*)::int n from client_onboarding_progress where client_name = 'Ironshell Roofing' and completed_at is not null`))[0].n === 0, 'Ironshell gets no progress');
 ok((await q(`select count(*)::int n from onboarding_test_backup`))[0].n === 6, 'six originals backed up');
 

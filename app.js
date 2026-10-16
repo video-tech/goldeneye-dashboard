@@ -1350,18 +1350,25 @@ window.submitPortalRequest = async function() {
 // name/phone fields rather than a free-text answer, because "Mike 801-555-0100 and
 // Sarah" is exactly the sort of thing that can't be parsed reliably.
 
-function obTeamRowHtml(stepId, contact) {
-    return `<div class="ob-team-row flex flex-wrap gap-2 items-center">
-        <input type="text" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-name" placeholder="Name"
+// The first row is the owner (who can't be removed); each person can get a GHL login, which ghl-account turns into a GHL
+// user when it fills their new account. A login needs an email, so the box is ticked only when there's an address to use.
+function obTeamRowHtml(stepId, contact, isOwner = false) {
+    const login = contact ? contact.ghl_login !== false : true;
+    return `<div class="ob-team-row flex flex-wrap gap-2 items-center"${isOwner ? ' data-owner="1"' : ''}>
+        ${isOwner ? '<span class="text-xs font-bold text-amber-400 w-full">You (the owner)</span>' : ''}
+        <input type="text" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-name" placeholder="${isOwner ? 'Your name' : 'Name'}"
                value="${escapeAttr(stripSlashEscapes(contact?.contact_name))}">
         <input type="tel" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-phone" placeholder="Mobile number"
                value="${escapeAttr(stripSlashEscapes(contact?.phone))}">
-        <input type="email" class="glass-input !py-2 flex-1 min-w-[160px] ob-team-email" placeholder="Email (optional)"
+        <input type="email" class="glass-input !py-2 flex-1 min-w-[160px] ob-team-email" placeholder="Email"
                value="${escapeAttr(stripSlashEscapes(contact?.email))}">
-        <button type="button" onclick="this.closest('.ob-team-row').remove()"
+        <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer whitespace-nowrap" title="They get their own login to your CRM and the phone app, where new leads come in">
+            <input type="checkbox" class="row-checkbox ob-team-login" ${login ? 'checked' : ''}> Give them a login
+        </label>
+        ${isOwner ? '' : `<button type="button" onclick="this.closest('.ob-team-row').remove()"
                 class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
             <i class="fa-solid fa-xmark"></i>
-        </button>
+        </button>`}
     </div>`;
 }
 
@@ -1375,10 +1382,14 @@ function obTeamStepHtml(s, complete) {
                    Need to change this? Just let us know.</p>`;
     }
 
-    const rows = mine.length ? mine.map(c => obTeamRowHtml(s.id, c)).join('') : obTeamRowHtml(s.id, null);
+    // The owner first: the saved owner row, else the first saved person, else an empty owner row
+    const ownerRow = mine.find(c => c.role === 'owner') || null;
+    const others = mine.filter(c => c !== ownerRow);
+    const rows = obTeamRowHtml(s.id, ownerRow, true) + others.map(c => obTeamRowHtml(s.id, c)).join('');
 
     return `
         <div class="space-y-3 mb-4">
+            <p class="text-sm text-gray-400">Who should get your new leads? Start with yourself, then add anyone who answers or follows up on leads. Each person with a login can work your leads and pipeline in the CRM and the phone app.</p>
             <div id="ob-team-rows-${s.id}" class="space-y-2">${rows}</div>
             <button type="button" onclick="obAddTeamRow('${s.id}')" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
                 <i class="fa-solid fa-plus mr-1"></i> Add another person
@@ -1406,49 +1417,54 @@ window.obSaveTeam = async function(stepId, justMe) {
     const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
     if (err) err.classList.add('hidden');
 
-    let people;
+    // Every row on screen; "it's just me" keeps only the owner's
+    let people = [...document.querySelectorAll(`#ob-team-rows-${stepId} .ob-team-row`)]
+        .map(r => ({
+            owner: r.dataset.owner === '1',
+            contact_name: r.querySelector('.ob-team-name').value.trim(),
+            phone: r.querySelector('.ob-team-phone').value.trim(),
+            email: (r.querySelector('.ob-team-email')?.value || '').trim().toLowerCase(),
+            ghl_login: !!r.querySelector('.ob-team-login')?.checked
+        }));
+    const ownerP = people.find(p => p.owner);
+    if (!ownerP || !ownerP.contact_name || !ownerP.phone) {
+        show('Fill in your own name and mobile number first.');
+        return;
+    }
+    people = justMe ? [ownerP] : people.filter(p => p.owner || p.contact_name || p.phone || p.email);
 
-    if (justMe) {
-        // The address they signed in with is the one we already reach them on
-        people = [{ contact_name: currentUserName || clientEmail || 'Owner', phone: null }];
-    } else {
-        people = [...document.querySelectorAll(`#ob-team-rows-${stepId} .ob-team-row`)]
-            .map(r => ({
-                contact_name: r.querySelector('.ob-team-name').value.trim(),
-                phone: r.querySelector('.ob-team-phone').value.trim(),
-                email: (r.querySelector('.ob-team-email')?.value || '').trim().toLowerCase()
-            }))
-            .filter(p => p.contact_name || p.phone || p.email);
-
-        if (!people.length) {
-            show("Add at least one person, or choose “it's just me” below.");
-            return;
-        }
-        const incomplete = people.find(p => !p.contact_name || !p.phone);
-        if (incomplete) {
-            show('Every person needs both a name and a mobile number.');
-            return;
-        }
-        // Ten digits is what a US mobile reduces to; anything shorter is a typo
-        const badPhone = people.find(p => String(p.phone).replace(/\D/g, '').length < 10);
-        if (badPhone) {
-            show(`That number for ${badPhone.contact_name} doesn't look complete.`);
-            return;
-        }
-        const badEmail = people.find(p => p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email));
-        if (badEmail) {
-            show(`That email for ${badEmail.contact_name} doesn't look right.`);
-            return;
-        }
+    const incomplete = people.find(p => !p.contact_name || !p.phone);
+    if (incomplete) {
+        show('Every person needs both a name and a mobile number.');
+        return;
+    }
+    // Ten digits is what a US mobile reduces to; anything shorter is a typo
+    const badPhone = people.find(p => String(p.phone).replace(/\D/g, '').length < 10);
+    if (badPhone) {
+        show(`That number for ${badPhone.contact_name} doesn't look complete.`);
+        return;
+    }
+    const badEmail = people.find(p => p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email));
+    if (badEmail) {
+        show(`That email for ${badEmail.contact_name} doesn't look right.`);
+        return;
+    }
+    // A login is made from an email address
+    const noEmail = people.find(p => p.ghl_login && !p.email);
+    if (noEmail) {
+        show(`${noEmail.contact_name} needs an email for their login (or untick "Give them a login").`);
+        return;
     }
 
     try {
         // Email is always sent (prefilled above), so re-saving never blanks one we have
-        const rows = people.filter(p => p.phone).map(p => ({
+        const rows = people.map(p => ({
             client_name: currentActiveClient,
             contact_name: p.contact_name,
             phone: p.phone,
             email: p.email || null,
+            role: p.owner ? 'owner' : 'sales',
+            ghl_login: p.ghl_login,
             active: true
         }));
 
@@ -1456,11 +1472,15 @@ window.obSaveTeam = async function(stepId, justMe) {
             // Re-saving updates a person rather than adding them twice. A number is unique
             // per client since client_directory.sql; before that it was unique across the
             // table, so fall back to that if the new index isn't there yet (42P10).
-            let { data, error } = await supabaseClient.from('client_contacts')
-                .upsert(rows, { onConflict: 'client_name,phone' }).select();
-            if (error && error.code === '42P10') {
-                ({ data, error } = await supabaseClient.from('client_contacts')
-                    .upsert(rows, { onConflict: 'phone' }).select());
+            const save = async (list) => {
+                let res = await supabaseClient.from('client_contacts').upsert(list, { onConflict: 'client_name,phone' }).select();
+                if (res.error && res.error.code === '42P10') res = await supabaseClient.from('client_contacts').upsert(list, { onConflict: 'phone' }).select();
+                return res;
+            };
+            let { data, error } = await save(rows);
+            // team_ghl_logins.sql not run yet: save the team without the login choice rather than not at all
+            if (error && (error.code === 'PGRST204' || /ghl_login/.test(error.message || ''))) {
+                ({ data, error } = await save(rows.map(({ ghl_login, ...r }) => r)));
             }
             if (error) throw error;
             if (data?.length) {
