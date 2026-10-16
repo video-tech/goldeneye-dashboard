@@ -2,6 +2,21 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-16",
+      "area": "Onboarding",
+      "title": "A new setup checklist for our team",
+      "what": "\"Our checklist\" is rewritten for the new onboarding: read the client's answers in Golden Eye, send them a what-happens-next message, connect the Golden Eye app to their new GHL account, build their website (only when we build it), build the funnel and survey and turn on the lead, Conversions API and follow-up workflows, review every other workflow before publishing it, then test. A new \"First week live\" group checks the first real lead and reviews days 3 and 7 after launch. Stored website passwords now have a Delete button next to Reveal.",
+      "action": "Run supabase/sql/setup_checklist_v2.sql"
+    },
+    {
+      "date": "2026-10-15",
+      "area": "Onboarding",
+      "title": "The new onboarding questionnaire (built, not switched on yet)",
+      "what": "Six question steps that will replace the three GHL forms: about your business (including which services they want more calls for, asked once for every client), registering your texting number, calls and service area, jobs and offers (Ads clients), website access (SEO clients keeping their site), and your new website, where clients whose site we build open example sites and pick a first and second look. Answers like the EIN, the owner's mobile and job values are private: clients can submit them but never see them again, and only admins can read them. A website password is stored encrypted, shown to admins only with a Reveal button, and every reveal is logged. Nothing changes for clients until the steps are switched on in Templates.",
+      "action": "Run supabase/sql/onboarding_questionnaire.sql, then re-run supabase/sql/rename_client.sql",
+      "note": "Switching it on is supabase/sql/onboarding_questionnaire_go_live.sql, which also removes the services and websites-you-like questions from the SEO questions step, since the new steps ask them. The SEO step's Copy for Cuppa still includes the services answer."
+    },
+    {
       "date": "2026-10-14",
       "area": "Onboarding",
       "title": "Master GHL account setup, first step",

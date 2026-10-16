@@ -1957,6 +1957,28 @@ Onboarding Progress row, opening `#setup-checklist-modal`.
 - **Tests:** 22 PGlite checks on the SQL (re-runnable, tags, order, group names match their task), 42 on the checklist logic and
   drawer, 15 on generation and the advance rule (5 breakages caught), 71 on the chat tools.
 
+### Version 2 (2026-10-16, `supabase/sql/setup_checklist_v2.sql`, run after v1)
+
+Rewritten for the onboarding rebuild. It replaces every step template in the three groups (templates only; no client had a
+step task yet) and keeps "Draft Copywriting Hooks V1". Groups: **Get ready for GHL** 9, **Set up GHL** 37, **Launch ads** 5,
+and a new **First week live** (Campaign Learning, Ads: first real lead end to end, day 3, day 7), raised by the manual stage move.
+- **Golden Eye will create the GHL account** from MasterV.1 once a client's answers are in (not built yet: until then the
+  step says to create it by hand), so our step is **installing the Golden Eye app on it**, which GHL won't do for us.
+- **New steps:** a "what happens next" message to the client (sent by hand; the step's notes hold a template); website
+  steps tagged by `website_statuses` (4 for a site we build, 1 for an existing site's form); a **Final check** before the tests.
+- **Funnel (Ads):** build the funnel, build the survey, connect both to the Conversions API and lead follow-up (survey)
+  workflows, paste the pixel and token by hand.
+- **Workflows stay unpublished until the final check**, except lead to Golden Eye (everyone) and, for Ads, the Conversions
+  API and lead follow-up (survey) workflows. GHL's API can list workflows but
+  not edit or publish them, so that part stays by hand.
+- **Steps the account automation will take over** (create the account, business info, custom values, people) are written as
+  checks, so they still read right once Golden Eye does the work. New auto-checks for them go in `onboarding_auto_checks`.
+- **"Delete their stored website password"** is an SEO agency step (existing sites), added switched off; the questionnaire
+  go-live switches it on. It uses the new admin-only **Delete** button beside Reveal (`deleteOnboardingSecret`, which treats
+  a delete that removed no row as a failure).
+- **Tests:** `supabase/sql/setup_checklist_v2.test.mjs` runs v1 then v2 twice in PGlite, 25 checks, 4 of 4 breakages caught.
+  The delete button: 5 jsdom checks in `tests/onboarding-questionnaire.test.mjs`, 2 of 2 caught.
+
 ## Loading screen (built 2026-10-14)
 
 `#ge-preload` at the top of `#theme-wrapper` in body.html: logo, name, progress bar and a status line. It is in the markup, so it is up the
@@ -2060,10 +2082,55 @@ two early questions, "Do you have a Facebook page?" and "Do you have a CRM you w
   existing videos ("Give us access to your Facebook" for a page, "Create your Facebook Page" for no page or not sure), and removes the two dropped video placeholders if they are still
   hidden with no link. **Run it only after the new app.js is being served:** the old code shows every question and requires "Which CRM?" even after "no CRM", which would trap a
   client. 20 PGlite checks, 6 of 6 breakages caught, including a client who answers nothing (sees the access video only), "no", "not sure" and "CRM yes".
-- **Still to build** (plan phases 1 to 5): the full questionnaire from the three GHL forms (sections 1 to 5), the compliance record and encrypted website-access record, the
-  Drive-link and style-picker question types, the GHL sub-account function (phase 0 first: prove the API on a throwaway account), and retiring Make #3.
+- **Still to build** (plan phases 2 to 5): the style-picker question type, the GHL account function (phase 0 is proven, see ghl-provision and the
+  Marketplace app below), and retiring Make #3.
 - **Tests:** 48 PGlite checks on the SQL (13 breakages tried, all caught), 44 node checks on the question logic (14 caught), 36 browser checks on the real form and builder,
   9 on the tag chips.
+
+### The questionnaire (built 2026-10-15, switched OFF): `supabase/sql/onboarding_questionnaire.sql`
+
+Six Questions steps replace the three GHL forms, agreed with the user question by question. **All added with `active = false`**.
+**Going live is `supabase/sql/onboarding_questionnaire_go_live.sql`, run only when the user says the rebuild is done** (a client is
+mid-onboarding). In one transaction it switches the six steps on, the three form steps ("Tell us about your business", "Your service area and
+hours", "Offers and preferences") off, and takes `q_services` and `q_liked_sites` out of the SEO step "Tell us about your business for SEO",
+since the questionnaire now asks both (old answers stay). Re-runnable.
+- **Services are asked once, for everyone:** `a_services` "Which services do you want more calls for?" in About your business
+  (`custom_value:services_list`). Jobs and offers no longer asks it; its job-value question reads "for each of your main services".
+  **The SEO step's Copy for Cuppa still carries services:** `clientAnswersHtml` adds the answer to any question saving to
+  `custom_value:services_list` to the copy of a step tagged `seo`, unless that step already holds a services answer of its own.
+- **Steps:** About your business (everyone), Registering your texting number (everyone, all private), Calls texts and your service area
+  (everyone), Your jobs and offers (Ads), Access to your website (**SEO, existing site only**, the user's call). Business hours stay on the SEO
+  questions. Dropped on purpose: personal email, Facebook login (Quick start already asks for the page link), area codes, ad-image policy.
+- **Every question has a `dest`** saying where its answer goes: `ghl:<location field>` (set when the account is created), `custom_value:<key>`
+  (Master's own keys), `a2p:<field>` (GHL's Business Profile, typed in during A2P registration), `admin:<field>`, `access:<field>`,
+  `ad_brief:` and `task:` (recorded; raising the calculator/rendering tasks isn't built). Phase 3 reads it.
+- **Private answers (`private: true`):** never go into `onboarding_answers` (client-readable). `save_private_onboarding_answers()` stores them in
+  `onboarding_private_answers` (admins read, admins delete, nobody writes directly). **The server decides what's private from the step's own
+  questions**, never from what the browser sends. The client can submit and change them but never read them back:
+  `private_onboarding_answer_keys()` tells the portal only which questions are answered, so the form says "Saved" and a required private
+  question counts as answered. Private: mobile, legal name, business type, EIN, job values, close rate, website login page/username/2FA contact.
+- **Secrets (`secret: true`, only the website password):** encrypted with pgcrypto in `onboarding_secrets`, key `onboarding_secret_key` in
+  Supabase Vault (created by the SQL, never in the repo). Admins see it masked and click **Reveal** (`reveal_onboarding_secret`, admin only);
+  every reveal is logged in `onboarding_secret_reveals`. Delete the row once we have our own access.
+- **app.js:** private fields never prefill (a password box for the secret, "Only our team can see this"), EIN type (9 digits, saved as
+  12-3456789), the admin answers list shows private answers (lock) and secrets (key, Reveal; shown with `textContent`), and Copy leaves both out.
+  Templates has "Only our team sees it" and "Encrypt" per question; the editor refuses a question depending on a private answer, a private fact,
+  and an encrypted choice. Missing SQL degrades: keys load empty, and a private save fails loudly instead of dropping the answer.
+- **All three tables are in `rename_client.sql`.**
+- **"Your new website" (added 2026-10-16)**, for every client whose website situation is "We're building it" (`{new_build}`, not only SEO):
+  a **style picker** plus 16 questions (likes and dislikes, brand colors, logo, lettering, feel, pages, features, domain, content ready).
+  - **The style picker** (question type `style`) shows looks as cards like the website-options pages the team sends (Red Valley,
+    claude.ai/artifact/YRun7Fkpye9fiN5sCnaDmc): picture, name, a line, color swatches, "See the example site" (new tab), and a **1st and
+    2nd choice**, saved as `[first, second]`. The looks are **data on the question** (`styles: [{name, note, colors, image, link}]`), edited
+    in Templates ("Style picker (looks)" type, Add a look), so swapping them needs no code. Only `#hex` colors and `https` pictures and links
+    reach the page (`obStyleLooks`), and the editor refuses fewer than two looks, duplicates, bad colors and non-https links.
+  - **Starting looks** (Bold and local, Sharp and modern, Warm and friendly, Refined and premium) come from the Red Valley directions 1, 3, 4
+    and 5, with **pictures and example-site links empty**: the user is building four clickable example sites (Red Valley option 1,
+    claude.ai/artifact/PkBs8x6iwdoZdUHkMtcdJX, is the first), and their links go in Templates when ready.
+- **Tests:** `supabase/sql/onboarding_questionnaire.test.mjs` (PGlite **0.2.x**: 0.3.x crashes after an error raised in a function; pgcrypto is
+  stood in, since PGlite can't load it), 85 checks including the go-live file, 6 of 6 breakages caught. `tests/onboarding-questionnaire.test.mjs`
+  (jsdom), 67 checks on the real app.js code, 10 of 10 caught. Both need the package dir in `PGLITE_DIR` / `JSDOM_DIR`. `qdemo.html` (not committed) runs the real code
+  against a pretend database in the browser pane, served by `preview-server.js` at /qdemo.html.
 
 ### ghl-setup: Master's custom values, contact fields and pipeline over REST (phase 0, built and run 2026-10-14)
 
@@ -2153,8 +2220,12 @@ token"), and fill_test wrote business_name "GE Test Co" and owner_name "Test Own
 - **The app only reaches sub-accounts it is installed on.** The install screen (Target user Sub-account, installed by the agency)
   offers a list of sub-accounts and **no "future sub-accounts" option**; `install_to_future` came back false. `ghl-provision`
   mode `app_locations` lists where it is installed (installed now: Master, "Y (Demo) Test Location" and GE TEST).
-  **Open for phase 2:** how each new client account gets the app (an agency auto-install setting, an API install, or one
-  click per client), checked before the account function is built.
+  **Tested 2026-10-15 22:08:** the app's own key **creates** an account from MasterV.1 ("GE TEST 2026-10-15 22:08",
+  `ryYoSWzzVyF3Ycb0ze8N`, no hand-made token), but **can't get inside it**: GHL answered "accessToken does not have access to
+  following location". So the app is **not** installed automatically on accounts it creates. Plan for phase 2: after creating an
+  account, Golden Eye shows the install link and a person ticks the new account (about 20 seconds); GHL's install webhook can
+  let Golden Eye carry on by itself once it's installed. No auto-install setting or install API was found in GHL's docs; a
+  public app with bulk install exists but needs GHL's review. A private app is limited to 5 agencies (we use one).
 - **Gotchas from the install:** GHL refuses a Redirect URL containing "ghl"; the custom values and fields scopes appear only with
   Target user Sub-account; a reinstall shows already-installed accounts and only offers the rest, so a fresh code needs one more
   account picked (or an uninstall from one); `GHL_COMPANY_ID` had been overwritten at 16:46 and refused our own agency until it

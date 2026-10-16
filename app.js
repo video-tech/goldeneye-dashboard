@@ -139,6 +139,12 @@
         let globalServices = [];          // add-ons on top of Base, from services
         let globalClientServices = [];    // which add-ons each client has, from client_services
         let globalOnboardingAnswers = []; // answers to built-in Questions steps, from onboarding_answers
+        // Private and secret answers (onboarding_questionnaire.sql). A client never reads these back: the portal
+        // only knows WHICH questions are answered ("client|step|question" keys). Admins also load the private
+        // answers and the secrets' labels (never their values: those come one at a time from Reveal).
+        let globalPrivateAnswerKeys = new Set();
+        let globalPrivateAnswers = [];    // admins: onboarding_private_answers rows
+        let globalSecretsMeta = [];       // admins: onboarding_secrets rows without the encrypted value
         // Delays the manual "mark it done" fallback on form steps until the webhook has had a chance
         let obManualRevealTimer = null;
         let allRawSeo = [];
@@ -720,6 +726,7 @@
             ]);
             globalServices = results[11].status === 'fulfilled' ? (results[11].value.data || []) : [];
             globalOnboardingAnswers = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
+            await loadPrivateAnswerKeys(allowedClients);
 
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
             allRawReports = rResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
@@ -2136,6 +2143,40 @@ function obQuestionsFor(step, clientName) {
         .filter(q => !(q.website_statuses || []).length || (web && q.website_statuses.includes(web)));
 }
 
+// ---- private and secret answers (onboarding_questionnaire.sql) ----
+// A question marked private (or secret) is saved through save_private_onboarding_answers(), never into
+// onboarding_answers, and the client can't read it back. The server decides what's private from the step itself.
+const obPrivateKey = (client, stepId, qid) => `${normalize(client || '')}|${stepId}|${qid}`;
+const obIsPrivate = q => !!(q && (q.private || q.secret));
+function obPrivateSaved(client, stepId, qid) { return globalPrivateAnswerKeys.has(obPrivateKey(client, stepId, qid)); }
+
+// Portal: which private questions each of these clients has answered. Missing SQL just means none.
+async function loadPrivateAnswerKeys(clients) {
+    const keys = new Set();
+    await Promise.all((clients || []).map(async c => {
+        const { data, error } = await supabaseClient.rpc('private_onboarding_answer_keys', { p_client: c });
+        if (error) return;
+        (data || []).forEach(r => keys.add(obPrivateKey(c, r.step_id, r.question_id)));
+    }));
+    globalPrivateAnswerKeys = keys;
+}
+
+// Admins: the private answers, and which secrets exist (label only; a value comes from Reveal, one at a time).
+async function loadPrivateAnswersForStaff() {
+    globalPrivateAnswers = []; globalSecretsMeta = [];
+    if (currentUserRole !== 'admin') return;
+    const [p, s] = await Promise.all([
+        supabaseClient.from('onboarding_private_answers').select('*'),
+        supabaseClient.from('onboarding_secrets').select('client_name, step_id, question_id, label, updated_at')
+    ]);
+    globalPrivateAnswers = p.error ? [] : (p.data || []);
+    globalSecretsMeta = s.error ? [] : (s.data || []);
+    const keys = new Set();
+    globalPrivateAnswers.forEach(r => Object.keys(r.answers || {}).forEach(qid => keys.add(obPrivateKey(r.client_name, r.step_id, qid))));
+    globalSecretsMeta.forEach(r => keys.add(obPrivateKey(r.client_name, r.step_id, r.question_id)));
+    globalPrivateAnswerKeys = keys;
+}
+
 // ---- question logic (pure; no page needed) ----
 // A question can depend on an earlier answer (show_if), save its answer onto the client as a fact (fact),
 // and carry a note of where it should end up in GHL later (dest). Which answers pick which video is decided
@@ -2164,15 +2205,41 @@ function obVisibleQuestions(questions, values) {
     return out;
 }
 
+// A style picker's looks (q.styles, edited in Templates), tidied for the page: only #hex colors and https links and
+// pictures get through, because they end up in a style attribute, an href and an img src.
+function obStyleLooks(q) {
+    return (Array.isArray(q?.styles) ? q.styles : []).filter(s => s && String(s.name || '').trim()).map(s => ({
+        name: String(s.name).trim(),
+        note: String(s.note || '').trim(),
+        colors: (Array.isArray(s.colors) ? s.colors : []).map(c => String(c).trim()).filter(c => /^#[0-9a-f]{3,8}$/i.test(c)).slice(0, 6),
+        image: /^https:\/\/\S+$/i.test(String(s.image || '').trim()) ? String(s.image).trim() : '',
+        link: /^https:\/\/\S+$/i.test(String(s.link || '').trim()) ? String(s.link).trim() : ''
+    }));
+}
+
 // Tidy one answer by type. Returns {value} or {error}. Blank is fine here: "required" is checked separately.
 function obCleanAnswer(q, raw) {
     if (q.type === 'multi') return { value: Array.isArray(raw) ? raw.filter(Boolean) : [] };
+    if (q.type === 'style') {
+        // [first choice, second choice], each the name of one of the looks shown
+        const [first, second] = Array.isArray(raw) ? raw : [];
+        if (!first && !second) return { value: [] };
+        if (!first) return { error: 'Pick your first choice too' };
+        const names = new Set(obStyleLooks(q).map(l => l.name));
+        if (!names.has(first) || (second && !names.has(second))) return { error: 'Pick from the looks shown' };
+        if (second && second === first) return { error: 'Pick a different look for your second choice' };
+        return { value: second ? [first, second] : [first] };
+    }
     const v = typeof raw === 'string' ? raw.trim() : '';
     if (!v) return { value: '' };
     if (q.type === 'email') return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v) ? { value: v } : { error: 'Enter a valid email address' };
     if (q.type === 'phone') {
         const digits = v.replace(/\D/g, '');
         return digits.length >= 10 && digits.length <= 15 ? { value: v } : { error: 'Enter a phone number with the area code' };
+    }
+    if (q.type === 'ein') {
+        const digits = v.replace(/\D/g, '');
+        return digits.length === 9 ? { value: `${digits.slice(0, 2)}-${digits.slice(2)}` } : { error: 'An EIN is 9 digits, like 12-3456789' };
     }
     if (q.type === 'link') {
         const withScheme = /^https?:\/\//i.test(v) ? v : 'https://' + v;
@@ -2215,16 +2282,45 @@ function obQuestionsFormHtml(s, complete) {
     const savedValues = {};
     questions.forEach(q => { savedValues[q.id] = valueOf(q); });
     const showing = new Set(obVisibleQuestions(questions, savedValues).map(q => q.id));
-    const INPUT_TYPES = { phone: 'tel', email: 'email', link: 'text' };
-    const PLACEHOLDERS = { phone: '(801) 555-0100', email: 'name@company.com', link: 'www.example.com' };
+    const INPUT_TYPES = { phone: 'tel', email: 'email', link: 'text', ein: 'text' };
+    const PLACEHOLDERS = { phone: '(801) 555-0100', email: 'name@company.com', link: 'www.example.com', ein: '12-3456789' };
 
     const field = q => {
-        const v = valueOf(q);
+        // A private answer is never shown back, even to the client who typed it: the field starts empty and
+        // says it's saved. Typing replaces it; leaving it empty keeps the saved one.
+        const priv = obIsPrivate(q);
+        const savedPriv = priv && obPrivateSaved(currentActiveClient, s.id, q.id);
+        const v = priv ? undefined : valueOf(q);
         const req = q.required ? ' <span class="text-red-400" title="Required">*</span>' : '';
         const label = `<label class="block text-sm font-bold text-white mb-1" for="${fieldId(q)}">${escapeAttr(q.label)}${req}</label>`;
+        const lock = priv ? `<p class="text-[11px] text-gray-500 mt-1"><i class="fa-solid fa-lock mr-1"></i>${savedPriv ? 'Saved. ' : ''}Only our team can see this${q.secret ? ', and it is stored encrypted' : ''}.${savedPriv ? (q.type === 'choice' || q.type === 'multi' ? ' Choose again to change it.' : ' Type here to change it.') : ''}</p>` : '';
         const opts = Array.isArray(q.options) ? q.options.filter(Boolean) : [];
+        if (q.type === 'style') {
+            // Cards like the website-options pages: picture, name, a line, colors, a link to the example site,
+            // and a 1st / 2nd choice. Colors and links are already checked by obStyleLooks.
+            const [first, second] = Array.isArray(v) ? v : [];
+            const pick = (look, which, checked) => `<label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer">
+                <input type="radio" name="${fieldId(q)}-${which}" value="${escapeAttr(look.name)}" class="row-checkbox" ${checked ? 'checked' : ''}> ${which === 'first' ? '1st choice' : '2nd choice'}</label>`;
+            return `<fieldset data-qid="${escapeAttr(q.id)}" data-qtype="style">
+                <legend class="block text-sm font-bold text-white mb-1">${escapeAttr(q.label)}${req}</legend>
+                <p class="text-xs text-gray-400 mb-3">Open each example, then pick your favorite and a second choice.</p>
+                <div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(210px,1fr))">
+                    ${obStyleLooks(q).map(look => `<div class="ob-style-card rounded-lg border border-white/10 bg-black/20 overflow-hidden flex flex-col">
+                        ${look.image ? `<img src="${escapeAttr(look.image)}" alt="${escapeAttr(look.name)} example" loading="lazy" class="w-full object-cover object-top" style="aspect-ratio:16/10">` : ''}
+                        <div class="p-3 flex flex-col gap-2 flex-1">
+                            <p class="text-sm font-bold text-white">${escapeAttr(look.name)}</p>
+                            ${look.note ? `<p class="text-xs text-gray-400">${escapeAttr(look.note)}</p>` : ''}
+                            ${look.colors.length ? `<div class="flex" aria-label="Colors">${look.colors.map(c => `<span class="border border-white/10" style="width:18px;height:18px;background:${c}"></span>`).join('')}</div>` : ''}
+                            ${look.link ? `<a href="${escapeAttr(look.link)}" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-400 hover:text-blue-300 font-bold"><i class="fa-solid fa-up-right-from-square mr-1"></i>See the example site</a>` : ''}
+                            <div class="flex flex-wrap gap-x-4 gap-y-1 mt-auto pt-1">${pick(look, 'first', first === look.name)}${pick(look, 'second', second === look.name)}</div>
+                        </div>
+                    </div>`).join('')}
+                </div>
+                <p class="obq-err hidden text-xs text-amber-400 mt-1" role="alert"></p>
+            </fieldset>`;
+        }
         if (q.type === 'long') {
-            return `${label}<textarea id="${fieldId(q)}" rows="3" class="glass-input w-full" data-qid="${escapeAttr(q.id)}">${escapeAttr(typeof v === 'string' ? v : '')}</textarea>`;
+            return `${label}<textarea id="${fieldId(q)}" rows="3" class="glass-input w-full" data-qid="${escapeAttr(q.id)}"${savedPriv ? ' placeholder="Saved"' : ''}>${escapeAttr(typeof v === 'string' ? v : '')}</textarea>${lock}`;
         }
         if (q.type === 'choice' || q.type === 'multi') {
             const chosen = new Set(Array.isArray(v) ? v : (v ? [v] : []));
@@ -2235,13 +2331,14 @@ function obQuestionsFormHtml(s, complete) {
                     ${opts.map(o => `<label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                         <input type="${input}" name="${fieldId(q)}" value="${escapeAttr(o)}" class="row-checkbox" ${chosen.has(o) ? 'checked' : ''}> ${escapeAttr(o)}
                     </label>`).join('')}
-                </div>
+                </div>${lock}
             </fieldset>`;
         }
-        const type = INPUT_TYPES[q.type] || 'text';
-        const ph = PLACEHOLDERS[q.type] ? ` placeholder="${PLACEHOLDERS[q.type]}"` : '';
-        return `${label}<input type="${type}" id="${fieldId(q)}" class="glass-input w-full" data-qid="${escapeAttr(q.id)}"${ph} value="${escapeAttr(typeof v === 'string' ? v : '')}">
-            <p class="obq-err hidden text-xs text-amber-400 mt-1" role="alert"></p>`;
+        const type = q.secret ? 'password' : (INPUT_TYPES[q.type] || 'text');
+        const ph = savedPriv ? ' placeholder="Saved"' : (PLACEHOLDERS[q.type] ? ` placeholder="${PLACEHOLDERS[q.type]}"` : '');
+        const extra = q.secret ? ' autocomplete="new-password"' : (q.type === 'ein' ? ' inputmode="numeric" autocomplete="off"' : '');
+        return `${label}<input type="${type}" id="${fieldId(q)}" class="glass-input w-full" data-qid="${escapeAttr(q.id)}"${ph}${extra} value="${escapeAttr(typeof v === 'string' ? v : '')}">
+            <p class="obq-err hidden text-xs text-amber-400 mt-1" role="alert"></p>${lock}`;
     };
 
     if (!questions.length) {
@@ -2267,6 +2364,9 @@ function obReadFormValues(form, questions) {
             values[q.id] = form.querySelector(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)?.value || '';
         } else if (q.type === 'multi') {
             values[q.id] = [...form.querySelectorAll(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)].map(i => i.value);
+        } else if (q.type === 'style') {
+            const fs = form.querySelector(`fieldset[data-qid="${CSS.escape(q.id)}"]`);
+            values[q.id] = [fs?.querySelector('input[name$="-first"]:checked')?.value || '', fs?.querySelector('input[name$="-second"]:checked')?.value || ''];
         } else {
             values[q.id] = form.querySelector(`[data-qid="${CSS.escape(q.id)}"]`)?.value || '';
         }
@@ -2280,6 +2380,7 @@ function obCollectAnswers(step, form) {
     const raw = obReadFormValues(form, all);
     const visible = obVisibleQuestions(all, raw);
     const answers = {};
+    const privateAnswers = {};
     const values = {};
     const missing = [];
     const errors = [];
@@ -2287,11 +2388,13 @@ function obCollectAnswers(step, form) {
         const cleaned = obCleanAnswer(q, raw[q.id]);
         if (cleaned.error) { errors.push({ q, message: cleaned.error }); return; }
         const empty = Array.isArray(cleaned.value) ? !cleaned.value.length : !cleaned.value;
-        if (q.required && empty) missing.push(q.label);
-        if (!empty) { answers[q.id] = { label: q.label, value: cleaned.value }; }
+        // A private answer saved earlier counts: the field is empty only because it's never shown back
+        const savedPriv = obIsPrivate(q) && obPrivateSaved(currentActiveClient, step.id, q.id);
+        if (q.required && empty && !savedPriv) missing.push(q.label);
+        if (!empty) (obIsPrivate(q) ? privateAnswers : answers)[q.id] = { label: q.label, value: cleaned.value };
         values[q.id] = cleaned.value;
     });
-    return { all, visible, answers, values, missing, errors, facts: obFactsFromAnswers(visible, values) };
+    return { all, visible, answers, privateAnswers, values, missing, errors, facts: obFactsFromAnswers(visible.filter(q => !obIsPrivate(q)), values) };
 }
 
 // Show and hide dependent questions as answers change, and save a draft a moment after typing stops
@@ -2333,6 +2436,22 @@ async function obSaveAnswers(stepId, { draft }) {
     }
     const existing = obAnswersFor(currentActiveClient, stepId);
     if (existing) Object.assign(existing, row); else globalOnboardingAnswers.push({ ...row, submitted_at: now });
+
+    // Private and secret answers go to their own store, which the client can't read back
+    if (Object.keys(c.privateAnswers).length) {
+        const { data: savedIds, error: privErr } = await supabaseClient.rpc('save_private_onboarding_answers', {
+            p_client: currentActiveClient, p_step_id: stepId, p_answers: c.privateAnswers
+        });
+        if (privErr) {
+            console.error('Could not save private answers:', privErr);
+            if (status) {
+                status.className = 'text-xs text-red-400';
+                status.innerText = draft ? "Couldn't save yet. We'll try again." : "Couldn't save some of your answers. Please try again, or email us if it keeps happening.";
+            }
+            return { ok: false };
+        }
+        (Array.isArray(savedIds) ? savedIds : []).forEach(qid => globalPrivateAnswerKeys.add(obPrivateKey(currentActiveClient, stepId, qid)));
+    }
 
     let factsChanged = false;
     if (Object.keys(c.facts).length) {
@@ -3787,6 +3906,7 @@ window.submitClientRequest = async function() {
     globalServices = results[12].status === 'fulfilled' ? (results[12].value.data || []) : [];
     globalClientServices = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
     globalOnboardingAnswers = results[14].status === 'fulfilled' ? (results[14].value.data || []) : [];
+    await loadPrivateAnswersForStaff();
     // A missing table (client_directory.sql not run yet) comes back as an error with no
     // data, so this is simply empty and the roster says the details can't be saved yet.
     globalClientProfiles = results[15].status === 'fulfilled' ? (results[15].value.data || []) : [];
@@ -5954,18 +6074,50 @@ window.markOnboardingComplete = async function() {
         // question is reworded or removed. Copy puts plain text on the clipboard (for Cuppa).
         const obAnswerText = {};
         function clientAnswersHtml(clientName) {
-            const mine = globalOnboardingAnswers.filter(a => normalize(a.client_name) === normalize(clientName));
-            if (!mine.length) return '';
-            return mine.map(a => {
+            const want = normalize(clientName);
+            const mine = globalOnboardingAnswers.filter(a => normalize(a.client_name) === want);
+            // Admins also see private answers and stored logins (onboarding_questionnaire.sql); a step with only
+            // private answers still gets its box. Copy leaves both out: it's for content tools like Cuppa.
+            const privRows = globalPrivateAnswers.filter(p => normalize(p.client_name) === want);
+            const secretRows = globalSecretsMeta.filter(p => normalize(p.client_name) === want);
+            const stepIds = [...new Set([...mine.map(a => a.step_id), ...privRows.map(p => p.step_id), ...secretRows.map(p => p.step_id)])];
+            if (!stepIds.length) return '';
+            return stepIds.map(stepId => {
+                const a = mine.find(x => x.step_id === stepId) || { step_id: stepId, answers: {} };
+                const privAnswers = privRows.find(p => p.step_id === stepId)?.answers || {};
+                const secrets = secretRows.filter(p => p.step_id === stepId);
                 const step = globalOnboardingSteps.find(s => s.id === a.step_id);
                 const title = step?.title || 'Onboarding questions';
                 // In the step's question order where the question still exists, then any others
                 const order = (Array.isArray(step?.questions) ? step.questions : []).map(q => q.id);
-                const entries = Object.entries(a.answers || {})
-                    .sort(([x], [y]) => (order.indexOf(x) + 1 || 999) - (order.indexOf(y) + 1 || 999));
+                const byOrder = ([x], [y]) => (order.indexOf(x) + 1 || 999) - (order.indexOf(y) + 1 || 999);
+                const entries = Object.entries(a.answers || {}).sort(byOrder);
                 const show = v => Array.isArray(v) ? v.join(', ') : String(v ?? '');
-                obAnswerText[a.step_id] = `${title} (${clientName})\n\n` + entries.map(([, e]) => `${e.label}\n${show(e.value)}`).join('\n\n');
-                const when = new Date(a.updated_at || a.submitted_at).toLocaleDateString();
+                // An SEO step's copy (for Cuppa) also carries the services answer, which the questionnaire asks once in
+                // another step (any question saving to custom_value:services_list) and the SEO step no longer asks.
+                let copyEntries = entries;
+                if ((step?.service_keys || []).includes('seo') && !entries.some(([qid]) => /services/i.test(qid))) {
+                    const servicesQ = new Set(globalOnboardingSteps.flatMap(st => (Array.isArray(st.questions) ? st.questions : [])
+                        .filter(q => /custom_value:services_list/.test(q.dest || '')).map(q => `${st.id}|${q.id}`)));
+                    const extra = mine.filter(x => x.step_id !== a.step_id).flatMap(x => Object.entries(x.answers || {})
+                        .filter(([qid, e]) => servicesQ.has(`${x.step_id}|${qid}`) && e && String(show(e.value)).trim()));
+                    copyEntries = [...extra.slice(0, 1), ...entries];
+                }
+                obAnswerText[a.step_id] = `${title} (${clientName})\n\n` + copyEntries.map(([, e]) => `${e.label}\n${show(e.value)}`).join('\n\n');
+                const privHtml = Object.entries(privAnswers).sort(byOrder).map(([, e]) => `<div>
+                            <p class="text-[11px] text-gray-500"><i class="fa-solid fa-lock mr-1" title="Only our team can see this"></i>${escapeAttr(e.label)}</p>
+                            <p class="text-sm text-gray-200 whitespace-pre-wrap">${escapeAttr(show(e.value))}</p>
+                        </div>`).join('');
+                const secretHtml = secrets.map(sc => `<div>
+                            <p class="text-[11px] text-gray-500"><i class="fa-solid fa-key mr-1" title="Stored encrypted"></i>${escapeAttr(sc.label || sc.question_id)}</p>
+                            <p class="text-sm text-gray-200 flex items-center gap-3"><span class="ob-secret-val font-mono">••••••••</span>
+                                <button type="button" class="text-xs text-blue-400 hover:text-blue-300 font-bold" onclick="revealOnboardingSecret(this)"
+                                    data-client="${escapeAttr(sc.client_name)}" data-step="${escapeAttr(sc.step_id)}" data-q="${escapeAttr(sc.question_id)}">Reveal</button>
+                                <button type="button" class="text-xs text-red-400 hover:text-red-300 font-bold" onclick="deleteOnboardingSecret(this)"
+                                    data-client="${escapeAttr(sc.client_name)}" data-step="${escapeAttr(sc.step_id)}" data-q="${escapeAttr(sc.question_id)}">Delete</button></p>
+                        </div>`).join('');
+                const stamps = [a.updated_at || a.submitted_at, ...secrets.map(x => x.updated_at), privRows.find(p => p.step_id === stepId)?.updated_at].filter(Boolean).sort();
+                const when = stamps.length ? new Date(stamps[stamps.length - 1]).toLocaleDateString() : '';
                 return `<details class="mt-3 rounded-lg border border-white/5 bg-black/20">
                     <summary class="cursor-pointer px-3 py-2 text-sm text-white flex items-center justify-between gap-3">
                         <span><i class="fa-solid fa-clipboard-list text-blue-400 mr-2"></i>${escapeAttr(title)} &mdash; answers</span>
@@ -5975,14 +6127,47 @@ window.markOnboardingComplete = async function() {
                         ${entries.map(([, e]) => `<div>
                             <p class="text-[11px] text-gray-500">${escapeAttr(e.label)}</p>
                             <p class="text-sm text-gray-200 whitespace-pre-wrap">${escapeAttr(show(e.value))}</p>
-                        </div>`).join('') || '<p class="text-sm text-gray-500">Submitted with nothing filled in.</p>'}
-                        <button type="button" onclick="copyClientAnswers('${a.step_id}', this)" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
-                            <i class="fa-solid fa-copy mr-1"></i> Copy answers
-                        </button>
+                        </div>`).join('')}${privHtml}${secretHtml}${entries.length || privHtml || secretHtml ? '' : '<p class="text-sm text-gray-500">Submitted with nothing filled in.</p>'}
+                        ${entries.length ? `<button type="button" onclick="copyClientAnswers('${a.step_id}', this)" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
+                            <i class="fa-solid fa-copy mr-1"></i> Copy answers${privHtml || secretHtml ? ' (leaves out the private ones)' : ''}
+                        </button>` : ''}
                     </div>
                 </details>`;
             }).join('');
         }
+
+        // Show one stored login to an admin for a minute. Every reveal is logged in the database.
+        window.revealOnboardingSecret = async function(btn) {
+            if (currentUserRole !== 'admin') return;
+            const span = btn.parentElement.querySelector('.ob-secret-val');
+            btn.disabled = true;
+            const { data, error } = await supabaseClient.rpc('reveal_onboarding_secret', {
+                p_client: btn.dataset.client, p_step_id: btn.dataset.step, p_question_id: btn.dataset.q
+            });
+            btn.disabled = false;
+            // textContent: the value is always shown as text, never read as markup
+            if (error) { span.textContent = "Couldn't reveal it"; console.error('Reveal failed:', error); return; }
+            span.textContent = data ?? '(nothing saved)';
+            btn.classList.add('hidden');
+            setTimeout(() => { span.textContent = '••••••••'; btn.classList.remove('hidden'); }, 60000);
+        };
+
+        // Delete a stored login once we have our own access to the site (the SEO step "Delete their stored website password").
+        // Admin only, by RLS too. The select() makes a delete RLS refused (0 rows) read as a failure, not a success.
+        window.deleteOnboardingSecret = async function(btn) {
+            if (currentUserRole !== 'admin') return;
+            if (!confirm('Delete this stored password for good? Only do this once we have our own login.')) return;
+            const { client, step, q } = btn.dataset;
+            btn.disabled = true;
+            const { data, error } = await supabaseClient.from('onboarding_secrets').delete()
+                .eq('client_name', client).eq('step_id', step).eq('question_id', q).select('question_id');
+            btn.disabled = false;
+            const span = btn.parentElement.querySelector('.ob-secret-val');
+            if (error || !data?.length) { span.textContent = "Couldn't delete it"; console.error('Delete failed:', error || 'no row deleted'); return; }
+            globalSecretsMeta = globalSecretsMeta.filter(x => !(x.client_name === client && x.step_id === step && x.question_id === q));
+            span.textContent = 'Deleted';
+            btn.parentElement.querySelectorAll('button').forEach(x => x.remove());
+        };
 
         window.copyClientAnswers = async function(stepId, btn) {
             try {
@@ -12462,7 +12647,31 @@ window.addOnboardingStepRow = function(step) {
 // One question in a Questions step. Its id is kept across edits, so rewording a question keeps the
 // answers already given to it. Website pills use their own class so readConditions() (the step's
 // own tags) never picks them up.
-const OB_QUESTION_TYPES = [['short', 'Short answer'], ['long', 'Long answer'], ['choice', 'Pick one'], ['multi', 'Pick any'], ['phone', 'Phone'], ['email', 'Email'], ['link', 'Link']];
+const OB_QUESTION_TYPES = [['short', 'Short answer'], ['long', 'Long answer'], ['choice', 'Pick one'], ['multi', 'Pick any'], ['phone', 'Phone'], ['email', 'Email'], ['link', 'Link'], ['ein', 'EIN (9 digits)'], ['style', 'Style picker (looks)']];
+
+// One look in a style picker question: name, a line, colors, a picture and the example site
+function obStyleRowHtml(s) {
+    s = s || {};
+    return `<div class="ob-style-row grid gap-1.5 border border-white/5 rounded-md p-2" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-name" placeholder="Name, e.g. Bold and local" value="${escapeAttr(s.name || '')}">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-note" placeholder="One line about it" value="${escapeAttr(s.note || '')}">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-colors" placeholder="Colors: #A63D22, #F1EBDF" value="${escapeAttr((s.colors || []).join(', '))}">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-image" placeholder="Picture link (https://…)" value="${escapeAttr(s.image || '')}">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-link" placeholder="Example site link (https://…)" value="${escapeAttr(s.link || '')}">
+        <button type="button" onclick="this.closest('.ob-style-row').remove()" class="text-red-500/60 hover:text-red-400 text-xs text-left" title="Remove this look"><i class="fa-solid fa-xmark mr-1"></i>Remove</button>
+    </div>`;
+}
+
+window.addObStyle = function(btn) {
+    btn.closest('.ob-q-styles').querySelector('.ob-q-style-list').insertAdjacentHTML('beforeend', obStyleRowHtml());
+};
+
+// Show the choices box for pick-one/pick-any and the looks editor for a style picker
+window.obQuestionTypeChanged = function(sel) {
+    const row = sel.closest('.ob-q-row');
+    row.querySelector('.ob-q-options').style.display = ['choice', 'multi'].includes(sel.value) ? '' : 'none';
+    row.querySelector('.ob-q-styles').style.display = sel.value === 'style' ? '' : 'none';
+};
 // Where an answer is saved on the client. These four are what the Quick start questions use; the
 // videos and tasks that depend on them are tagged in SQL (onboarding_facts.sql).
 const OB_FACT_OPTIONS = [
@@ -12482,11 +12691,17 @@ function obQuestionRowHtml(q) {
         <div class="ob-q-row bg-black/20 border border-white/5 rounded-lg p-2 space-y-2" data-qid="${escapeAttr(id)}">
             <div class="flex gap-2 items-center">
                 <input type="text" class="glass-input !py-1.5 flex-1 ob-q-label" placeholder="Question" value="${escapeAttr(q.label || '')}">
-                <select class="glass-input !py-1.5 !w-36 ob-q-type" onchange="this.closest('.ob-q-row').querySelector('.ob-q-options').style.display = ['choice','multi'].includes(this.value) ? '' : 'none'">
+                <select class="glass-input !py-1.5 !w-36 ob-q-type" onchange="obQuestionTypeChanged(this)">
                     ${OB_QUESTION_TYPES.map(([v, l]) => `<option value="${v}" ${(q.type || 'short') === v ? 'selected' : ''}>${l}</option>`).join('')}
                 </select>
                 <label class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer whitespace-nowrap">
                     <input type="checkbox" class="row-checkbox ob-q-required" ${q.required ? 'checked' : ''}> Required
+                </label>
+                <label class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer whitespace-nowrap" title="The client can answer but never sees it again; only admins can read it">
+                    <input type="checkbox" class="row-checkbox ob-q-private" ${q.private || q.secret ? 'checked' : ''}> Only our team sees it
+                </label>
+                <label class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer whitespace-nowrap" title="Stored encrypted; admins see it only by clicking Reveal, and every reveal is logged. For passwords.">
+                    <input type="checkbox" class="row-checkbox ob-q-secret" ${q.secret ? 'checked' : ''}> Encrypt
                 </label>
                 <button type="button" onclick="moveObQuestion(this, -1)" class="text-gray-500 hover:text-white px-1" title="Move up"><i class="fa-solid fa-arrow-up"></i></button>
                 <button type="button" onclick="moveObQuestion(this, 1)" class="text-gray-500 hover:text-white px-1" title="Move down"><i class="fa-solid fa-arrow-down"></i></button>
@@ -12494,6 +12709,11 @@ function obQuestionRowHtml(q) {
             </div>
             <input type="text" class="glass-input !py-1.5 w-full ob-q-options" placeholder="Choices, separated by commas"
                    value="${escapeAttr((q.options || []).join(', '))}" style="display:${['choice', 'multi'].includes(q.type) ? '' : 'none'}">
+            <div class="ob-q-styles space-y-1.5" style="display:${q.type === 'style' ? '' : 'none'}">
+                <p class="text-[10px] uppercase tracking-widest text-gray-500">Looks the client picks from (a 1st and a 2nd choice)</p>
+                <div class="ob-q-style-list space-y-1.5">${(Array.isArray(q.styles) ? q.styles : []).map(obStyleRowHtml).join('')}</div>
+                <button type="button" onclick="addObStyle(this)" class="text-xs text-blue-400 hover:text-blue-300 font-bold"><i class="fa-solid fa-plus mr-1"></i>Add a look</button>
+            </div>
             <div class="flex flex-wrap items-center gap-1.5">
                 <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">Only ask if website</span>
                 ${Object.entries(WEBSITE_STATUS_LABELS).map(([k, label]) => `
@@ -12571,6 +12791,18 @@ function readObQuestions(stepRow) {
             website_statuses: [...r.querySelectorAll('.ob-q-web[aria-pressed="true"]')].map(b => b.dataset.key)
         };
         if (showQ) q.show_if = { q: showQ, any: showAny };
+        if (type === 'style') {
+            q.styles = [...r.querySelectorAll('.ob-style-row')].map(sr => ({
+                name: sr.querySelector('.ob-style-name').value.trim(),
+                note: sr.querySelector('.ob-style-note').value.trim(),
+                colors: split(sr.querySelector('.ob-style-colors').value),
+                image: sr.querySelector('.ob-style-image').value.trim(),
+                link: sr.querySelector('.ob-style-link').value.trim()
+            })).filter(s => s.name);
+        }
+        // Encrypted answers are always private too
+        if (r.querySelector('.ob-q-secret')?.checked) q.secret = true;
+        else if (r.querySelector('.ob-q-private')?.checked) q.private = true;
         if (fact) q.fact = fact;
         if (fact && factValues.length) q.fact_values = factValues;
         if (dest) q.dest = dest;
@@ -12586,10 +12818,35 @@ function obQuestionProblems(stepTitle, questions) {
             const parent = questions.slice(0, i).find(p => p.id === q.show_if.q);
             if (!parent) problems.push(`In "${stepTitle}", "${q.label}" depends on a question that is not above it.`);
             else if (!q.show_if.any.length) problems.push(`In "${stepTitle}", "${q.label}" needs the answer(s) that make it appear.`);
+            else if (parent.private || parent.secret) {
+                // The portal never reads a private answer back, so a question can't depend on one
+                problems.push(`In "${stepTitle}", "${q.label}" depends on "${parent.label}", which only our team sees. A question can't depend on a private answer.`);
+            }
             else if (['choice', 'multi'].includes(parent.type)) {
                 const stray = q.show_if.any.find(a => !parent.options.includes(a));
                 if (stray) problems.push(`In "${stepTitle}", "${q.label}" waits for "${stray}", which is not one of the choices of "${parent.label}".`);
             }
+        }
+        if ((q.private || q.secret) && q.fact) {
+            problems.push(`In "${stepTitle}", "${q.label}" is private, so it can't also save to the client record.`);
+        }
+        if (q.type === 'style') {
+            const looks = Array.isArray(q.styles) ? q.styles : [];
+            if (looks.length < 2) problems.push(`In "${stepTitle}", "${q.label}" needs at least two looks to pick from.`);
+            const names = looks.map(l => String(l.name || '').trim().toLowerCase());
+            if (new Set(names).size !== names.length) problems.push(`In "${stepTitle}", two looks in "${q.label}" have the same name.`);
+            looks.forEach(l => {
+                ['image', 'link'].forEach(k => {
+                    if (l[k] && !/^https:\/\/\S+$/i.test(String(l[k]).trim())) problems.push(`In "${stepTitle}", the ${k === 'image' ? 'picture' : 'example site'} link for "${l.name}" must start with https://.`);
+                });
+                (l.colors || []).forEach(c => {
+                    if (!/^#[0-9a-f]{3,8}$/i.test(String(c).trim())) problems.push(`In "${stepTitle}", "${c}" in "${l.name}" isn't a color code like #A63D22.`);
+                });
+            });
+            if (q.private || q.secret) problems.push(`In "${stepTitle}", "${q.label}" is a style picker, which can't be private or encrypted.`);
+        }
+        if (q.secret && ['choice', 'multi'].includes(q.type)) {
+            problems.push(`In "${stepTitle}", "${q.label}" is a choice, which can't be encrypted. Encrypt is for typed answers like passwords.`);
         }
         if (q.fact && q.type === 'choice' && q.fact_values && q.fact_values.length !== q.options.length) {
             problems.push(`In "${stepTitle}", "${q.label}" has ${q.options.length} choices but ${q.fact_values.length} saved values. They must line up one to one.`);

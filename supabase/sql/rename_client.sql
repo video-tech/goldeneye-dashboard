@@ -145,6 +145,10 @@ begin
     update meta_ad_daily              set client_name = new_name where client_name = old_name;
     update meta_activity              set client_name = new_name where client_name = old_name;
     update meta_sync_state            set client_name = new_name where client_name = old_name;
+    -- Added 2026-10-15 with the onboarding questionnaire (supabase/sql/onboarding_questionnaire.sql). Run that first.
+    update onboarding_private_answers set client_name = new_name where client_name = old_name;
+    update onboarding_secrets         set client_name = new_name where client_name = old_name;
+    update onboarding_secret_reveals  set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users
