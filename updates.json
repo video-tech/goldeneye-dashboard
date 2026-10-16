@@ -3,6 +3,13 @@
   "updates": [
     {
       "date": "2026-10-16",
+      "area": "Tasks",
+      "title": "Setup tasks open into their steps",
+      "what": "Our setup work after onboarding is now ten clear tasks instead of two huge ones: Connect Meta, Connect their GHL to Golden Eye, Register their texting number, Build their website, Build the funnel and survey, Turn on automations and add their team, Final check and test, Set up SEO tracking, Set up Cuppa, and Launch ads. Each shows \"2 of 5 steps\" on its card: click the arrow to open the steps right there and tick them off, and the task moves along on its own. SEO's separate tasks (Search Console, SE Ranking, Cuppa and the rest) now live inside the two SEO tasks, and steps that ticked themselves still do.",
+      "action": "Run supabase/sql/setup_checklist_v3.sql"
+    },
+    {
+      "date": "2026-10-16",
       "area": "Onboarding",
       "title": "A new setup checklist for our team",
       "what": "\"Our checklist\" is rewritten for the new onboarding: read the client's answers in Golden Eye, send them a what-happens-next message, connect the Golden Eye app to their new GHL account, build their website (only when we build it), build the funnel and survey and turn on the lead, Conversions API and follow-up workflows, review every other workflow before publishing it, then test. A new \"First week live\" group checks the first real lead and reviews days 3 and 7 after launch. Stored website passwords now have a Delete button next to Reveal.",

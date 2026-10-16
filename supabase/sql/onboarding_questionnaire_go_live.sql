@@ -23,7 +23,7 @@ begin;
 
 update public.onboarding_steps set active = true
  where step_type = 'questions'
-   and title in ('About your business', 'Registering your texting number', 'Calls, texts and your service area',
+   and title in ('About your business', 'Registering your texting number', 'Texting and your service area',
                  'Your jobs and offers', 'Access to your website', 'Your new website');
 
 -- Our SEO step to delete a stored website password (setup_checklist_v2.sql), on with the step that stores them

@@ -4817,6 +4817,8 @@ function showOverviewChat() {
                 const scoreColor = t.score > 75 ? 'var(--neg)' : (t.score > 50 ? 'var(--warn)' : 'var(--t3)');
                 const init = t.assignee ? t.assignee.substring(0,2).toUpperCase() : '?';
                 const hiddenIcon = t.client_visible === false ? '<i class="fa-solid fa-eye-slash" style="color:var(--t3); margin-right:4px;" title="Hidden from the client"></i>' : '';
+                const grp = setupGroupForTask(t);
+                const stepsHtml = grp ? `<div>${taskStepsToggleHtml(t, grp)}</div>${expandedTaskSteps.has(String(t.id)) ? taskStepsPanelHtml(grp) : ''}` : '';
 
                 cols[s].innerHTML += `<div class="kanban-card transition" data-id="${t.id}" style="border:1px solid var(--line); border-radius:3px; background:var(--panel); padding:16px; display:flex; flex-direction:column; gap:11px;${t.__onboardingStep ? ' border-style:dashed; opacity:0.9;' : ''}"
                              onclick="${t.__onboardingStep ? "goToClient('" + escapeHTML(t.client) + "')" : "openTaskDrawer(" + t.id + ")"}">
@@ -4825,6 +4827,7 @@ function showOverviewChat() {
                                 <span class="text-xs shrink-0 ge-num" style="color:var(${dueColor});">${hiddenIcon}${due}</span>
                             </div>
                             <div style="font-size:13.5px; font-weight:450; line-height:1.4; color:var(--t1);">${escapeAttr(stripSlashEscapes(t.title || 'Untitled Task'))}</div>
+                            ${stepsHtml}
                             <div class="flex items-center justify-between gap-2" style="padding-top:3px;">
                                 <div style="width:20px; height:20px; border-radius:2px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:9px; color:var(--t2);">${init}</div>
                                 <div class="flex items-center gap-2">
@@ -4848,7 +4851,7 @@ function showOverviewChat() {
             
             sortableInstances.forEach(s=>s.destroy()); sortableInstances=[];
             document.querySelectorAll('#page-tasks .kanban-col').forEach(c => {
-                sortableInstances.push(new Sortable(c, { group:'kanban', draggable:'.kanban-card', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
+                sortableInstances.push(new Sortable(c, { group:'kanban', draggable:'.kanban-card', filter:'.task-steps, .task-steps-toggle', preventOnFilter:false, animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
                     const id = e.item.getAttribute('data-id'); const nS = e.to.getAttribute('data-status'); const t = globalTasksData.find(x=>x.id==id);
                     if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); if(await queueLifecycle(autoAdvanceCompletedOnboarding)) renderKanban(); }
                 }}));
@@ -4869,15 +4872,17 @@ function showOverviewChat() {
                 let sColor = 'var(--t2)'; if(t.status==='In Progress') sColor='var(--warn)'; if(t.status==='Complete') sColor='var(--pos)'; if(t.status==='Blocked') sColor='var(--neg)';
                 let dI='', dColor='var(--t2)'; if(t.status!=='Complete'&&t.due){ if(t.due<td){dI='<i class="fa-solid fa-circle-exclamation mr-1" style="color:var(--neg);"></i>'; dColor='var(--neg)';} else if(t.due===td){dI='<i class="fa-solid fa-bell mr-1" style="color:var(--warn);"></i>'; dColor='var(--warn)';} }
                 const openAttr = taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`; let pC = t.score>75?'var(--neg)':(t.score>50?'var(--warn)':'var(--t3)'); const chk = selectedTaskIds.has(t.id)?'checked':'';
+                const grp = taskArchiveView ? null : setupGroupForTask(t);
 
                 bH += `<tr class="ge-table-row transition" style="border-bottom:1px solid var(--line);${chk?' background:var(--goldWash);':''}">
                     <td class="p-4"><input type="checkbox" class="row-checkbox" value="${t.id}" ${chk} onchange="toggleTaskRow(this, ${t.id})"></td>
-                    <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'} transition" style="color:var(--t1);"${taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`}><span class="flex items-center gap-2 flex-wrap">${escapeAttr(stripSlashEscapes(t.title || 'Untitled'))}${taskArchiveView ? `<span class="ge-label" style="padding:2px 6px; border-radius:2px; background:var(--inset);">Archived ${escapeAttr(new Date(t.archived_at).toLocaleDateString())}</span>` : clientTaskBadge(t)}</span></td>
+                    <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'} transition" style="color:var(--t1);"${taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`}><span class="flex items-center gap-2 flex-wrap">${escapeAttr(stripSlashEscapes(t.title || 'Untitled'))}${taskArchiveView ? `<span class="ge-label" style="padding:2px 6px; border-radius:2px; background:var(--inset);">Archived ${escapeAttr(new Date(t.archived_at).toLocaleDateString())}</span>` : clientTaskBadge(t)}${grp ? taskStepsToggleHtml(t, grp) : ''}</span></td>
                     <td class="p-4 cursor-pointer" style="color:var(--gold);" onclick="goToClient('${escapeHTML(t.client)}')">${escapeAttr(stripSlashEscapes(t.client || 'Unknown'))}</td>
                     <td class="p-4${taskArchiveView ? '' : ' cursor-pointer'}"${openAttr}><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-xs" style="color:var(--t1);">${t.score}</span></td>
                     <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'}" style="color:${dColor};"${openAttr}>${dI}${t.due||'-'}</td>
                     <td class="p-4${taskArchiveView ? '' : ' cursor-pointer'}"${openAttr}><span class="ge-label" style="padding:3px 8px; border-radius:2px; border:1px solid var(--line); color:${sColor};">${t.status}</span></td>`;
                 activeCols.forEach(c => { let v=t[c]||'-'; if(c==='assignee'&&t.assignee) v=`<div style="width:24px; height:24px; border-radius:2px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; color:var(--t2);">${t.assignee.substring(0,2).toUpperCase()}</div>`; if(c==='updated_at') v=new Date(v).toLocaleDateString(); if(c==='notes') v=`<span class="truncate block max-w-[150px] opacity-70 text-xs">${v}</span>`; bH+=`<td class="p-4" style="color:var(--t2);">${v}</td>`; }); bH += `</tr>`;
+                if (grp && expandedTaskSteps.has(String(t.id))) bH += `<tr style="border-bottom:1px solid var(--line);"><td></td><td colspan="${5 + activeCols.length}" style="padding:0 16px 14px;">${taskStepsPanelHtml(grp)}</td></tr>`;
             });
             document.getElementById('t-table-body').innerHTML = bH; updateTaskBulkBar();
         }
@@ -13296,11 +13301,23 @@ function setupChecklistHtml(clientName) {
     if (!groups.length) {
         return '<p class="text-sm" style="color:var(--t2); line-height:1.6;">No checklist for this client yet. It is created when their onboarding is finished, and when they enter Campaign Building. Clients who finished earlier do not have one.</p>';
     }
-    const today = new Date().toISOString().split('T')[0];
     return groups.map(g => {
-        let lastLabel = null;
         const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
-        const steps = g.steps.map(s => {
+        const steps = setupStepRowsHtml(g);
+        const here = g.stage === current ? '<span class="ge-label" style="margin-left:10px; color:var(--gold);">current stage</span>' : `<span class="ge-label" style="margin-left:10px; color:var(--t3);">${escapeAttr(g.stage)}</span>`;
+        return `<section style="margin-bottom:22px;">
+            <div class="flex items-baseline justify-between gap-3"><h3 class="ge-title" style="font-size:16px;">${escapeAttr(g.group)}${here}</h3><span class="text-xs ge-num" style="color:var(--t2);">${g.done} of ${g.total}</span></div>
+            <div style="height:5px; border-radius:3px; background:var(--inset); margin:8px 0 4px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--goldSolid);"></div></div>
+            ${steps}
+        </section>`;
+    }).join('');
+}
+
+// One group's steps as rows with a tick box: Our checklist, and the arrow on the group's own task card
+function setupStepRowsHtml(g) {
+    const today = new Date().toISOString().split('T')[0];
+    let lastLabel = null;
+    return g.steps.map(s => {
             const { label, name } = setupStepParts(s.title);
             const head = label && label !== lastLabel ? `<div class="ge-label" style="margin:14px 0 4px; color:var(--gold);">${escapeAttr(label)}</div>` : '';
             lastLabel = label || lastLabel;
@@ -13319,14 +13336,35 @@ function setupChecklistHtml(clientName) {
                 <button type="button" onclick="openSetupStepTask('${s.id}')" class="text-xs" style="flex:none; background:none; border:none; color:var(--t3); cursor:pointer;" title="Open as a task: assign someone, change the due date or add notes">Edit</button>
             </div>`;
         }).join('');
-        const here = g.stage === current ? '<span class="ge-label" style="margin-left:10px; color:var(--gold);">current stage</span>' : `<span class="ge-label" style="margin-left:10px; color:var(--t3);">${escapeAttr(g.stage)}</span>`;
-        return `<section style="margin-bottom:22px;">
-            <div class="flex items-baseline justify-between gap-3"><h3 class="ge-title" style="font-size:16px;">${escapeAttr(g.group)}${here}</h3><span class="text-xs ge-num" style="color:var(--t2);">${g.done} of ${g.total}</span></div>
-            <div style="height:5px; border-radius:3px; background:var(--inset); margin:8px 0 4px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--goldSolid);"></div></div>
-            ${steps}
-        </section>`;
-    }).join('');
 }
+
+// The arrow on a task card: a task that is a checklist group ("Register their texting number") opens its steps
+// underneath, like a Roster row, and they can be ticked right there. Admins only, like the steps themselves.
+const expandedTaskSteps = new Set();
+
+function setupGroupForTask(t) {
+    if (currentUserRole !== 'admin' || !t || t.__onboardingStep || t.type === SETUP_STEP_TYPE || !t.client) return null;
+    const title = String(t.title || '').trim().toLowerCase();
+    return setupGroupsFor(t.client).find(g => g.stage === t.stage && String(g.group).trim().toLowerCase() === title) || null;
+}
+
+function taskStepsToggleHtml(t, g) {
+    const open = expandedTaskSteps.has(String(t.id));
+    return `<button type="button" class="task-steps-toggle ge-label" onclick="event.stopPropagation(); toggleTaskSteps('${t.id}')" aria-expanded="${open}"
+        style="display:inline-flex; align-items:center; gap:6px; background:none; border:none; padding:0; cursor:pointer; color:var(${g.done === g.total ? '--pos' : '--gold'});">
+        <i class="fa-solid fa-chevron-${open ? 'down' : 'right'}" style="font-size:9px;"></i>${g.done} of ${g.total} steps</button>`;
+}
+
+function taskStepsPanelHtml(g) {
+    // Clicks inside stay inside: ticking a step must not open the task drawer underneath
+    return `<div class="task-steps" onclick="event.stopPropagation()" style="cursor:default; margin-top:-4px;">${setupStepRowsHtml(g)}</div>`;
+}
+
+window.toggleTaskSteps = function (id) {
+    const k = String(id);
+    if (expandedTaskSteps.has(k)) expandedTaskSteps.delete(k); else expandedTaskSteps.add(k);
+    renderActiveTaskView();
+};
 
 function renderSetupChecklist() {
     const body = document.getElementById('setup-checklist-body');
@@ -13341,6 +13379,8 @@ function renderSetupChecklist() {
 function refreshSetupViews() {
     if (setupChecklistClient) renderSetupChecklist();
     if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+    // A step ticked from a task card: redraw the board so the card's count (and column) follow
+    if (expandedTaskSteps.size && typeof renderActiveTaskView === 'function') renderActiveTaskView();
 }
 
 window.toggleSetupStep = async function (id) {

@@ -264,18 +264,17 @@ select 'Registering your texting number',
 where not exists (select 1 from public.onboarding_steps where title = 'Registering your texting number');
 
 insert into public.onboarding_steps (title, description, step_type, owner, active, sort_order, questions)
-select 'Calls, texts and your service area',
+select 'Texting and your service area',
        'How you want leads handled, and where you work.',
        'questions', 'client', false, 5,
        '[
-         {"id": "c_calls", "label": "Who answers your calls, and when should a call go to voicemail?", "type": "long", "required": true, "options": [], "website_statuses": [], "dest": "custom_value:call_routing"},
          {"id": "c_text_ok", "label": "We text new leads between 8am and 8pm, weekends included. Is that OK?", "type": "choice", "required": true, "options": ["Yes", "No (I would like different hours)"], "website_statuses": [], "dest": "custom_value:text_window"},
          {"id": "c_text_hours", "label": "What hours should we text your leads?", "type": "short", "required": true, "options": [], "website_statuses": [], "show_if": {"q": "c_text_ok", "any": ["No (I would like different hours)"]}, "dest": "custom_value:text_window"},
          {"id": "c_area", "label": "Main cities you serve", "type": "short", "required": true, "options": [], "website_statuses": [], "dest": "custom_value:service_area"},
          {"id": "c_radius", "label": "How far will you travel for a job?", "type": "short", "required": true, "options": [], "website_statuses": [], "dest": "custom_value:service_radius"},
          {"id": "c_exclude", "label": "Areas you will not serve (optional)", "type": "long", "required": false, "options": [], "website_statuses": [], "dest": "custom_value:excluded_areas"}
        ]'::jsonb
-where not exists (select 1 from public.onboarding_steps where title = 'Calls, texts and your service area');
+where not exists (select 1 from public.onboarding_steps where title = 'Texting and your service area');
 
 insert into public.onboarding_steps (title, description, step_type, owner, active, sort_order, service_keys, questions)
 select 'Your jobs and offers',

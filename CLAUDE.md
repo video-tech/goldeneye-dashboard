@@ -1979,6 +1979,37 @@ and a new **First week live** (Campaign Learning, Ads: first real lead end to en
 - **Tests:** `supabase/sql/setup_checklist_v2.test.mjs` runs v1 then v2 twice in PGlite, 25 checks, 4 of 4 breakages caught.
   The delete button: 5 jsdom checks in `tests/onboarding-questionnaire.test.mjs`, 2 of 2 caught.
 
+### Version 3 (2026-10-16, `supabase/sql/setup_checklist_v3.sql`, run after v2): smaller tasks
+
+The user's model: **a task is a piece of work, its checklist is the steps inside it.** v2's "Set up GHL" had 37 steps; v3 splits
+the work into these tasks (agency rows in `onboarding_steps`, steps in `stage_templates` with `checklist_group` = the task's title):
+
+| Task | Who | Steps |
+|---|---|---|
+| Connect Meta | Ads | 4 |
+| Connect their GHL to Golden Eye (install the app, location ID, review what Golden Eye filled) | all | 6 |
+| Register their texting number (website on their GHL, submit, number when approved) | all | 5 |
+| Build their website (`website_statuses` new_build / existing on the task itself) | site | 5 / 1 |
+| Build the funnel and survey | Ads | 7 |
+| Turn on automations and add their team | all | 6 |
+| Final check and test | all | 8 |
+| Set up SEO tracking | SEO | 9 |
+| Set up Cuppa | SEO | 4 |
+| Launch ads (Campaign Building; ends with checking the first real lead) | Ads | 6 |
+
+- **Gone, by the user's choice:** "Review their answers" (EIN check moved to A2P, logo check to the website), creating the GHL
+  account by hand (Golden Eye will create it), "First week live", and the separate SEO tasks: six are switched off, and the old
+  "Set up Cuppa" row became the Cuppa task (auto_check cleared, so it ticks from its steps). Every auto-tick moved to a step.
+- **The website task carries `website_statuses` {new_build, existing}**, so a client with no website situation never gets an
+  empty task that could never complete (and would hold up the move to Campaign Building).
+- **The arrow on a task (app.js, `setupGroupForTask`, `taskStepsToggleHtml`, `taskStepsPanelHtml`):** a group's task card on
+  the board, and its row in the list, shows "N of M steps"; the arrow opens the steps underneath, like a Roster row, ticked right
+  there through `toggleSetupStep`. Clicks inside never open the task drawer, the board's Sortable ignores drags that start there,
+  and `refreshSetupViews` redraws the board so the count and column follow. Admins only. **Our checklist** on the Health tab
+  draws the same rows (`setupStepRowsHtml`).
+- **Tests:** `supabase/sql/setup_checklist_v3.test.mjs` runs v1, v2 and v3 twice, 42 checks, 3 of 3 breakages caught;
+  `tests/task-steps.test.mjs` runs the real board, list and checklist code in jsdom, 22 checks, 5 of 5 breakages caught.
+
 ## Loading screen (built 2026-10-14)
 
 `#ge-preload` at the top of `#theme-wrapper` in body.html: logo, name, progress bar and a status line. It is in the markup, so it is up the
@@ -2098,8 +2129,8 @@ since the questionnaire now asks both (old answers stay). Re-runnable.
   (`custom_value:services_list`). Jobs and offers no longer asks it; its job-value question reads "for each of your main services".
   **The SEO step's Copy for Cuppa still carries services:** `clientAnswersHtml` adds the answer to any question saving to
   `custom_value:services_list` to the copy of a step tagged `seo`, unless that step already holds a services answer of its own.
-- **Steps:** About your business (everyone), Registering your texting number (everyone, all private), Calls texts and your service area
-  (everyone), Your jobs and offers (Ads), Access to your website (**SEO, existing site only**, the user's call). Business hours stay on the SEO
+- **Steps:** About your business (everyone), Registering your texting number (everyone, all private), Texting and your service area
+  (everyone; the call-handling question was dropped 2026-10-16), Your jobs and offers (Ads), Access to your website (**SEO, existing site only**, the user's call). Business hours stay on the SEO
   questions. Dropped on purpose: personal email, Facebook login (Quick start already asks for the page link), area codes, ad-image policy.
 - **Every question has a `dest`** saying where its answer goes: `ghl:<location field>` (set when the account is created), `custom_value:<key>`
   (Master's own keys), `a2p:<field>` (GHL's Business Profile, typed in during A2P registration), `admin:<field>`, `access:<field>`,

@@ -67,7 +67,7 @@ const as = async ({ admin = false, visible = '', email = 'client@acme.com', role
 // ---- the steps ----
 const steps = await q(`select id, title, active, sort_order, service_keys, website_statuses, questions from onboarding_steps order by sort_order, title`);
 const byTitle = Object.fromEntries(steps.map((s) => [s.title, s]));
-const titles = ['About your business', 'Registering your texting number', 'Calls, texts and your service area', 'Your jobs and offers', 'Access to your website', 'Your new website'];
+const titles = ['About your business', 'Registering your texting number', 'Texting and your service area', 'Your jobs and offers', 'Access to your website', 'Your new website'];
 ok(steps.length === 6 && titles.every((t) => byTitle[t]), 'six steps, inserted once even on a second run');
 ok(byTitle['Your new website'].website_statuses.join() === 'new_build' && byTitle['Your new website'].service_keys.length === 0, 'new website: everyone whose site we build');
 const styleQ = byTitle['Your new website'].questions.find((x) => x.type === 'style');

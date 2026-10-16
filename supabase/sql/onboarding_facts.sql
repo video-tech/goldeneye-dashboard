@@ -303,14 +303,14 @@ begin
               {"id": "q_fb_url", "label": "Paste the link to your Facebook page", "type": "link", "required": false,
                "options": [], "website_statuses": [], "show_if": {"q": "q_fb_page", "any": ["Yes"]}, "dest": "custom_value:facebook_url"},
               {"id": "q_crm", "label": "Do you have a CRM you want your leads sent to?", "type": "choice", "required": true,
-               "options": ["No (the text alerts are enough)", "Yes"], "website_statuses": [],
+               "options": ["No, use the default setup", "Yes, I already have a CRM I want to keep"], "website_statuses": [],
                "fact": "crm_choice", "fact_values": ["no", "yes"]},
               {"id": "q_crm_name", "label": "Which CRM?", "type": "choice", "required": true,
                "options": ["HubSpot", "Jobber", "JobNimbus", "Housecall Pro", "ServiceTitan", "Salesforce", "Other"], "website_statuses": [],
-               "show_if": {"q": "q_crm", "any": ["Yes"]}, "fact": "crm_name"},
+               "show_if": {"q": "q_crm", "any": ["Yes, I already have a CRM I want to keep"]}, "fact": "crm_name"},
               {"id": "q_crm_method", "label": "How does it take in new leads?", "type": "choice", "required": true,
                "options": ["An email address", "A webhook link", "Not sure"], "website_statuses": [],
-               "show_if": {"q": "q_crm", "any": ["Yes"]}, "fact": "crm_method", "fact_values": ["email", "webhook", "unsure"]}
+               "show_if": {"q": "q_crm", "any": ["Yes, I already have a CRM I want to keep"]}, "fact": "crm_method", "fact_values": ["email", "webhook", "unsure"]}
             ]'::jsonb);
     end if;
 end $$;
