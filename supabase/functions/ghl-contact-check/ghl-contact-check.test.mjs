@@ -100,5 +100,20 @@ ok(primaryEmail(' Owner@Found.com , second@found.com') === 'owner@found.com' && 
     ok((await call(db, g, {}, 'cron', { GHL_MIDAS_TOKEN: '' })).status === 500 && !g.calls.length, 'nothing runs without the key');
 }
 
+{
+    // The browser's permission check before Check now (it failed with 405 before this, as "Failed to fetch")
+    const db = fakeDb([]), g = fakeGhl([]);
+    const pre = await handle(new Request('https://x', { method: 'OPTIONS', headers: { Origin: 'https://goldeneye.midasmediafirm.com' } }), { env: {}, db, fetch: g.f });
+    ok(pre.status === 204 && pre.headers.get('Access-Control-Allow-Origin') === 'https://goldeneye.midasmediafirm.com'
+        && /authorization/.test(pre.headers.get('Access-Control-Allow-Headers')) && !g.calls.length, "the browser's permission check is answered for Golden Eye's site, without touching GHL");
+    const other = await handle(new Request('https://x', { method: 'OPTIONS', headers: { Origin: 'https://evil.example' } }), { env: {}, db, fetch: g.f });
+    ok(other.headers.get('Access-Control-Allow-Origin') !== 'https://evil.example', 'another site is not allowed');
+    const r = await call(fakeDb(clients.map((c) => ({ ...c }))), fakeGhl(contacts), { mode: 'check', client: 'Found Co' }, 'admin-jwt');
+    ok(r.status === 200, 'a real check still works');
+    const res = await handle(new Request('https://x', { method: 'POST', headers: { Origin: 'https://video-tech.github.io', 'x-cron-secret': CRON }, body: '{}' }),
+        { env: { GHL_MIDAS_TOKEN: TOKEN, GHL_MIDAS_LOCATION_ID: LOC, MAKE_WEBHOOK_SECRET: CRON }, db: fakeDb([]), fetch: fakeGhl([]).f });
+    ok(res.headers.get('Access-Control-Allow-Origin') === 'https://video-tech.github.io', 'answers carry the permission header too, or the browser hides them');
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

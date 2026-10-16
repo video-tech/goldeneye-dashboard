@@ -42,8 +42,22 @@ export async function checkOne(deps: Deps, client: { name: string; client_email?
     }
 }
 
+// Check now runs in the dashboard's browser, on another origin, so the browser first asks (OPTIONS) whether it may call.
+export const ALLOWED_ORIGINS = ["https://goldeneye.midasmediafirm.com", "https://video-tech.github.io"];
+export function corsHeaders(req: Request): Record<string, string> {
+    const origin = req.headers.get("Origin") ?? "";
+    return {
+        "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Vary": "Origin",
+    };
+}
+
 export async function handle(req: Request, deps: Deps): Promise<Response> {
-    const reply = (body: unknown, status = 200) => Response.json(body, { status });
+    const cors = corsHeaders(req);
+    const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: cors });
+    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     if (req.method !== "POST") return reply({ error: "POST only" }, 405);
     if (!cronCheck(req, deps.env.MAKE_WEBHOOK_SECRET)) {
         const caller = await adminCheck(deps.db, req);
