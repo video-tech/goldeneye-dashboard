@@ -1979,6 +1979,15 @@ and a new **First week live** (Campaign Learning, Ads: first real lead end to en
 - **Tests:** `supabase/sql/setup_checklist_v2.test.mjs` runs v1 then v2 twice in PGlite, 25 checks, 4 of 4 breakages caught.
   The delete button: 5 jsdom checks in `tests/onboarding-questionnaire.test.mjs`, 2 of 2 caught.
 
+### Clients see our tasks (2026-10-16, `supabase/sql/show_setup_tasks_to_clients.sql`)
+
+The setup tasks are shown in the client's portal, so they see what we're doing; their steps stay hidden. Renamed to read well to a
+client (one title serves both sides): Set up your CRM, Register your texting number, Build your website, Turn on your automations and
+add your team, Set up your blog articles (was Set up Cuppa); the rest unchanged. Descriptions are written for the client ("We
+register your business texting number…"). app.js raises group tasks with `client_visible` true and steps false. The portal shows a
+task's title and status only. The names in the v3 section below are the pre-rename ones. Tests: 10 PGlite checks, 3 jsdom checks
+(`tests/stage-tasks.test.mjs`), breakages caught.
+
 ### Version 3 (2026-10-16, `supabase/sql/setup_checklist_v3.sql`, run after v2): smaller tasks
 
 The user's model: **a task is a piece of work, its checklist is the steps inside it.** v2's "Set up GHL" had 37 steps; v3 splits
@@ -2118,7 +2127,11 @@ two early questions, "Do you have a Facebook page?" and "Do you have a CRM you w
 - **Tests:** 48 PGlite checks on the SQL (13 breakages tried, all caught), 44 node checks on the question logic (14 caught), 36 browser checks on the real form and builder,
   9 on the tag chips.
 
-### The questionnaire (built 2026-10-15, switched OFF): `supabase/sql/onboarding_questionnaire.sql`
+### The questionnaire (built 2026-10-15, **LIVE since 2026-10-16**): `supabase/sql/onboarding_questionnaire.sql`
+
+**Went live 2026-10-16** after a full GE Test Client run (questionnaire, tasks, GHL account, fill, users): teardown, then
+`onboarding_quick_start_go_live.sql`, then `onboarding_questionnaire_go_live.sql`. Ironshell Roofing (no GHL account) is the first real
+client on it; ghl-account makes their account when they finish.
 
 Six Questions steps replace the three GHL forms, agreed with the user question by question. **All added with `active = false`**.
 **Going live is `supabase/sql/onboarding_questionnaire_go_live.sql`, run only when the user says the rebuild is done** (a client is

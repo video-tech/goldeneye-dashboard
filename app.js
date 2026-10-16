@@ -13124,9 +13124,6 @@ async function generateStageTasks(clientName, stage, opts = {}) {
     const toCreate = templates.filter(t => !existing.has(String(t.task_title || '').trim().toLowerCase()));
     if (!toCreate.length) return 0;
 
-    // A group's own task carries the group's name
-    const setupGroupTitles = new Set(templates.filter(t => t.task_type === SETUP_STEP_TYPE && t.checklist_group)
-        .map(t => String(t.checklist_group).trim().toLowerCase()));
 
     const now = new Date().toISOString();
     const dueFrom = days => {
@@ -13147,8 +13144,9 @@ async function generateStageTasks(clientName, stage, opts = {}) {
             status: 'Not Started',
             assignee: t.assignee || null,
             checklist_group: t.checklist_group || null,
-            // Our steps, and the group tasks that stand for them, are internal: never shown to the client
-            client_visible: t.task_type !== SETUP_STEP_TYPE && !setupGroupTitles.has(String(t.task_title || '').trim().toLowerCase()),
+            // Our steps are internal and never shown to the client. The tasks they roll up into ("Register your texting
+            // number") are, so the client sees what we're working on (show_setup_tasks_to_clients.sql)
+            client_visible: t.task_type !== SETUP_STEP_TYPE,
             p, u, e,
             score: Math.round(((p * 0.4) + (u * 0.4) + ((6 - e) * 0.2)) * 20),
             due: dueFrom(t.due_days),

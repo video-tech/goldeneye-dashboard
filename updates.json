@@ -4,6 +4,13 @@
     {
       "date": "2026-10-16",
       "area": "Onboarding",
+      "title": "Clients can see what we are working on",
+      "what": "Our setup tasks now show in the client's portal with plain names (Set up your CRM, Register your texting number, Build your website, Set up your blog articles and the rest), so they can watch the work move along. The small steps inside each task stay ours.",
+      "action": "Run supabase/sql/show_setup_tasks_to_clients.sql"
+    },
+    {
+      "date": "2026-10-16",
+      "area": "Onboarding",
       "title": "Copy A2P details, and Add client on the Roster",
       "what": "The \"Connect their GHL to Golden Eye\" task has a new step for the Business Profile fields GHL won't let Golden Eye fill (legal business name, business type, EIN, authorized representative): its Copy A2P details button puts the client's answers on your clipboard in the order GHL asks for them. The Roster page has an Add client button, and adding a client now stops you if that name is already taken, even by an archived client.",
       "action": "Run supabase/sql/setup_checklist_a2p_profile.sql"
