@@ -71,7 +71,8 @@ const titles = ['About your business', 'Registering your texting number', 'Texti
 ok(steps.length === 6 && titles.every((t) => byTitle[t]), 'six steps, inserted once even on a second run');
 ok(byTitle['Your new website'].website_statuses.join() === 'new_build' && byTitle['Your new website'].service_keys.length === 0, 'new website: everyone whose site we build');
 const styleQ = byTitle['Your new website'].questions.find((x) => x.type === 'style');
-ok(styleQ && styleQ.styles.length === 4 && styleQ.styles.every((s) => s.name && s.colors.length === 4 && s.image === '' && s.link === ''), 'the style picker starts with 4 looks, pictures and links to be pasted in later');
+ok(styleQ && styleQ.styles.length === 4 && styleQ.styles.every((s) => s.name && s.colors.length === 4 && s.image === '' && /^https:\/\//.test(s.link)),
+    'the style picker starts with 4 looks, each linking to its example site (pictures to be added later)');
 ok(steps.every((s) => s.active === false), 'every step is switched off');
 ok(byTitle['Your jobs and offers'].service_keys.join() === 'ads', 'jobs and offers: Ads clients only');
 ok(byTitle['Access to your website'].service_keys.join() === 'seo' && byTitle['Access to your website'].website_statuses.join() === 'existing', 'website access: SEO clients keeping their own site');

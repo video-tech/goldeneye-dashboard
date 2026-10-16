@@ -320,10 +320,10 @@ select 'Your new website',
        '[
          {"id": "w_style", "label": "Pick the look closest to what you want, then a second choice", "type": "style", "required": true, "options": [], "website_statuses": [], "dest": "design:style",
           "styles": [
-            {"name": "Bold and local", "note": "Heavy lettering, warm earthy colors and square edges. Hands-on and local, not corporate.", "colors": ["#A63D22", "#F1EBDF", "#1B1915", "#6A5B4B"], "image": "", "link": ""},
-            {"name": "Sharp and modern", "note": "Near-black with one strong accent color, big project photos and a clean grid.", "colors": ["#1E1F25", "#C0432F", "#FFFFFF", "#8A8D96"], "image": "", "link": ""},
-            {"name": "Warm and friendly", "note": "Soft warm tones and friendly lettering, with your team and reviews up front.", "colors": ["#9B3222", "#F1ECE6", "#57504C", "#C98B5A"], "image": "", "link": ""},
-            {"name": "Refined and premium", "note": "An elegant serif headline, magazine-style project pages and plenty of space.", "colors": ["#8E3F2E", "#F6EEE8", "#3A2824", "#B8A89E"], "image": "", "link": ""}
+            {"name": "Bold and local", "note": "Heavy lettering, warm earthy colors and square edges. Hands-on and local, not corporate.", "colors": ["#A63D22", "#F1EBDF", "#1B1915", "#6A5B4B"], "image": "", "link": "https://claude.ai/artifact/3QmahedVMqA4pd7tBxmEPB"},
+            {"name": "Sharp and modern", "note": "Near-black with one strong accent color, big project photos and a clean grid.", "colors": ["#1E1F25", "#C0432F", "#FFFFFF", "#8A8D96"], "image": "", "link": "https://claude.ai/artifact/4XofsfBmYf1pWWss64KzGJ"},
+            {"name": "Warm and friendly", "note": "Soft warm tones and friendly lettering, with your team and reviews up front.", "colors": ["#9B3222", "#F1ECE6", "#57504C", "#C98B5A"], "image": "", "link": "https://claude.ai/artifact/LQkogU3C1CnLtQa3jpmUsJ"},
+            {"name": "Refined and premium", "note": "An elegant serif headline, magazine-style project pages and plenty of space.", "colors": ["#8E3F2E", "#F6EEE8", "#3A2824", "#B8A89E"], "image": "", "link": "https://claude.ai/artifact/EFjnTxRLcVggXMG13LZTrm"}
           ]},
          {"id": "w_style_why", "label": "What do you like or dislike about the looks you picked? (optional)", "type": "long", "required": false, "options": [], "website_statuses": [], "dest": "design:notes"},
          {"id": "w_sites_like", "label": "Websites you like the look of, and what you like about each (optional)", "type": "long", "required": false, "options": [], "website_statuses": [], "dest": "design:sites_liked"},
