@@ -4,6 +4,12 @@
     {
       "date": "2026-10-19",
       "area": "Onboarding",
+      "title": "Onboarding and Set up show as two steps",
+      "what": "A client in onboarding now shows as Onboarding while they still have steps to do, and as Set up once they've finished and the work is ours. You'll see it on the Overview, the Roster (sorted in journey order), the client's stage chip, their portal profile, the Journey bar (now six steps: Onboarding, Set up, Campaign Building and on) and the Onboarding & Set up list, which now has two sections: what they do, then what we do. Only the labels changed: when tasks are raised, when accounts are made and when a client moves to Campaign Building all work as before."
+    },
+    {
+      "date": "2026-10-19",
+      "area": "Onboarding",
       "title": "Stage Checklists shows Onboarding and Set up side by side",
       "what": "The stage picker now starts with Onboarding (client steps), the steps the client does in their portal, followed by Set up (our tasks) and the later stages. The package filter works on both. Client steps are shown to read here; Edit in Client Onboarding opens the editor where their videos, forms and questions are changed."
     },

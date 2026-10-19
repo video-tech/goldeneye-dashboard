@@ -2020,6 +2020,22 @@ the work into these tasks (agency rows in `onboarding_steps`, steps in `stage_te
 - **Tests:** `supabase/sql/setup_checklist_v3.test.mjs` runs v1, v2 and v3 twice, 42 checks, 3 of 3 breakages caught;
   `tests/task-steps.test.mjs` runs the real board, list and checklist code in jsdom, 22 checks, 5 of 5 breakages caught.
 
+## "Set up": a label, not a stage (2026-10-19)
+
+The Onboarding stage is shown as two phases everywhere a client's stage appears: **Onboarding** while the client still has their
+own steps to do, **Set up** once they've finished (the handoff task exists, or every client step that applies is done). Only the
+screen changes: `current_stage` and `tasks.stage` still say `Onboarding`, and every rule (the handoff trigger, ghl-account,
+the contact check, auto-ticks, `autoAdvanceCompletedOnboarding`, filters) still compares against it.
+- **Helpers** (app.js, after `lifecycleStages`): `clientPhase(row)`, `clientFinishedOwnSteps(name)`, `stageLabelForOurWork(stage)`,
+  `displayStages` (six steps). Display only: never compare their result or save it.
+- **Where:** Overview active roster, Roster stage column (sorted in journey order), the Accounts page stage chip, the portal profile,
+  the Journey box (Onboarding counts the client's steps, Set up counts our onboarding tasks), the Onboarding & Set up list (two
+  sections, theirs then ours), the Our checklist modal's stage tag, Move Stage (current phase; the option keeps value
+  `Onboarding`, labelled "Onboarding / Set up"), and the task drawer's stage option (same).
+- **Not changed:** the database, edge functions, the chat tools, the morning audit and the client summary.
+- **Tests:** `tests/setup-phase.test.mjs`, 21 jsdom checks on the real code, 2 of 2 breakages caught, plus checks that the label is
+  never saved and the stage advance still reads the stored stage.
+
 ## Loading screen (built 2026-10-14)
 
 `#ge-preload` at the top of `#theme-wrapper` in body.html: logo, name, progress bar and a status line. It is in the markup, so it is up the

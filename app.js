@@ -1936,7 +1936,7 @@ window.renderCpProfile = function() {
     if (emailEl) emailEl.innerText = clientEmail || row?.client_email || '—';
 
     const stageEl = document.getElementById('cp-profile-stage');
-    if (stageEl) stageEl.innerText = row?.current_stage || 'Active';
+    if (stageEl) stageEl.innerText = row?.current_stage ? clientPhase(row) : 'Active';
 
     const obEl = document.getElementById('cp-profile-onboarding');
     if (obEl) {
@@ -4598,7 +4598,7 @@ function showOverviewChat() {
                         <span style="font-size:13.5px; font-weight:450; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--t1);">${escapeAttr(stripSlashEscapes(c.name))}</span>
                         <span class="ge-label" style="padding:2px 6px; border-radius:2px; white-space:nowrap; color:${payColor}; background:var(--inset);">${payLabel}</span>
                     </div>
-                    <span class="text-sm" style="color:var(--t2);">${escapeAttr(c.current_stage || '—')}</span>
+                    <span class="text-sm" style="color:var(--t2);">${escapeAttr(c.current_stage ? clientPhase(c) : '—')}</span>
                     <div style="display:flex; align-items:center; justify-content:flex-end; gap:9px;">
                         <div class="score-bar-bg" style="width:34px; height:3px;" title="Health Score: ${score}"><div class="score-bar-fill" style="width: ${score}%; background: ${sc};"></div></div>
                         <span class="ge-num text-xs" style="color:var(--t2); width:18px; text-align:right;">${score || '—'}</span>
@@ -5427,7 +5427,7 @@ function filterAdsData() {
                     const currentStage = stageClient ? (stageClient.current_stage || 'Onboarding') : null;
 
                     if (stageChip) {
-                        stageChip.innerText = currentStage || '';
+                        stageChip.innerText = currentStage ? clientPhase(stageClient) : '';
                         stageChip.classList.toggle('hidden', !currentStage || cSelectedAccount === 'ALL');
                     }
 
@@ -6025,12 +6025,14 @@ window.markOnboardingComplete = async function() {
         function stageProgressFor(client) {
             const row = globalClientsData.find(c => normalize(c.name) === normalize(client));
             if (!row) return null;
-            const stage = row.current_stage || 'Onboarding';
-            const idx = lifecycleStages.indexOf(stage);
-            const next = idx >= 0 ? lifecycleStages[idx + 1] || null : null;
+            const stage = clientPhase(row);
+            const idx = displayStages.indexOf(stage);
+            const next = idx >= 0 ? displayStages[idx + 1] || null : null;
             let done = 0, total = 0;
-            if (stage === 'Onboarding') {
-                const items = allOnboardingItems(client);
+            if (stage === 'Onboarding' || stage === SETUP_PHASE) {
+                // Onboarding: the client's own steps. Set up: our onboarding work (the items the box lists under Set up).
+                const ours = stage === SETUP_PHASE;
+                const items = allOnboardingItems(client).filter(i => (i.owner === 'agency') === ours);
                 const tasks = new Map(globalTasksData.filter(t => normalize(t.client || '') === normalize(client) && t.stage === 'Onboarding')
                     .map(t => [String(t.title || '').trim().toLowerCase(), t]));
                 total = items.length;
@@ -6051,7 +6053,7 @@ window.markOnboardingComplete = async function() {
             const p = cSelectedAccount === "ALL" ? null : stageProgressFor(cSelectedAccount);
             if (!p) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
-            document.getElementById('c-stage-steps').innerHTML = lifecycleStages.map((s, i) => {
+            document.getElementById('c-stage-steps').innerHTML = displayStages.map((s, i) => {
                 const state = i < p.idx ? 'done' : i === p.idx ? 'now' : 'todo';
                 const color = state === 'todo' ? 'var(--t3)' : state === 'now' ? 'var(--gold)' : 'var(--t2)';
                 return `<span style="flex:1; text-align:center; padding-bottom:4px; border-bottom:2px solid ${state === 'todo' ? 'var(--line)' : 'var(--goldSolid)'}; opacity:${state === 'done' ? 0.55 : 1}; color:${color}; font-weight:${state === 'now' ? 700 : 500};">${state === 'done' ? '✓ ' : ''}${escapeAttr(s)}</span>`;
@@ -6123,10 +6125,15 @@ window.markOnboardingComplete = async function() {
                 backfill.classList.toggle('hidden', !(currentUserRole === 'admin' && outstanding > 0));
             }
 
-            // The first outstanding item — whoever it's waiting on
-            const blocker = items.find(i => !isDone(i));
+            // Two sections: the client's onboarding, then our set up. Each keeps its own order.
+            const theirs = items.filter(i => i.owner !== 'agency'), ours = items.filter(i => i.owner === 'agency');
+            const sectionHead = (label, group) => group.length
+                ? `<div class="ob-section-head text-[10px] uppercase tracking-widest text-gray-500 pt-2 px-1">${label} <span class="text-gray-600">· ${group.filter(isDone).length} of ${group.length}</span></div>` : '';
 
-            list.innerHTML = items.map(item => {
+            // The first outstanding item — whoever it's waiting on (their steps come first)
+            const blocker = [...theirs, ...ours].find(i => !isDone(i));
+
+            const itemRow = item => {
                 const complete = isDone(item);
                 const isBlocker = !complete && item.id === blocker?.id;
                 const mine = item.owner === 'agency';
@@ -6164,7 +6171,10 @@ window.markOnboardingComplete = async function() {
                     <div class="flex items-center gap-3 text-[11px] whitespace-nowrap">${mine && currentUserRole === 'admin' && setupGroupsFor(cSelectedAccount).some(g => g.stage === 'Onboarding' && String(g.group).trim().toLowerCase() === String(item.title || '').trim().toLowerCase())
                         ? `<button type="button" onclick="openSetupChecklist()" class="${isBlocker ? 'btn-primary' : ''} btn text-xs" style="padding:3px 10px;${isBlocker ? '' : ' background:transparent; border:1px solid var(--line); color:var(--t2);'}"><i class="fa-solid fa-list-check mr-1.5"></i>Our checklist</button>` : ''}<span>${state}</span></div>
                 </div>`;
-            }).join('') + clientAnswersHtml(cSelectedAccount);
+            };
+            list.innerHTML = sectionHead('Onboarding · what they do', theirs) + theirs.map(itemRow).join('')
+                + sectionHead('Set up · what we do', ours) + ours.map(itemRow).join('')
+                + clientAnswersHtml(cSelectedAccount);
         }
 
         // What the client answered on built-in Questions steps, under their onboarding list.
@@ -12151,6 +12161,34 @@ window.deleteMorningAudit = async function(id) {
 // ============================================================================
 const lifecycleStages = ['Onboarding', 'Campaign Building', 'Campaign Learning', 'Optimizing', 'Offboarding'];
 
+// ---- "Set up": a label, not a stage (2026-10-19) ----
+// The Onboarding stage is shown as two phases: Onboarding (the client's own steps) and Set up (our work once they've
+// finished). Only what's on screen changes. current_stage and tasks.stage still say 'Onboarding', and everything that
+// decides anything (the handoff trigger, ghl-account, the contact check, auto-ticks, the stage advance, filters) still
+// compares against 'Onboarding'. These helpers are for display only: never compare their result or save it.
+const SETUP_PHASE = 'Set up';
+const displayStages = ['Onboarding', SETUP_PHASE, ...lifecycleStages.slice(1)];
+
+// The client has finished their own steps: the handoff task exists (the moment they got their "onboarding complete"
+// text), or every client step that applies to them is done. No steps known yet counts as not finished.
+function clientFinishedOwnSteps(clientName) {
+    const key = normalize(clientName || '');
+    if ((globalTasksData || []).some(t => normalize(t.client || '') === key
+        && String(t.title || '').trim().toLowerCase() === OB_COMPLETE_TASK_TITLE.toLowerCase())) return true;
+    const steps = activeOnboardingSteps(clientName);
+    return steps.length > 0 && steps.every(s => onboardingProgressFor(clientName, s.id)?.completed_at);
+}
+
+// What to show for a client's stage: their stage, except Onboarding reads Set up once their own steps are done
+function clientPhase(row) {
+    if (!row) return null;
+    const stage = row.current_stage || 'Onboarding';
+    return stage === 'Onboarding' && clientFinishedOwnSteps(row.name) ? SETUP_PHASE : stage;
+}
+
+// What to show for a stage name on our own work (checklist groups): Onboarding reads Set up
+function stageLabelForOurWork(stage) { return stage === 'Onboarding' ? SETUP_PHASE : stage; }
+
 // Checklist templates per stage, loaded from stage_templates. Previously a hardcoded
 // map of invented counts that promised tasks no code ever created.
 let globalStageTemplates = [];
@@ -13509,7 +13547,7 @@ function setupChecklistHtml(clientName) {
     return groups.map(g => {
         const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
         const steps = setupStepRowsHtml(g);
-        const here = g.stage === current ? '<span class="ge-label" style="margin-left:10px; color:var(--gold);">current stage</span>' : `<span class="ge-label" style="margin-left:10px; color:var(--t3);">${escapeAttr(g.stage)}</span>`;
+        const here = g.stage === current ? '<span class="ge-label" style="margin-left:10px; color:var(--gold);">current stage</span>' : `<span class="ge-label" style="margin-left:10px; color:var(--t3);">${escapeAttr(stageLabelForOurWork(g.stage))}</span>`;
         return `<section style="margin-bottom:22px;">
             <div class="flex items-baseline justify-between gap-3"><h3 class="ge-title" style="font-size:16px;">${escapeAttr(g.group)}${here}</h3><span class="text-xs ge-num" style="color:var(--t2);">${g.done} of ${g.total}</span></div>
             <div style="height:5px; border-radius:3px; background:var(--inset); margin:8px 0 4px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--goldSolid);"></div></div>
@@ -13771,12 +13809,12 @@ window.openStageTransitionModal = function() {
     const currentStage = clientObj.current_stage || 'Onboarding';
     const currentIndex = lifecycleStages.indexOf(currentStage);    
     // Set Current Stage Text
-    document.getElementById('trans-current-stage').innerText = currentStage;
+    document.getElementById('trans-current-stage').innerText = clientPhase(clientObj) || currentStage;
     
     // Populate Target Stage Dropdown
     const selectEl = document.getElementById('trans-target-stage');
     selectEl.innerHTML = lifecycleStages.map(stage => 
-        `<option value="${stage}">${stage}</option>`
+        `<option value="${stage}">${stage === 'Onboarding' ? 'Onboarding / Set up' : stage}</option>`
     ).join('');
     
     // Default to the next logical stage, or the current one if at the end
@@ -14249,7 +14287,7 @@ function rosterSortValue(c, key) {
         case 'checkin':  return rosterCheckinStatus(c).rank;
         case 'name':     return String(c.name || '').toLowerCase();
         case 'status':   return ['active', 'paused', 'archived'].indexOf(rosterStatusOf(c));
-        case 'stage':    return String(c.current_stage || '').toLowerCase();
+        case 'stage':    { const i = c.current_stage ? displayStages.indexOf(clientPhase(c)) : -1; return i < 0 ? 99 : i; }
         case 'health':   return c.current_score || 0;
         case 'retainer': return parseFloat(c.monthly_retainer || 0);
         case 'payment':  return String(c.payment_status || '');
@@ -14359,7 +14397,7 @@ window.renderRoster = function() {
             </div>`,
             status: `<span class="ge-label" style="color:${ROSTER_STATUS_COLOR[status] || 'var(--t3)'};">${status}</span>`,
             Services: `<div style="display:flex; flex-wrap:wrap; gap:4px; min-width:0;">${svcHtml}</div>`,
-            stage: `<span class="text-sm" style="color:var(--t2);">${rosterEsc(c.current_stage || '—')}</span>`,
+            stage: `<span class="text-sm" style="color:var(--t2);">${rosterEsc(c.current_stage ? clientPhase(c) : '—')}</span>`,
             checkin: `<span class="ge-label" data-checkin="${ck.state}" style="color:${ckColor};" title="Numbers for ${escapeAttr(weekRangeLabel(reportingWeekStart()))}">${ck.state === 'in' ? '<i class="fa-solid fa-check mr-1"></i>' : ''}${ck.label}</span>`,
             health: `<div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
                 <div class="score-bar-bg" style="width:30px; height:3px;"><div class="score-bar-fill" style="width:${score}%; background:${sc};"></div></div>
