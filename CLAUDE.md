@@ -2032,6 +2032,12 @@ the contact check, auto-ticks, `autoAdvanceCompletedOnboarding`, filters) still 
   the Journey box (Onboarding counts the client's steps, Set up counts our onboarding tasks), the Onboarding & Set up list (two
   sections, theirs then ours), the Our checklist modal's stage tag, Move Stage (current phase; the option keeps value
   `Onboarding`, labelled "Onboarding / Set up"), and the task drawer's stage option (same).
+- **The Onboarding & Set up box past Onboarding** (`onboardingItemsToShow`): only the steps of an add-on being onboarded now
+  (`service_status = 'onboarding'`, the portal's `getStartedSteps` rule), otherwise hidden. Steps added after a long-running
+  client onboarded (the questionnaire) aren't owed, and used to show as outstanding for clients like 3Sixty.
+- **Stages corrected 2026-10-19** (`supabase/sql/fix_client_stages_2026_10_19.sql`): Anxiety Solutions, Astra, KLH and Midas Media
+  to Optimizing. A direct `current_stage` update fires nothing: `clients` only has an INSERT trigger, and stage tasks come only
+  from Move Stage or the automatic move out of Onboarding.
 - **Not changed:** the database, edge functions, the chat tools, the morning audit and the client summary.
 - **Tests:** `tests/setup-phase.test.mjs`, 21 jsdom checks on the real code, 2 of 2 breakages caught, plus checks that the label is
   never saved and the stage advance still reads the stored stage.

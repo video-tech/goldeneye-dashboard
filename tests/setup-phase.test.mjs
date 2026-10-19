@@ -52,6 +52,7 @@ function world({ progress = [], tasks = [], stage = 'Onboarding' } = {}) {
         function clientAnswersHtml() { return ''; }
         ${code}
         window.displayStages = displayStages;
+        window.__setOb = (entry) => { obServiceMode = true; obApplicable.set('acme', entry); };
     `);
     return w;
 }
@@ -96,6 +97,19 @@ ok(heads.length === 2 && /^Onboarding · what they do · 2 of 2$/.test(heads[0])
 const order = [...d.querySelectorAll('#c-onboarding-list .text-sm.truncate')].map(e => e.textContent);
 ok(order.join('|') === 'Welcome video|About your business|Connect Meta|Final check and test', 'their steps first, then ours, each in order');
 ok(d.getElementById('c-onboarding-summary').innerText === '3 of 4 complete', 'the overall count is unchanged');
+
+// Past Onboarding the box is hidden: steps added after a long-running client onboarded aren't owed
+w = world({ stage: 'Optimizing' });
+w.renderClientOnboarding();
+ok(w.document.getElementById('c-onboarding-box').classList.contains('hidden'), 'an Optimizing client with no add-on onboarding gets no onboarding box');
+w = world({ stage: 'Optimizing' });
+w.__setOb({ services: [], steps: [{ step_id: 'q1', service_status: 'onboarding' }, { step_id: 'a2', service_status: 'onboarding' }, { step_id: 'v1', service_status: 'active' }] });
+w.renderClientOnboarding();
+const addon = [...w.document.querySelectorAll('#c-onboarding-list .text-sm.truncate')].map(e => e.textContent);
+ok(!w.document.getElementById('c-onboarding-box').classList.contains('hidden') && addon.join('|') === 'About your business|Final check and test', 'an add-on being onboarded shows only its own steps');
+w = world({ stage: 'Onboarding' });
+w.renderClientOnboarding();
+ok(!w.document.getElementById('c-onboarding-box').classList.contains('hidden'), 'a client in Onboarding still gets the box');
 
 // Nothing that decides anything uses the label
 const logic = app.split('\n').filter(l => /clientPhase\(|SETUP_PHASE|displayStages/.test(l) && !/^\s*\/\//.test(l));

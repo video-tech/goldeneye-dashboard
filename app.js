@@ -6087,13 +6087,25 @@ window.markOnboardingComplete = async function() {
             return !live.has(item.id);
         }
 
+        function onboardingItemsToShow(clientName) {
+            const items = allOnboardingItems(clientName);
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+            if (!row || (row.current_stage || 'Onboarding') === 'Onboarding') return items;
+            const a = obFor(clientName);
+            if (!a) return [];
+            const live = new Set(a.steps.filter(r => r.service_status === 'onboarding').map(r => r.step_id));
+            return items.filter(i => live.has(i.id));
+        }
+
         function renderClientOnboarding() {
             const box = document.getElementById('c-onboarding-box');
             const list = document.getElementById('c-onboarding-list');
             if (!box || !list) return;
             renderStageProgress();
 
-            const items = cSelectedAccount === "ALL" ? [] : allOnboardingItems(cSelectedAccount);
+            // Past Onboarding, only the steps of an add-on they're onboarding now (the portal's rule, getStartedSteps).
+            // Steps added after a long-running client onboarded (the questionnaire, for one) aren't owed and don't show.
+            const items = cSelectedAccount === "ALL" ? [] : onboardingItemsToShow(cSelectedAccount);
             if (cSelectedAccount === "ALL" || !items.length) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
 

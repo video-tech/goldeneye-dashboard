@@ -4,6 +4,13 @@
     {
       "date": "2026-10-19",
       "area": "Onboarding",
+      "title": "Long-running clients no longer show an onboarding checklist",
+      "what": "The Onboarding & Set up box on the Relationship tab now only shows for clients in onboarding, or for one onboarding an add-on (then only that add-on's steps). Clients like 3Sixty were showing the new questionnaire steps as outstanding even though they onboarded long ago. Anxiety Solutions, Astra, KLH and Midas Media are moved to Optimizing; that change raises no tasks and sends nothing.",
+      "action": "Run supabase/sql/fix_client_stages_2026_10_19.sql"
+    },
+    {
+      "date": "2026-10-19",
+      "area": "Onboarding",
       "title": "Onboarding and Set up show as two steps",
       "what": "A client in onboarding now shows as Onboarding while they still have steps to do, and as Set up once they've finished and the work is ours. You'll see it on the Overview, the Roster (sorted in journey order), the client's stage chip, their portal profile, the Journey bar (now six steps: Onboarding, Set up, Campaign Building and on) and the Onboarding & Set up list, which now has two sections: what they do, then what we do. Only the labels changed: when tasks are raised, when accounts are made and when a client moves to Campaign Building all work as before."
     },
