@@ -49,6 +49,9 @@ function world() {
             { id: 'x1', stage: 'Onboarding', task_title: 'Ads and SEO task', service_keys: ['ads', 'seo'] },
             { id: 'c1', stage: 'Campaign Building', task_title: 'Launch', service_keys: ['ads'] },
         ];
+        var globalOnboardingSteps = [{ title: 'Welcome video', type: 'video', owner: 'client', sort_order: 1, service_keys: [] }, { title: 'Give us Facebook access', type: 'video', owner: 'client', sort_order: 2, service_keys: ['ads'] }, { title: 'Hidden draft', type: 'form', owner: 'client', active: false, sort_order: 3 }, { title: 'Our task', type: 'action', owner: 'agency', sort_order: 4 }, { title: 'Website access', type: 'questions', owner: 'client', sort_order: 5, service_keys: ['seo'], website_statuses: ['existing'] }];
+        const serviceName = (k) => globalServices.find(s => s.key === k)?.name || k;
+        window.switchTemplateView = (v) => { window.__switched = v; };
         function templatesForStage(s) { return stageRows.filter(r => r.stage === s); }
         async function loadStageTemplates() {}
         async function saveRowsByIdPresence(t, rows) { __saved = rows; }
@@ -64,8 +67,27 @@ const setPkg = (w, v) => { w.document.getElementById('tpl-stage-package').value 
 
 let w = world();
 const d = w.document;
-ok([...d.getElementById('tpl-stage-picker').options].map(o => o.text).join('|') === 'Set up (our tasks)|Campaign Building', 'the Onboarding stage is labelled Set up');
-ok(d.getElementById('tpl-stage-picker').value === 'Onboarding', 'the stored stage is still Onboarding');
+ok([...d.getElementById('tpl-stage-picker').options].map(o => o.text).join('|') === 'Onboarding (client steps)|Set up (our tasks)|Campaign Building', 'the picker has Onboarding (client steps), then Set up, then the later stages');
+ok(d.getElementById('tpl-stage-picker').options[1].value === 'Onboarding', 'Set up is still the stored Onboarding stage');
+
+// Onboarding (client steps): the client's live steps, read only, with the package filter
+const clientTitles = () => [...d.querySelectorAll('.tpl-client-step:not(.hidden) span:first-child')].map(e => e.textContent);
+ok(clientTitles().join('|') === 'Welcome video|Give us Facebook access|Website access', 'client steps show in order, without hidden ones or our tasks');
+ok(d.getElementById('btn-save-stage-tpl').classList.contains('hidden') && d.getElementById('btn-add-stage-tpl').classList.contains('hidden'), 'no Add Task or Save on the read-only client view');
+ok(/3 steps the client does/.test(d.getElementById('tpl-stage-status').innerText), 'the status line counts client steps');
+setPkg(w, 'ads');
+ok(clientTitles().join('|') === 'Give us Facebook access', 'the package filter works on client steps too');
+setPkg(w, 'base');
+ok(clientTitles().join('|') === 'Welcome video', 'Base shows the untagged client steps');
+setPkg(w, '');
+d.querySelector('#tpl-stage-tasks-container button').click();
+ok(w.__switched === 'onboarding', 'Edit in Client Onboarding opens that editor');
+await w.saveStageTemplates();
+ok(w.__saved === null && w.__deleted === null, 'Save does nothing on the client view');
+
+d.getElementById('tpl-stage-picker').value = 'Onboarding';
+w.renderStageTemplates();
+ok(!d.getElementById('btn-save-stage-tpl').classList.contains('hidden'), 'Set up brings Add Task and Save back');
 ok([...d.getElementById('tpl-stage-package').options].map(o => o.value).join('|') === '|base|ads|seo', 'packages: All, Base, then the offered services (retired Video left out)');
 ok(shownTitles(w).length === 4 && /4 tasks created once a client finishes their onboarding/.test(d.getElementById('tpl-stage-status').innerText), 'All shows every task');
 

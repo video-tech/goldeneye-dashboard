@@ -4,6 +4,12 @@
     {
       "date": "2026-10-19",
       "area": "Onboarding",
+      "title": "Stage Checklists shows Onboarding and Set up side by side",
+      "what": "The stage picker now starts with Onboarding (client steps), the steps the client does in their portal, followed by Set up (our tasks) and the later stages. The package filter works on both. Client steps are shown to read here; Edit in Client Onboarding opens the editor where their videos, forms and questions are changed."
+    },
+    {
+      "date": "2026-10-19",
+      "area": "Onboarding",
       "title": "Stage Checklists: filter by package, and our onboarding tasks are now called Set up",
       "what": "Templates → Stage Checklists has a package picker next to the stage: All, Base, Ads management or SEO Growth, showing only that package's tasks. Saving with a package picked still keeps every task. Add Task while a package is picked starts the new task tagged with it. The stage picker now says \"Set up (our tasks)\" for our side of onboarding; the client's own steps stay under Client Onboarding. Only the name changed: nothing about when tasks are created moves."
     },

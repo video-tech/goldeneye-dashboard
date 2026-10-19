@@ -12537,8 +12537,10 @@ window.initStageTemplateEditor = function() {
     if (!picker.options.length) {
         // The client's own onboarding steps live in their own editor. "Onboarding" here is OUR setup
         // steps (type Setup step), raised once the client has finished theirs.
-        picker.innerHTML = lifecycleStages
-            .map(s => `<option value="${s}">${stageTemplateLabel(s)}</option>`).join('');
+        // First the client's own onboarding steps (shown here to read, edited in Client Onboarding), then our Set up
+        // tasks, then the later stages
+        picker.innerHTML = `<option value="${CLIENT_ONBOARDING_VIEW}">Onboarding (client steps)</option>`
+            + lifecycleStages.map(s => `<option value="${s}">${stageTemplateLabel(s)}</option>`).join('');
     }
     renderStagePackageOptions();
     renderStageTemplates();
@@ -12547,6 +12549,7 @@ window.initStageTemplateEditor = function() {
 // Our tasks in the Onboarding stage show as "Set up": the client's own steps are their onboarding, the rest is our set up.
 // Only the label changes. The stored stage stays 'Onboarding', which the triggers, GHL account creation and the stage
 // advance all key on.
+const CLIENT_ONBOARDING_VIEW = '__client_onboarding';
 function stageTemplateLabel(stage) { return stage === 'Onboarding' ? 'Set up (our tasks)' : stage; }
 
 // The package filter: All, Base (untagged rows) or one service. It only hides rows. They stay in the editor, so Save
@@ -12563,22 +12566,29 @@ function renderStagePackageOptions() {
 
 function stageRowMatchesPackage(row, pkg) {
     if (!pkg) return true;
-    const keys = [...row.querySelectorAll('.ob-conditions .ob-chip-svc[aria-pressed="true"]')].map(b => b.dataset.key);
+    const keys = row.dataset.services !== undefined
+        ? row.dataset.services.split(',').filter(Boolean)
+        : [...row.querySelectorAll('.ob-conditions .ob-chip-svc[aria-pressed="true"]')].map(b => b.dataset.key);
     return pkg === 'base' ? keys.length === 0 : keys.includes(pkg);
 }
 
 window.applyStagePackageFilter = function() {
     const pkg = document.getElementById('tpl-stage-package')?.value || '';
-    const rows = [...document.querySelectorAll('#tpl-stage-tasks-container .tpl-stage-row')];
+    const rows = [...document.querySelectorAll('#tpl-stage-tasks-container .tpl-stage-row, #tpl-stage-tasks-container .tpl-client-step')];
     let visible = 0;
     rows.forEach(r => { const on = stageRowMatchesPackage(r, pkg); r.classList.toggle('hidden', !on); if (on) visible++; });
     const status = document.getElementById('tpl-stage-status');
     const picker = document.getElementById('tpl-stage-picker');
     if (!status || !picker) return;
+    const pkgName = pkg === 'base' ? 'Base' : (globalServices.find(s => s.key === pkg)?.name || pkg);
+    if (picker.value === CLIENT_ONBOARDING_VIEW) {
+        const all = `${rows.length} step${rows.length === 1 ? '' : 's'} the client does in their portal. Edit them in Client Onboarding.`;
+        status.innerText = pkg ? `Showing ${visible} ${pkgName} step${visible === 1 ? '' : 's'} of ${all}` : all;
+        return;
+    }
     const where = picker.value === 'Onboarding' ? 'once a client finishes their onboarding' : `when a client enters ${picker.value}`;
     if (!rows.length) { status.innerText = `No checklist yet: ${where}, no tasks are created.`; return; }
     const total = `${rows.length} task${rows.length === 1 ? '' : 's'} created ${where}.`;
-    const pkgName = pkg === 'base' ? 'Base' : (globalServices.find(s => s.key === pkg)?.name || pkg);
     status.innerText = pkg ? `Showing ${visible} ${pkgName} task${visible === 1 ? '' : 's'} of ${total}` : total;
 };
 
@@ -12588,11 +12598,31 @@ window.renderStageTemplates = function() {
     if (!container || !picker) return;
 
     renderStagePackageOptions();
-    const rows = templatesForStage(picker.value);
+    const clientView = picker.value === CLIENT_ONBOARDING_VIEW;
+    ['btn-add-stage-tpl', 'btn-save-stage-tpl', 'tpl-stage-headers'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', clientView));
     container.innerHTML = '';
-    rows.forEach(r => addStageTemplateRow(r));
+    if (clientView) renderClientOnboardingSteps(container);
+    else templatesForStage(picker.value).forEach(r => addStageTemplateRow(r));
     applyStagePackageFilter();
 };
+
+// The client's own onboarding steps, read only: they are edited in Client Onboarding (videos, forms and questions need
+// that editor). Hidden steps are left out, as clients never see them.
+function renderClientOnboardingSteps(container) {
+    const typeLabel = { video: 'Video', form: 'Form', action: 'Action', team: 'Team', questions: 'Questions' };
+    const steps = globalOnboardingSteps.filter(s => s.owner !== 'agency' && s.active !== false)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    container.innerHTML = steps.map(s => {
+        const keys = Array.isArray(s.service_keys) ? s.service_keys : [];
+        const who = keys.length ? keys.map(serviceName).join(', ') : 'Everyone (Base)';
+        const web = (s.website_statuses || []).map(k => WEBSITE_STATUS_LABELS[k] || k).join(', ');
+        return `<div class="tpl-client-step bg-black/20 border border-white/5 rounded-xl px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1" data-services="${escapeAttr(keys.join(','))}">
+            <span class="text-sm text-white flex-1 min-w-[12rem]">${escapeAttr(stripSlashEscapes(s.title))}</span>
+            <span class="text-[11px] text-gray-400">${typeLabel[s.type] || escapeAttr(s.type || '')}</span>
+            <span class="text-[11px] text-gray-500">${escapeAttr(who)}${web ? ' · Website: ' + escapeAttr(web) : ''}</span>
+        </div>`;
+    }).join('') + `<button type="button" onclick="switchTemplateView('onboarding')" class="text-xs text-blue-400 hover:text-blue-300 mt-1">Edit in Client Onboarding <i class="fa-solid fa-arrow-right ml-1"></i></button>`;
+}
 
 window.addStageTemplateRow = function(tpl) {
     const container = document.getElementById('tpl-stage-tasks-container');
@@ -12649,6 +12679,7 @@ window.saveStageTemplates = async function() {
     const picker = document.getElementById('tpl-stage-picker');
     const btn = document.getElementById('btn-save-stage-tpl');
     const stage = picker.value;
+    if (stage === CLIENT_ONBOARDING_VIEW) return; // read only here
 
     const rows = [...document.querySelectorAll('#tpl-stage-tasks-container .tpl-stage-row')];
     const entered = rows.map((r, i) => ({
