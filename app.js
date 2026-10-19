@@ -5426,6 +5426,12 @@ function filterAdsData() {
                     const stageClient = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
                     const currentStage = stageClient ? (stageClient.current_stage || 'Onboarding') : null;
 
+                    const pkgBtn = document.getElementById('c-packages-btn');
+                    if (pkgBtn) {
+                        const showPkg = currentUserRole === 'admin' && stageClient && cSelectedAccount !== 'ALL';
+                        pkgBtn.classList.toggle('hidden', !showPkg);
+                        if (showPkg) pkgBtn.innerHTML = `<i class="fa-solid fa-box-open mr-1.5"></i>${escapeAttr(packagesSummary(stageClient.name))}`;
+                    }
                     if (stageChip) {
                         stageChip.innerText = currentStage ? clientPhase(stageClient) : '';
                         stageChip.classList.toggle('hidden', !currentStage || cSelectedAccount === 'ALL');
@@ -12580,6 +12586,136 @@ async function applyClientServiceChanges(clientName, plan) {
     }
 }
 
+// ---- Packages editor (the Roster profile and the Accounts page, 2026-10-19) ----
+// The same client_services rows Edit Client writes, with two things Edit Client can't do:
+//   * an add-on newly ticked can be marked "already running" (status active), so a long-running client's packages can be
+//     corrected without starting that add-on's onboarding steps in their portal;
+//   * an add-on they have can be set to onboarding, active or paused.
+// Writes client_services only. No trigger is on that table, so nothing is sent; an add-on set to "onboarding" shows its
+// steps in the client's portal, exactly as ticking it in Edit Client does.
+let packagesModalClient = null;
+const PACKAGE_LIVE = ['onboarding', 'active', 'paused'];
+
+function packagesSummary(clientName) {
+    const names = globalClientServices.filter(cs => cs.client_name === clientName && PACKAGE_LIVE.includes(cs.status))
+        .map(cs => serviceName(cs.service_key) + (cs.status === 'active' ? '' : ` (${cs.status})`));
+    return names.length ? 'Base + ' + names.join(', ') : 'Base only';
+}
+
+window.openPackagesModal = function(clientName) {
+    if (currentUserRole !== 'admin' || !clientName || clientName === 'ALL') return;
+    const modal = document.getElementById('packages-modal');
+    if (!modal) return;
+    packagesModalClient = clientName;
+    document.getElementById('packages-modal-client').textContent = clientName;
+    const msg = document.getElementById('packages-modal-msg');
+    msg.classList.add('hidden');
+    const mine = globalClientServices.filter(cs => cs.client_name === clientName);
+    const statusOf = key => mine.find(cs => cs.service_key === key)?.status;
+    const shown = globalServices.filter(s => s.active !== false || PACKAGE_LIVE.includes(statusOf(s.key)))
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const sel = (key, val, label) => `<option value="${val}"${statusOf(key) === val ? ' selected' : ''}>${label}</option>`;
+    document.getElementById('packages-modal-rows').innerHTML = shown.length ? shown.map(s => {
+        const st = statusOf(s.key), has = PACKAGE_LIVE.includes(st);
+        return `<div class="pkg-row bg-black/20 border border-white/5 rounded-xl px-3 py-2" data-key="${escapeAttr(s.key)}" data-was="${escapeAttr(st || '')}">
+            <label class="flex items-center gap-2 text-sm text-white cursor-pointer">
+                <input type="checkbox" class="row-checkbox pkg-box" ${has ? 'checked' : ''} onchange="packagesRowChanged(this)">
+                ${escapeAttr(s.name)}
+                ${s.active === false ? '<span class="text-[10px] text-gray-500">(not offered any more)</span>' : ''}
+            </label>
+            <div class="pkg-status mt-2 ${has ? '' : 'hidden'}">
+                <select class="glass-input !py-1 !text-xs !w-auto pkg-status-select">
+                    ${sel(s.key, 'active', 'Active')}${sel(s.key, 'onboarding', 'Onboarding')}${sel(s.key, 'paused', 'Paused')}
+                </select>
+            </div>
+            <div class="pkg-new mt-2 hidden text-xs text-gray-300 space-y-1">
+                <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="pkg-new-${escapeAttr(s.key)}" value="active" checked> Already running: just record it, no onboarding</label>
+                <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="pkg-new-${escapeAttr(s.key)}" value="onboarding"> New: start its onboarding steps in their portal</label>
+            </div>
+        </div>`;
+    }).join('') : '<p class="text-xs text-gray-500">No add-ons set up yet. Add them in Templates → Services.</p>';
+    modal.style.display = 'flex';
+};
+
+window.packagesRowChanged = function(box) {
+    const row = box.closest('.pkg-row');
+    const had = PACKAGE_LIVE.includes(row.dataset.was);
+    row.querySelector('.pkg-status').classList.toggle('hidden', !(box.checked && had));
+    row.querySelector('.pkg-new').classList.toggle('hidden', !(box.checked && !had));
+};
+
+window.closePackagesModal = function() {
+    const modal = document.getElementById('packages-modal');
+    if (modal) modal.style.display = 'none';
+    packagesModalClient = null;
+};
+
+// What saving would do, worked out from the rows: { insert: [{key,status}], set: [{key,status}], end: [key] }
+function planPackagesModal() {
+    const plan = { insert: [], set: [], end: [] };
+    document.querySelectorAll('#packages-modal-rows .pkg-row').forEach(row => {
+        const key = row.dataset.key, was = row.dataset.was, had = PACKAGE_LIVE.includes(was);
+        const ticked = row.querySelector('.pkg-box').checked;
+        if (ticked && had) {
+            const status = row.querySelector('.pkg-status-select').value;
+            if (status !== was) plan.set.push({ key, status });
+        } else if (ticked && !had) {
+            const status = row.querySelector('.pkg-new input[type="radio"]:checked')?.value === 'onboarding' ? 'onboarding' : 'active';
+            if (was) plan.set.push({ key, status }); else plan.insert.push({ key, status });
+        } else if (!ticked && had) {
+            plan.end.push(key);
+        }
+    });
+    return plan;
+}
+
+window.savePackagesModal = async function() {
+    if (currentUserRole !== 'admin' || !packagesModalClient) return;
+    const client = packagesModalClient;
+    const plan = planPackagesModal();
+    const msg = document.getElementById('packages-modal-msg');
+    const btn = document.getElementById('packages-modal-save');
+    if (!plan.insert.length && !plan.set.length && !plan.end.length) { closePackagesModal(); return; }
+    if (plan.end.length && !confirm(`End ${plan.end.map(serviceName).join(', ')} for ${client}? Their history is kept.`)) return;
+    btn.disabled = true; btn.innerText = 'Saving...';
+    const now = new Date().toISOString();
+    const stamp = status => status === 'active' ? { onboarded_at: now } : status === 'onboarding' ? { started_at: now, onboarded_at: null } : {};
+    try {
+        if (plan.insert.length) {
+            const { error } = await supabaseClient.from('client_services')
+                .insert(plan.insert.map(p => ({ client_name: client, service_key: p.key, status: p.status, ...stamp(p.status) })));
+            if (error) throw error;
+        }
+        for (const p of plan.set) {
+            const { error } = await supabaseClient.from('client_services')
+                .update({ status: p.status, ...stamp(p.status) }).eq('client_name', client).eq('service_key', p.key);
+            if (error) throw error;
+        }
+        if (plan.end.length) {
+            const { error } = await supabaseClient.from('client_services')
+                .update({ status: 'ended' }).eq('client_name', client).in('service_key', plan.end);
+            if (error) throw error;
+        }
+        const { data, error: rErr } = await supabaseClient.from('client_services').select('*');
+        if (!rErr && data) globalClientServices = data;
+        try { await loadOnboardingApplicability([client]); } catch (e) { console.warn('Could not reload onboarding steps:', e); }
+        closePackagesModal();
+        if (typeof renderRosterDetail === 'function' && document.getElementById('roster-detail')) renderRosterDetail();
+        // The Accounts page, when it's showing this client: the packages button and the onboarding box (which depends on
+        // which add-ons are onboarding). Redrawn directly; re-selecting the account would reset the chat.
+        if (cSelectedAccount === client) {
+            const pkgBtn = document.getElementById('c-packages-btn');
+            if (pkgBtn) pkgBtn.innerHTML = `<i class="fa-solid fa-box-open mr-1.5"></i>${escapeAttr(packagesSummary(client))}`;
+            if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+        }
+    } catch (e) {
+        msg.textContent = 'Could not save: ' + (e.message || e);
+        msg.className = 'text-xs mt-3 text-red-400';
+    } finally {
+        btn.disabled = false; btn.innerText = 'Save packages';
+    }
+};
+
 // ---- Stage checklist editor (Templates → Stage Checklists) ----
 window.initStageTemplateEditor = function() {
     const picker = document.getElementById('tpl-stage-picker');
@@ -14837,7 +14973,7 @@ function rosterProfileHtml(c) {
             ['Target CPL', c.target_cpl ? `<span class="ge-num">${rosterMoney(c.target_cpl)}</span>` : '—'],
         ])}</div>
 
-        <div class="rd-section">${rosterSectionHead('services.', null)}<div class="flex flex-wrap gap-1.5">${svcHtml}</div></div>
+        <div class="rd-section"><div class="flex justify-between items-center mb-4"><h3 class="ge-title" style="font-size:15px;">services.</h3><button type="button" class="ge-label" style="color:var(--gold); cursor:pointer;" data-client="${escapeAttr(c.name)}" onclick="openPackagesModal(this.dataset.client)">Edit</button></div><div class="flex flex-wrap gap-1.5">${svcHtml}</div></div>
 
         <div class="rd-section">${rosterSectionHead('connections.', null)}${rosterKv([
             ['Meta ad account', set(c.ad_account_id)],
