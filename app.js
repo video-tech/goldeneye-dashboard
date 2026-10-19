@@ -12538,9 +12538,48 @@ window.initStageTemplateEditor = function() {
         // The client's own onboarding steps live in their own editor. "Onboarding" here is OUR setup
         // steps (type Setup step), raised once the client has finished theirs.
         picker.innerHTML = lifecycleStages
-            .map(s => `<option value="${s}">${s === 'Onboarding' ? 'Onboarding (our setup steps)' : s}</option>`).join('');
+            .map(s => `<option value="${s}">${stageTemplateLabel(s)}</option>`).join('');
     }
+    renderStagePackageOptions();
     renderStageTemplates();
+};
+
+// Our tasks in the Onboarding stage show as "Set up": the client's own steps are their onboarding, the rest is our set up.
+// Only the label changes. The stored stage stays 'Onboarding', which the triggers, GHL account creation and the stage
+// advance all key on.
+function stageTemplateLabel(stage) { return stage === 'Onboarding' ? 'Set up (our tasks)' : stage; }
+
+// The package filter: All, Base (untagged rows) or one service. It only hides rows. They stay in the editor, so Save
+// still keeps every row of the stage, filtered out or not.
+function renderStagePackageOptions() {
+    const sel = document.getElementById('tpl-stage-package');
+    if (!sel) return;
+    const was = sel.value;
+    const shown = globalServices.filter(s => s.active !== false).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    sel.innerHTML = '<option value="">All packages</option><option value="base">Base (everyone)</option>'
+        + shown.map(s => `<option value="${escapeAttr(s.key)}">${escapeAttr(s.name)}</option>`).join('');
+    sel.value = [...sel.options].some(o => o.value === was) ? was : '';
+}
+
+function stageRowMatchesPackage(row, pkg) {
+    if (!pkg) return true;
+    const keys = [...row.querySelectorAll('.ob-conditions .ob-chip-svc[aria-pressed="true"]')].map(b => b.dataset.key);
+    return pkg === 'base' ? keys.length === 0 : keys.includes(pkg);
+}
+
+window.applyStagePackageFilter = function() {
+    const pkg = document.getElementById('tpl-stage-package')?.value || '';
+    const rows = [...document.querySelectorAll('#tpl-stage-tasks-container .tpl-stage-row')];
+    let visible = 0;
+    rows.forEach(r => { const on = stageRowMatchesPackage(r, pkg); r.classList.toggle('hidden', !on); if (on) visible++; });
+    const status = document.getElementById('tpl-stage-status');
+    const picker = document.getElementById('tpl-stage-picker');
+    if (!status || !picker) return;
+    const where = picker.value === 'Onboarding' ? 'once a client finishes their onboarding' : `when a client enters ${picker.value}`;
+    if (!rows.length) { status.innerText = `No checklist yet: ${where}, no tasks are created.`; return; }
+    const total = `${rows.length} task${rows.length === 1 ? '' : 's'} created ${where}.`;
+    const pkgName = pkg === 'base' ? 'Base' : (globalServices.find(s => s.key === pkg)?.name || pkg);
+    status.innerText = pkg ? `Showing ${visible} ${pkgName} task${visible === 1 ? '' : 's'} of ${total}` : total;
 };
 
 window.renderStageTemplates = function() {
@@ -12548,21 +12587,20 @@ window.renderStageTemplates = function() {
     const picker = document.getElementById('tpl-stage-picker');
     if (!container || !picker) return;
 
+    renderStagePackageOptions();
     const rows = templatesForStage(picker.value);
     container.innerHTML = '';
     rows.forEach(r => addStageTemplateRow(r));
-
-    const status = document.getElementById('tpl-stage-status');
-    if (status) {
-        status.innerText = rows.length
-            ? `${rows.length} task${rows.length === 1 ? '' : 's'} created when a client enters ${picker.value}.`
-            : `No checklist yet — moving a client into ${picker.value} won't create any tasks.`;
-    }
+    applyStagePackageFilter();
 };
 
 window.addStageTemplateRow = function(tpl) {
     const container = document.getElementById('tpl-stage-tasks-container');
     if (!container) return;
+    // Add Task while one package is showing: the new task starts tagged with it, so it doesn't vanish behind the filter
+    const isNew = !tpl;
+    const pkg = document.getElementById('tpl-stage-package')?.value || '';
+    if (isNew && pkg && pkg !== 'base') tpl = { service_keys: [pkg] };
 
     const types = ['Checklist', 'Setup step', 'Milestone', 'One-off', 'Recurring'];
     const row = document.createElement('div');
@@ -12584,6 +12622,7 @@ window.addStageTemplateRow = function(tpl) {
         ${conditionEditorHtml(tpl)}`;
     container.appendChild(row);
     updateConditionSummary(row.querySelector('.ob-conditions'));
+    if (isNew) applyStagePackageFilter();
     if (!autoCheckCatalog) loadAutoCheckCatalog().then(refreshAutoCheckSelects);
 };
 

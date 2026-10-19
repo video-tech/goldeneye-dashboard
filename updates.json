@@ -3,6 +3,12 @@
   "updates": [
     {
       "date": "2026-10-19",
+      "area": "Onboarding",
+      "title": "Stage Checklists: filter by package, and our onboarding tasks are now called Set up",
+      "what": "Templates → Stage Checklists has a package picker next to the stage: All, Base, Ads management or SEO Growth, showing only that package's tasks. Saving with a package picked still keeps every task. Add Task while a package is picked starts the new task tagged with it. The stage picker now says \"Set up (our tasks)\" for our side of onboarding; the client's own steps stay under Client Onboarding. Only the name changed: nothing about when tasks are created moves."
+    },
+    {
+      "date": "2026-10-19",
       "area": "Reports",
       "title": "No more stock closing lines in reports",
       "what": "Sentences that could go in any report, like \"Let's keep an eye on those changes moving forward\", \"we'll continue to monitor performance\" or \"stay tuned\", are now deleted from the email note and the report before you see them. The writer is also told it's our agency reporting to the client, and that if something needs watching it should say exactly what we'll check and when."
