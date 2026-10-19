@@ -6436,6 +6436,44 @@ window.renderClientReports = async function() {
     modal.style.display = 'flex';
 }
 
+// Stock sentences the report model kept ending on ("Let's keep an eye on those changes moving forward"), however the
+// prompt asked. They say nothing about this client's week, so any sentence matching one is deleted from the email note
+// and the report's paragraphs. A sentence is the unit: the rest of the paragraph stays.
+const REPORT_FILLER = [
+    /\bkeep(ing)? ((an?|a close|close) )?(eye|eyes|watch|tabs) on\b/i,
+    /\bkeep(ing)? (a close )?watch\b/i,
+    /\b(continue|continuing) to (closely )?(monitor|track|watch|analy[sz]e|optimi[sz]e|evaluate|assess|review)\b/i,
+    /\bmonitor(ing)? (performance|results|things|this|these|it|the (results|numbers|performance|changes))( closely)?\b/i,
+    /\b(adjust|refine|tweak)(ing)? (our|the) (strategy|approach|plan)( as needed| accordingly)?\b(?! to\b)/i,
+    /\bsee how (it|this|that|these|those|things|everything)( all)? (plays?|pans?|shakes?|goes|go|works?) out\b/i,
+    /\bsee how (it|this|that|these|those|things) (goes|go|perform|performs|develops?)\b/i,
+    /\bstay tuned\b/i,
+    /\bkeep you (posted|updated|in the loop)\b/i,
+    /\bmore to come\b/i,
+    /\b(exciting|great) things ahead\b/i,
+];
+function stripFillerSentences(text) {
+    return String(text ?? '').split('\n').map(line => {
+        const parts = line.split(/(?<=[.!?])\s+/);
+        const kept = parts.filter(s => !REPORT_FILLER.some(re => re.test(s)));
+        return kept.length === parts.length ? line : kept.join(' ');
+    }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+// The email note, plus every paragraph of the report's sections (the 15px explanation divs). Tiles and headings untouched.
+function stripReportFiller(parsed) {
+    if (!parsed || typeof parsed !== 'object') return parsed;
+    const out = { ...parsed };
+    if (typeof out.email_summary === 'string') out.email_summary = stripFillerSentences(out.email_summary);
+    if (typeof out.html_report === 'string') {
+        out.html_report = out.html_report.replace(/(<div style="font-size: 15px; color: #515154; line-height: 1\.6;">)([\s\S]*?)(<\/div>)/g,
+            (m, open, body, close) => /<[a-z]/i.test(body) ? m : open + stripFillerSentences(body) + close);
+    }
+    if (Array.isArray(out.working_on)) {
+        out.working_on = out.working_on.map(i => i && typeof i === 'object' ? { ...i, details: stripFillerSentences(i.details) } : i);
+    }
+    return out;
+}
+
         async function generateReport() {
             const n = document.getElementById('rpt-improving').value.trim();
             const b = document.getElementById('rpt-gen-btn');
@@ -6758,8 +6796,13 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             NO GENERIC FILLER — this is what makes reports blur together week to week:
             Phrases like "we'll continue to analyze trends," "adjust our strategy accordingly,"
-            "monitor performance closely," or any other sentence that could be pasted into any
-            report regardless of what happened are banned outright. A closing priority or action
+            "monitor performance closely," "let's keep an eye on those changes moving forward,"
+            "we'll see how it plays out," "stay tuned," or any other sentence that could be pasted
+            into any report regardless of what happened are banned outright. Any sentence like that
+            is deleted automatically after you write it, so it is wasted. Remember who is writing:
+            this is our agency reporting to the client, so never "let's" about work that is ours to do.
+            If something genuinely needs watching, say exactly what we will check and when ("we'll
+            check the new carousel's cost per lead on Thursday"). A closing priority or action
             step must name something SPECIFIC: an actual open task from the list above (explained
             for the client), an actual metric that moved and what will
             be done about it, or a specific manual note. If none of those give you something
@@ -6845,7 +6888,8 @@ Treat this period as a fresh starting point. State every number plainly as where
                 // it's model output going into an email.
                 const workingOnBlock = (headline, details, last) =>
                     `<div style="padding: 20px 0;${last ? '' : ' border-bottom: 1px solid #e8e8ed;'}"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">${escapeAttr(headline)}</div>${details ? `<div style="font-size: 15px; color: #515154; line-height: 1.6;">${escapeAttr(details)}</div>` : ''}</div>`;
-                const finalizeReport = (parsed) => {
+                const finalizeReport = (rawParsed) => {
+                    const parsed = stripReportFiller(rawParsed);
                     const items = (Array.isArray(parsed?.working_on) ? parsed.working_on : [])
                         .filter(i => i && String(i.headline || '').trim());
                     const blocks = items.length

@@ -2,6 +2,12 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-19",
+      "area": "Reports",
+      "title": "No more stock closing lines in reports",
+      "what": "Sentences that could go in any report, like \"Let's keep an eye on those changes moving forward\", \"we'll continue to monitor performance\" or \"stay tuned\", are now deleted from the email note and the report before you see them. The writer is also told it's our agency reporting to the client, and that if something needs watching it should say exactly what we'll check and when."
+    },
+    {
       "date": "2026-10-16",
       "area": "Onboarding",
       "title": "The onboarding-complete text only goes to clients found in our GHL",
