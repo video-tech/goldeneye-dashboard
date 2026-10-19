@@ -871,6 +871,7 @@
                             </div>
                             <span id="c-stage-chip" class="hidden ge-label" style="color:var(--gold); border:1px solid var(--goldLine); padding:5px 10px; border-radius:2px; text-transform:none;"></span>
                             <span id="c-summary-line" class="hidden text-xs" style="color:var(--t2);"></span>
+                            <button type="button" id="c-packages-btn" class="hidden ge-label" style="color:var(--t2); border:1px solid var(--line); padding:5px 10px; border-radius:2px; text-transform:none; background:transparent; cursor:pointer;" onclick="openPackagesModal(cSelectedAccount)" title="Change this client's packages"></button>
 
                             <div id="global-health-pill" class="glass-pill hidden cursor-pointer" onclick="switchClientView('health')" title="Relationship health — click for detail">
                                 <i id="global-health-icon" class="fa-solid fa-heart-pulse mr-2" style="color:var(--t3);"></i>
@@ -3107,7 +3108,7 @@
             </div>
         </div>
 
-        <!-- PACKAGES MODAL (Edit on a Roster profile's services). Admin only. -->
+        <!-- PACKAGES MODAL (the Roster profile and the Accounts page). Admin only. -->
         <div id="packages-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;" onclick="if (event.target === this) closePackagesModal()">
             <div class="glass p-6 w-full max-w-lg mx-4">
                 <div class="flex justify-between items-center mb-1">

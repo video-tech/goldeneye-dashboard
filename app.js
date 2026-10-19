@@ -5426,6 +5426,12 @@ function filterAdsData() {
                     const stageClient = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
                     const currentStage = stageClient ? (stageClient.current_stage || 'Onboarding') : null;
 
+                    const pkgBtn = document.getElementById('c-packages-btn');
+                    if (pkgBtn) {
+                        const showPkg = currentUserRole === 'admin' && stageClient && cSelectedAccount !== 'ALL';
+                        pkgBtn.classList.toggle('hidden', !showPkg);
+                        if (showPkg) pkgBtn.innerHTML = `<i class="fa-solid fa-box-open mr-1.5"></i>${escapeAttr(packagesSummary(stageClient.name))}`;
+                    }
                     if (stageChip) {
                         stageChip.innerText = currentStage ? clientPhase(stageClient) : '';
                         stageChip.classList.toggle('hidden', !currentStage || cSelectedAccount === 'ALL');
@@ -12580,7 +12586,7 @@ async function applyClientServiceChanges(clientName, plan) {
     }
 }
 
-// ---- Packages editor (Edit Client and the Roster profile, 2026-10-19) ----
+// ---- Packages editor (Edit Client, the Roster profile and the Accounts page, 2026-10-19) ----
 // The client_services rows, with two things the old checkboxes couldn't do:
 //   * an add-on newly ticked can be marked "already running" (status active), so a long-running client's packages can be
 //     corrected without starting that add-on's onboarding steps in their portal;
@@ -12589,6 +12595,13 @@ async function applyClientServiceChanges(clientName, plan) {
 // steps in the client's portal, exactly as ticking it in Edit Client does.
 let packagesModalClient = null;
 const PACKAGE_LIVE = ['onboarding', 'active', 'paused'];
+
+// "Base + Ads management, SEO Growth (onboarding)": the Accounts page's packages button
+function packagesSummary(clientName) {
+    const names = globalClientServices.filter(cs => cs.client_name === clientName && PACKAGE_LIVE.includes(cs.status))
+        .map(cs => serviceName(cs.service_key) + (cs.status === 'active' ? '' : ` (${cs.status})`));
+    return names.length ? 'Base + ' + names.join(', ') : 'Base only';
+}
 
 // One row per offered add-on (plus a retired one the client still has). prefix keeps the radio groups of the two places
 // these rows appear (Edit Client and the Roster's pop-up) apart.
@@ -12670,7 +12683,7 @@ async function applyPackagePlan(client, plan) {
     }
 }
 
-// The Roster's pop-up (Edit on a profile's services section). Admins only.
+// The pop-up: Edit on a Roster profile's services section, and the packages button on the Accounts page. Admins only.
 window.openPackagesModal = function(clientName) {
     if (currentUserRole !== 'admin' || !clientName || clientName === 'ALL') return;
     const modal = document.getElementById('packages-modal');
@@ -12704,6 +12717,13 @@ window.savePackagesModal = async function() {
         try { await loadOnboardingApplicability([client]); } catch (e) { console.warn('Could not reload onboarding steps:', e); }
         closePackagesModal();
         if (typeof renderRosterDetail === 'function' && document.getElementById('roster-detail')) renderRosterDetail();
+        // The Accounts page, when it's showing this client: the packages button and the onboarding box (which depends on
+        // which add-ons are onboarding). Redrawn directly; re-selecting the account would reset the chat.
+        if (cSelectedAccount === client) {
+            const pkgBtn = document.getElementById('c-packages-btn');
+            if (pkgBtn) pkgBtn.innerHTML = `<i class="fa-solid fa-box-open mr-1.5"></i>${escapeAttr(packagesSummary(client))}`;
+            if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+        }
     } catch (e) {
         msg.textContent = 'Could not save: ' + (e.message || e);
         msg.className = 'text-xs mt-3 text-red-400';
