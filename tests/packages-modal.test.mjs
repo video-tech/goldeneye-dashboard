@@ -19,10 +19,9 @@ const cut = (from, to) => { const a = app.indexOf(from), b = app.indexOf(to, a +
 const code = cut('let packagesModalClient = null;', '// ---- Stage checklist editor');
 const ma = body.indexOf('<div id="packages-modal"'), mb = body.indexOf('<!-- EDIT CLIENT MODAL -->', ma);
 const modal = body.slice(ma, mb);
-const btnLine = body.slice(body.indexOf('<button type="button" id="c-packages-btn"'), body.indexOf('</button>', body.indexOf('id="c-packages-btn"')) + 9);
 
 function world({ role = 'admin', confirmAnswer = true, rows } = {}) {
-    const dom = new JSDOM(`<!doctype html><body><style>.hidden{display:none}</style>${modal}${btnLine}<div id="roster-detail"></div></body>`, { runScripts: 'dangerously' });
+    const dom = new JSDOM(`<!doctype html><body><style>.hidden{display:none}</style>${modal}<div id="edit-client-services"></div><div id="roster-detail"></div></body>`, { runScripts: 'dangerously' });
     const w = dom.window;
     w.__calls = []; w.__redraws = []; w.__confirmAnswer = confirmAnswer;
     w.__rows = rows || [
@@ -66,7 +65,6 @@ ok([...d.querySelectorAll('.pkg-row')].map(r => r.dataset.key).join('|') === 'ad
 ok(rowOf(w, 'ads').querySelector('.pkg-box').checked && rowOf(w, 'ads').querySelector('.pkg-status-select').value === 'active', 'Ads shows ticked, Active');
 ok(rowOf(w, 'seo').querySelector('.pkg-status-select').value === 'onboarding', 'SEO shows Onboarding');
 ok(!rowOf(w, 'gbp').querySelector('.pkg-box').checked && rowOf(w, 'gbp').querySelector('.pkg-new').classList.contains('hidden'), 'an add-on they don\'t have is unticked');
-ok(w.packagesSummary('Acme') === 'Base + Ads management, SEO Growth (onboarding)' && w.packagesSummary('Nobody') === 'Base only', 'the summary reads Base + add-ons');
 
 // Nothing changed: nothing written
 await w.savePackagesModal();
@@ -79,8 +77,7 @@ ok(!rowOf(w, 'gbp').querySelector('.pkg-new').classList.contains('hidden'), 'tic
 await w.savePackagesModal();
 ok(w.__calls.length === 1 && w.__calls[0].op === 'insert' && w.__calls[0].rows[0].status === 'active' && w.__calls[0].rows[0].service_key === 'gbp' && w.__calls[0].rows[0].onboarded_at,
     'a new tick defaults to Active (recorded, no onboarding)');
-ok(w.__redraws.includes('applicability:Acme') && w.__redraws.includes('roster') && w.__redraws.includes('onboarding'), 'reloads the client\'s steps and redraws the Roster and Accounts views');
-ok(w.document.getElementById('c-packages-btn').innerHTML.includes('GBP boost'), 'the Accounts button shows the new package');
+ok(w.__redraws.includes('applicability:Acme') && w.__redraws.includes('roster'), 'reloads the client\'s steps and redraws the Roster profile');
 
 // "New" starts onboarding
 w = world(); w.openPackagesModal('Acme');
@@ -120,8 +117,19 @@ ok(w.__calls.length === 0, 'a non-admin can\'t save');
 
 // Wiring
 ok(/onclick="openPackagesModal\(this\.dataset\.client\)">Edit<\/button>/.test(app), 'the Roster profile has an Edit link on services');
-ok(/const showPkg = currentUserRole === 'admin' && stageClient && cSelectedAccount !== 'ALL';/.test(app), 'the Accounts button shows for admins only');
-ok(!/cSelectAccount\(client\)/.test(code), 'saving never re-selects the account (that would reset the chat)');
+ok(!/c-packages-btn/.test(app + body), 'no packages button on the Accounts page');
+
+// Edit Client uses the same rows, with its own radio groups
+w = world();
+w.document.getElementById('edit-client-services').innerHTML = w.packageRowsHtml('Acme', 'edit');
+w.openPackagesModal('Acme');
+const eb = w.document.querySelector('#edit-client-services .pkg-row[data-key="gbp"] .pkg-box'); eb.checked = true; w.packagesRowChanged(eb);
+w.document.querySelector('#edit-client-services .pkg-row[data-key="gbp"] input[value="onboarding"]').checked = true;
+ok(w.document.querySelector('#packages-modal-rows .pkg-row[data-key="gbp"] input[value="active"]').checked, 'Edit Client\'s choice doesn\'t move the pop-up\'s radio (separate groups)');
+const ep = w.planPackageRows(w.document.getElementById('edit-client-services'));
+ok(ep.insert.length === 1 && ep.insert[0].status === 'onboarding' && !ep.set.length && !ep.end.length, 'Edit Client plans from its own rows');
+ok(/editPkgs\.innerHTML = packageRowsHtml\(c\.name, 'edit'\)/.test(app) && /const servicePlan = planPackageRows\(document\.getElementById\('edit-client-services'\)\);/.test(app) && /await applyPackagePlan\(newName, servicePlan\);/.test(app),
+    'Edit Client renders, plans and saves with the new rows');
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

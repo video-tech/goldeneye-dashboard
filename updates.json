@@ -4,8 +4,8 @@
     {
       "date": "2026-10-19",
       "area": "Onboarding",
-      "title": "Change a client's packages from the Roster or their account page",
-      "what": "The Roster profile's services section now has Edit, and a client's Accounts page shows their packages (\"Base + Ads management\") as a button. Both open the same Packages window. Tick an add-on a client has had for a while and choose Already running: it's recorded without starting its onboarding steps. Choose New to start them, as before. Add-ons they have can be set to Active, Onboarding or Paused, and unticking one ends it after a confirm. Nothing is sent or raised when you save."
+      "title": "Change a client's packages in Edit Client or on the Roster",
+      "what": "Edit Client's add-ons and a new Edit on the Roster profile's services section now work the same way. Tick an add-on a client has had for a while and choose Already running: it's recorded without starting its onboarding steps. Choose New to start them, as before. Add-ons they have can be set to Active, Onboarding or Paused, and unticking one ends it after a confirm. Nothing is sent or raised when you save."
     },
     {
       "date": "2026-10-19",

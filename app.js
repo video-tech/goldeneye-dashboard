@@ -5426,12 +5426,6 @@ function filterAdsData() {
                     const stageClient = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
                     const currentStage = stageClient ? (stageClient.current_stage || 'Onboarding') : null;
 
-                    const pkgBtn = document.getElementById('c-packages-btn');
-                    if (pkgBtn) {
-                        const showPkg = currentUserRole === 'admin' && stageClient && cSelectedAccount !== 'ALL';
-                        pkgBtn.classList.toggle('hidden', !showPkg);
-                        if (showPkg) pkgBtn.innerHTML = `<i class="fa-solid fa-box-open mr-1.5"></i>${escapeAttr(packagesSummary(stageClient.name))}`;
-                    }
                     if (stageChip) {
                         stageChip.innerText = currentStage ? clientPhase(stageClient) : '';
                         stageChip.classList.toggle('hidden', !currentStage || cSelectedAccount === 'ALL');
@@ -12586,8 +12580,8 @@ async function applyClientServiceChanges(clientName, plan) {
     }
 }
 
-// ---- Packages editor (the Roster profile and the Accounts page, 2026-10-19) ----
-// The same client_services rows Edit Client writes, with two things Edit Client can't do:
+// ---- Packages editor (Edit Client and the Roster profile, 2026-10-19) ----
+// The client_services rows, with two things the old checkboxes couldn't do:
 //   * an add-on newly ticked can be marked "already running" (status active), so a long-running client's packages can be
 //     corrected without starting that add-on's onboarding steps in their portal;
 //   * an add-on they have can be set to onboarding, active or paused.
@@ -12596,27 +12590,18 @@ async function applyClientServiceChanges(clientName, plan) {
 let packagesModalClient = null;
 const PACKAGE_LIVE = ['onboarding', 'active', 'paused'];
 
-function packagesSummary(clientName) {
-    const names = globalClientServices.filter(cs => cs.client_name === clientName && PACKAGE_LIVE.includes(cs.status))
-        .map(cs => serviceName(cs.service_key) + (cs.status === 'active' ? '' : ` (${cs.status})`));
-    return names.length ? 'Base + ' + names.join(', ') : 'Base only';
-}
-
-window.openPackagesModal = function(clientName) {
-    if (currentUserRole !== 'admin' || !clientName || clientName === 'ALL') return;
-    const modal = document.getElementById('packages-modal');
-    if (!modal) return;
-    packagesModalClient = clientName;
-    document.getElementById('packages-modal-client').textContent = clientName;
-    const msg = document.getElementById('packages-modal-msg');
-    msg.classList.add('hidden');
-    const mine = globalClientServices.filter(cs => cs.client_name === clientName);
+// One row per offered add-on (plus a retired one the client still has). prefix keeps the radio groups of the two places
+// these rows appear (Edit Client and the Roster's pop-up) apart.
+function packageRowsHtml(clientName, prefix) {
+    const mine = clientName ? globalClientServices.filter(cs => cs.client_name === clientName) : [];
     const statusOf = key => mine.find(cs => cs.service_key === key)?.status;
     const shown = globalServices.filter(s => s.active !== false || PACKAGE_LIVE.includes(statusOf(s.key)))
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    if (!shown.length) return '<p class="text-xs text-gray-500">No add-ons set up yet. Add them in Templates → Services.</p>';
     const sel = (key, val, label) => `<option value="${val}"${statusOf(key) === val ? ' selected' : ''}>${label}</option>`;
-    document.getElementById('packages-modal-rows').innerHTML = shown.length ? shown.map(s => {
+    return shown.map(s => {
         const st = statusOf(s.key), has = PACKAGE_LIVE.includes(st);
+        const group = `pkg-new-${escapeAttr(prefix)}-${escapeAttr(s.key)}`;
         return `<div class="pkg-row bg-black/20 border border-white/5 rounded-xl px-3 py-2" data-key="${escapeAttr(s.key)}" data-was="${escapeAttr(st || '')}">
             <label class="flex items-center gap-2 text-sm text-white cursor-pointer">
                 <input type="checkbox" class="row-checkbox pkg-box" ${has ? 'checked' : ''} onchange="packagesRowChanged(this)">
@@ -12629,13 +12614,12 @@ window.openPackagesModal = function(clientName) {
                 </select>
             </div>
             <div class="pkg-new mt-2 hidden text-xs text-gray-300 space-y-1">
-                <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="pkg-new-${escapeAttr(s.key)}" value="active" checked> Already running: just record it, no onboarding</label>
-                <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="pkg-new-${escapeAttr(s.key)}" value="onboarding"> New: start its onboarding steps in their portal</label>
+                <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="${group}" value="active" checked> Already running: just record it, no onboarding</label>
+                <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="${group}" value="onboarding"> New: start its onboarding steps in their portal</label>
             </div>
         </div>`;
-    }).join('') : '<p class="text-xs text-gray-500">No add-ons set up yet. Add them in Templates → Services.</p>';
-    modal.style.display = 'flex';
-};
+    }).join('');
+}
 
 window.packagesRowChanged = function(box) {
     const row = box.closest('.pkg-row');
@@ -12644,16 +12628,10 @@ window.packagesRowChanged = function(box) {
     row.querySelector('.pkg-new').classList.toggle('hidden', !(box.checked && !had));
 };
 
-window.closePackagesModal = function() {
-    const modal = document.getElementById('packages-modal');
-    if (modal) modal.style.display = 'none';
-    packagesModalClient = null;
-};
-
-// What saving would do, worked out from the rows: { insert: [{key,status}], set: [{key,status}], end: [key] }
-function planPackagesModal() {
+// What saving the rows in this container would do: { insert: [{key,status}], set: [{key,status}], end: [key] }
+function planPackageRows(container) {
     const plan = { insert: [], set: [], end: [] };
-    document.querySelectorAll('#packages-modal-rows .pkg-row').forEach(row => {
+    (container ? container.querySelectorAll('.pkg-row') : []).forEach(row => {
         const key = row.dataset.key, was = row.dataset.was, had = PACKAGE_LIVE.includes(was);
         const ticked = row.querySelector('.pkg-box').checked;
         if (ticked && had) {
@@ -12668,46 +12646,64 @@ function planPackagesModal() {
     });
     return plan;
 }
+const packagePlanIsEmpty = (plan) => !plan.insert.length && !plan.set.length && !plan.end.length;
+
+// Writes client_services only. No trigger is on that table, so nothing is sent; an add-on set to "onboarding" shows its
+// steps in the client's portal.
+async function applyPackagePlan(client, plan) {
+    const now = new Date().toISOString();
+    const stamp = status => status === 'active' ? { onboarded_at: now } : status === 'onboarding' ? { started_at: now, onboarded_at: null } : {};
+    if (plan.insert.length) {
+        const { error } = await supabaseClient.from('client_services')
+            .insert(plan.insert.map(p => ({ client_name: client, service_key: p.key, status: p.status, ...stamp(p.status) })));
+        if (error) throw error;
+    }
+    for (const p of plan.set) {
+        const { error } = await supabaseClient.from('client_services')
+            .update({ status: p.status, ...stamp(p.status) }).eq('client_name', client).eq('service_key', p.key);
+        if (error) throw error;
+    }
+    if (plan.end.length) {
+        const { error } = await supabaseClient.from('client_services')
+            .update({ status: 'ended' }).eq('client_name', client).in('service_key', plan.end);
+        if (error) throw error;
+    }
+}
+
+// The Roster's pop-up (Edit on a profile's services section). Admins only.
+window.openPackagesModal = function(clientName) {
+    if (currentUserRole !== 'admin' || !clientName || clientName === 'ALL') return;
+    const modal = document.getElementById('packages-modal');
+    if (!modal) return;
+    packagesModalClient = clientName;
+    document.getElementById('packages-modal-client').textContent = clientName;
+    document.getElementById('packages-modal-msg').classList.add('hidden');
+    document.getElementById('packages-modal-rows').innerHTML = packageRowsHtml(clientName, 'roster');
+    modal.style.display = 'flex';
+};
+
+window.closePackagesModal = function() {
+    const modal = document.getElementById('packages-modal');
+    if (modal) modal.style.display = 'none';
+    packagesModalClient = null;
+};
 
 window.savePackagesModal = async function() {
     if (currentUserRole !== 'admin' || !packagesModalClient) return;
     const client = packagesModalClient;
-    const plan = planPackagesModal();
+    const plan = planPackageRows(document.getElementById('packages-modal-rows'));
     const msg = document.getElementById('packages-modal-msg');
     const btn = document.getElementById('packages-modal-save');
-    if (!plan.insert.length && !plan.set.length && !plan.end.length) { closePackagesModal(); return; }
+    if (packagePlanIsEmpty(plan)) { closePackagesModal(); return; }
     if (plan.end.length && !confirm(`End ${plan.end.map(serviceName).join(', ')} for ${client}? Their history is kept.`)) return;
     btn.disabled = true; btn.innerText = 'Saving...';
-    const now = new Date().toISOString();
-    const stamp = status => status === 'active' ? { onboarded_at: now } : status === 'onboarding' ? { started_at: now, onboarded_at: null } : {};
     try {
-        if (plan.insert.length) {
-            const { error } = await supabaseClient.from('client_services')
-                .insert(plan.insert.map(p => ({ client_name: client, service_key: p.key, status: p.status, ...stamp(p.status) })));
-            if (error) throw error;
-        }
-        for (const p of plan.set) {
-            const { error } = await supabaseClient.from('client_services')
-                .update({ status: p.status, ...stamp(p.status) }).eq('client_name', client).eq('service_key', p.key);
-            if (error) throw error;
-        }
-        if (plan.end.length) {
-            const { error } = await supabaseClient.from('client_services')
-                .update({ status: 'ended' }).eq('client_name', client).in('service_key', plan.end);
-            if (error) throw error;
-        }
+        await applyPackagePlan(client, plan);
         const { data, error: rErr } = await supabaseClient.from('client_services').select('*');
         if (!rErr && data) globalClientServices = data;
         try { await loadOnboardingApplicability([client]); } catch (e) { console.warn('Could not reload onboarding steps:', e); }
         closePackagesModal();
         if (typeof renderRosterDetail === 'function' && document.getElementById('roster-detail')) renderRosterDetail();
-        // The Accounts page, when it's showing this client: the packages button and the onboarding box (which depends on
-        // which add-ons are onboarding). Redrawn directly; re-selecting the account would reset the chat.
-        if (cSelectedAccount === client) {
-            const pkgBtn = document.getElementById('c-packages-btn');
-            if (pkgBtn) pkgBtn.innerHTML = `<i class="fa-solid fa-box-open mr-1.5"></i>${escapeAttr(packagesSummary(client))}`;
-            if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
-        }
     } catch (e) {
         msg.textContent = 'Could not save: ' + (e.message || e);
         msg.className = 'text-xs mt-3 text-red-400';
@@ -13997,7 +13993,8 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-contact-name').value = c.contact_name || '';
     document.getElementById('edit-client-industry').value     = c.industry || '';
     document.getElementById('edit-client-email').value        = c.client_email || '';
-    renderClientServicePicker('edit-client-services', c.name);
+    const editPkgs = document.getElementById('edit-client-services');
+    if (editPkgs) editPkgs.innerHTML = packageRowsHtml(c.name, 'edit');
     document.getElementById('edit-client-website-status').value = c.website_status || '';
     renderEditClientPeopleSummary(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
@@ -15146,7 +15143,7 @@ window.saveClientEdits = async function(e) {
     const renaming = normalize(newName) !== normalize(originalName) || newName !== originalName;
     if (renaming && !confirm(`Rename "${originalName}" to "${newName}"?\n\nTheir tasks, health record, check-ins, reports and team access will all be moved across.`)) return;
 
-    const servicePlan = planClientServiceChanges(originalName, 'edit-client-services');
+    const servicePlan = planPackageRows(document.getElementById('edit-client-services'));
     if (servicePlan.end.length && !confirm(`End ${servicePlan.end.map(serviceName).join(', ')} for ${newName}?\n\nIts onboarding steps stop applying. Their history and completed steps are kept.`)) return;
 
     const original = btn.innerHTML;
@@ -15225,7 +15222,7 @@ window.saveClientEdits = async function(e) {
         // After the rename, so add-ons are filed under the client's current name.
         // rename_client() has already moved client_services, so the old rows sit under newName.
         // People are no longer edited here (see openRosterFromEditClient).
-        await applyClientServiceChanges(newName, servicePlan);
+        await applyPackagePlan(newName, servicePlan);
 
         document.getElementById('edit-client-modal').style.display = 'none';
 

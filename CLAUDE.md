@@ -510,12 +510,13 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
     `onboarding`, an unticked one becomes `ended` (after a confirm), and re-ticking an ended one
     restarts it.
   - **Tests:** 26 jsdom checks.
-  - **Packages pop-up (2026-10-19):** **Edit** on the Roster profile's services section and the packages button beside the stage
-    chip on the Accounts page (admins only) open `#packages-modal` (`openPackagesModal` / `savePackagesModal` in app.js). Unlike
-    Edit Client, a newly ticked add-on defaults to **Already running** (saved `active`, no onboarding), with **New** (saved
-    `onboarding`) as the choice that starts its steps; an add-on they have gets an Active / Onboarding / Paused select; unticking
-    ends it after a confirm. Writes `client_services` only, which has no trigger, so nothing is sent. `tests/packages-modal.test.mjs`,
-    21 jsdom checks, 2 of 2 breakages caught.
+  - **Package controls (2026-10-19):** **Edit Client** and **Edit** on the Roster profile's services section (`#packages-modal`,
+    admins only) share `packageRowsHtml` / `planPackageRows` / `applyPackagePlan` in app.js. A newly ticked add-on defaults to
+    **Already running** (saved `active`, no onboarding), with **New** (saved `onboarding`) as the choice that starts its steps; an
+    add-on they have gets an Active / Onboarding / Paused select; unticking ends it after a confirm. Add Client keeps the plain
+    checkboxes (a new client's add-ons start onboarding). Writes `client_services` only, which has no trigger, so nothing is sent.
+    Nothing about packages is on the Accounts page or in the client portal. `tests/packages-modal.test.mjs`, 21 jsdom checks,
+    3 of 3 breakages caught.
 - **Switched over 2026-09-15:** Get Started, agency tasks, stage checklists and `trg_onboarding_handoff`
   all use the tags now.
   - **One source:** app.js loads `onboarding_steps_for_clients` and `service_onboarding_status_for_clients`
