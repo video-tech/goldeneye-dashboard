@@ -24,6 +24,12 @@
     },
     {
       "date": "2026-10-19",
+      "area": "SEO",
+      "title": "Organic Leads on the SEO tab now counts organic leads only",
+      "what": "The Organic Leads tile on a client's SEO tab was counting every website lead, including paid ones. PANDEN showed 22 for last week; all 22 were Facebook and Instagram ad leads landing on their go.pandenconstruction.com quiz. It now counts only leads from Google search, the same rule the client's Organic Search tab already used."
+    },
+    {
+      "date": "2026-10-19",
       "area": "Onboarding",
       "title": "Change a client's packages from Edit Client, the Roster or their Accounts page",
       "what": "Edit Client's add-ons, a new Edit on the Roster profile's services section, and a packages button on the client's Accounts page (\"Base + Ads management\") all work the same way. Tick an add-on a client has had for a while and choose Already running: it's recorded without starting its onboarding steps. Choose New to start them, as before. Add-ons they have can be set to Active, Onboarding or Paused, and unticking one ends it after a confirm. Nothing is sent or raised when you save."

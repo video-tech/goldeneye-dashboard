@@ -7763,8 +7763,11 @@ async function buildChatSeoBriefing(clientName) {
      };
  }
 
+ // Organic only: lead_sources holds every website lead, and a client's paid funnel on their own subdomain (PANDEN's
+ // go.pandenconstruction.com) lands there too, tagged paid. Counting them all read 22 "organic" leads for a week with none.
+ // Same rule as seo_client_overview and the case study (source = 'organic').
  function seoLeadsInWindow(leads, s, e) {
-     return leads.filter(l => { const d = new Date(l.created_at); return d >= s && d <= e; }).length;
+     return leads.filter(l => { if (l.source !== 'organic') return false; const d = new Date(l.created_at); return d >= s && d <= e; }).length;
  }
 
  // opts.invert: true means a DECREASE is the improvement — position, where a smaller
