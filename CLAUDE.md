@@ -2391,7 +2391,16 @@ admin-read, in `rename_client.sql`).
   client (in the background), and **Check now** (admins).
 - **Where it shows:** a warning on the client's Onboarding Progress when they aren't found exactly once, and a line at the top of
   their Roster profile (found or not). Clients never see it.
-- **Tests:** 16 node checks on the function (3 of 3 breakages caught), 13 jsdom checks on the notices and Check now.
+- **It gates the onboarding-complete webhook (2026-10-16, `supabase/sql/onboarding_handoff_contact_gate.sql`).**
+  `trg_onboarding_handoff` no longer posts to Make #4. It posts `{"mode":"handoff", client, client_email, completed_at,
+  services}` to ghl-contact-check with the Vault secret as `x-cron-secret`. The function checks the client and sends Make
+  the same body (plus `secret` from `MAKE_WEBHOOK_SECRET`) **only when found exactly once**. Otherwise it sends nothing and raises
+  one task, "Onboarding-complete text not sent: check them in our GHL" (hidden from the client, with the reason). That covers a missing
+  key and a client with no email too. Only the cron secret may ask for a handoff, not an admin. **`verify_jwt = false`** for this
+  function (config.toml) so Postgres can call it without a user JWT; the function checks every caller itself.
+  `supabase/triggers/onboarding_handoff.sql` carries the same function. **Deploy before running the SQL.**
+- **Tests:** 38 node checks on the function (5 breakages caught), 11 PGlite checks on the trigger (1 caught), 13 jsdom checks on
+  the notices and Check now.
 
 ## Tasks page filters (2026-10-02)
 

@@ -31,7 +31,8 @@ export async function checkOne(deps: Deps, client: { name: string; client_email?
     const email = primaryEmail(client.client_email);
     const base = { client_name: client.name, email: email || null, contact_id: null as string | null, matches: 0, error: null as string | null };
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ...base, status: "no_email" };
-    const token = deps.env.GHL_MIDAS_TOKEN!.trim(), loc = deps.env.GHL_MIDAS_LOCATION_ID!.trim();
+    const token = deps.env.GHL_MIDAS_TOKEN?.trim() ?? "", loc = deps.env.GHL_MIDAS_LOCATION_ID?.trim() ?? "";
+    if (!token || !loc) return { ...base, status: "error", error: "GHL_MIDAS_TOKEN or GHL_MIDAS_LOCATION_ID is not set" };
     try {
         const j = await ghlRead(deps, `/contacts/?locationId=${encodeURIComponent(loc)}&query=${encodeURIComponent(email)}&limit=100`, token);
         const exact = (Array.isArray(j?.contacts) ? j.contacts : []).filter((c: any) => String(c?.email ?? "").trim().toLowerCase() === email);
@@ -40,6 +41,54 @@ export async function checkOne(deps: Deps, client: { name: string; client_email?
     } catch (e) {
         return { ...base, status: "error", error: errText(e).slice(0, 300) };
     }
+}
+
+// ---- The onboarding-complete handoff (trg_onboarding_handoff sends it here instead of straight to Make) ----
+// When a client finishes onboarding, the database asks this function to send Make scenario #4's webhook (the tag that
+// texts them "what happens next"). It is sent only when the client is a contact in our Midas GHL exactly once; otherwise
+// nothing is sent and a task says why, so a missing contact is never silent.
+export const ONBOARDING_HOOK = "https://hook.us2.make.com/hucrpp6hm43ps165n7wxut8v9rn3dksu";
+export const NOT_SENT_TITLE = "Onboarding-complete text not sent: check them in our GHL";
+
+const NOT_SENT_WHY: Record<string, string> = {
+    missing: "They aren't a contact in our Midas GHL with this email.",
+    duplicate: "More than one contact in our Midas GHL has this email.",
+    no_email: "Their client record has no usable email.",
+    error: "The check couldn't reach GHL.",
+};
+
+export async function handoff(deps: Deps, body: any) {
+    const client = String(body?.client ?? "");
+    if (!client) return { sent: false, error: "no client" };
+    const result = await checkOne(deps, { name: client, client_email: body?.client_email });
+    const nowIso = (deps.now ?? (() => new Date()))().toISOString();
+    await deps.db.from("client_ghl_contacts").upsert([{ ...result, checked_at: nowIso }], { onConflict: "client_name" });
+
+    if (result.status === "found") {
+        const res = await deps.fetch(ONBOARDING_HOOK, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                event: "onboarding_complete", client, client_email: body?.client_email ?? result.email,
+                completed_at: body?.completed_at ?? null, services: body?.services ?? [], secret: deps.env.MAKE_WEBHOOK_SECRET,
+            }),
+        });
+        console.log(`ghl-contact-check handoff: ${client} found in our GHL, webhook sent (${res.status})`);
+        return { sent: res.ok, status: result.status, make_status: res.status };
+    }
+
+    // Not sent: a task for the team, once per client, hidden from the client
+    const { data: existing } = await deps.db.from("tasks").select("id").eq("client", client).eq("title", NOT_SENT_TITLE);
+    if (!existing?.length) {
+        await deps.db.from("tasks").insert([{
+            client, title: NOT_SENT_TITLE, type: "One-off", stage: "Onboarding", status: "Not Started", assignee: "Account Manager",
+            client_visible: false, p: 4, u: 4, e: 1, score: 84, due: nowIso.slice(0, 10), updated_at: nowIso,
+            notes: `${client} finished onboarding, but the "what happens next" text wasn't sent. ${NOT_SENT_WHY[result.status] ?? ""}` +
+                `${result.email ? ` Email checked: ${result.email}.` : ""} Fix it in GHL (or the email in Edit Client), then add the onboarding-complete tag to their contact in our GHL to send the text, or text them by hand.`,
+        }]);
+    }
+    console.log(`ghl-contact-check handoff: ${client} ${result.status}, webhook NOT sent`);
+    return { sent: false, status: result.status };
 }
 
 // Check now runs in the dashboard's browser, on another origin, so the browser first asks (OPTIONS) whether it may call.
@@ -63,10 +112,15 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
         const caller = await adminCheck(deps.db, req);
         if (!caller.ok) { console.warn("ghl-contact-check REFUSED:", caller.reason); return reply({ error: caller.reason }, 403); }
     }
+    const body = await req.json().catch(() => ({}));
+    // Before the key check on purpose: with the key missing the handoff still raises its "not sent" task
+    if (body?.mode === "handoff") {
+        if (!cronCheck(req, deps.env.MAKE_WEBHOOK_SECRET)) return reply({ error: '"handoff" is sent by the database only.' }, 403);
+        return reply(await handoff(deps, body));
+    }
     if (!deps.env.GHL_MIDAS_TOKEN?.trim() || !deps.env.GHL_MIDAS_LOCATION_ID?.trim()) {
         return reply({ error: "Set GHL_MIDAS_TOKEN (our Midas GHL account's read-only Contacts key) and GHL_MIDAS_LOCATION_ID first." }, 500);
     }
-    const body = await req.json().catch(() => ({}));
     const one = typeof body?.client === "string" ? body.client : null;
 
     let q = deps.db.from("clients").select("name, client_email, status, current_stage");

@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { handle, primaryEmail } = await import(pathToFileURL(path.join(here, 'handler.ts')).href);
+const { handle, primaryEmail, ONBOARDING_HOOK, NOT_SENT_TITLE } = await import(pathToFileURL(path.join(here, 'handler.ts')).href);
 
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) pass++; else { fail++; console.log('FAIL:', n); } };
@@ -18,7 +18,9 @@ function fakeDb(clients) {
         eq(c, v) { this.f.push((r) => r[c] === v); return this; }
         maybeSingle() { this.one = true; return this; }
         upsert(rows, opts) { this.op = 'upsert'; this.rows = rows; this.key = opts.onConflict; return this; }
+        insert(rows) { this.op = 'insert'; this.rows = rows; return this; }
         then(res) {
+            if (this.op === 'insert') { (tables[this.t] ??= []).push(...this.rows); return res({ data: null, error: null }); }
             if (this.op === 'upsert') {
                 for (const r of this.rows) { const i = tables[this.t].findIndex((x) => x[this.key] === r[this.key]); if (i >= 0) tables[this.t][i] = r; else tables[this.t].push(r); }
                 return res({ data: null, error: null });
@@ -113,6 +115,54 @@ ok(primaryEmail(' Owner@Found.com , second@found.com') === 'owner@found.com' && 
     const res = await handle(new Request('https://x', { method: 'POST', headers: { Origin: 'https://video-tech.github.io', 'x-cron-secret': CRON }, body: '{}' }),
         { env: { GHL_MIDAS_TOKEN: TOKEN, GHL_MIDAS_LOCATION_ID: LOC, MAKE_WEBHOOK_SECRET: CRON }, db: fakeDb([]), fetch: fakeGhl([]).f });
     ok(res.headers.get('Access-Control-Allow-Origin') === 'https://video-tech.github.io', 'answers carry the permission header too, or the browser hides them');
+}
+
+// ---- the onboarding-complete handoff: the webhook goes to Make only when the client is found exactly once ----
+async function handoffWorld(contactsList, envOver = {}, makeStatus = 200) {
+    const db = fakeDb([]); db.tables.tasks = [];
+    const g = fakeGhl(contactsList);
+    const make = [];
+    const f = async (url, init) => {
+        if (url === ONBOARDING_HOOK) { make.push(JSON.parse(init.body)); return new Response('Accepted', { status: makeStatus }); }
+        return g.f(url, init);
+    };
+    const run = async (body, headers = { 'x-cron-secret': CRON }) => {
+        const res = await handle(new Request('https://x', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }),
+            { env: { GHL_MIDAS_TOKEN: TOKEN, GHL_MIDAS_LOCATION_ID: LOC, MAKE_WEBHOOK_SECRET: CRON, ...envOver }, db, fetch: f, now: () => new Date('2026-10-16T22:00:00Z') });
+        return { status: res.status, body: await res.json() };
+    };
+    return { db, make, run };
+}
+const H = (client, email) => ({ mode: 'handoff', client, client_email: email, completed_at: '2026-10-16T21:59:00Z', services: ['ads', 'seo'] });
+{
+    const w = await handoffWorld(contacts);
+    const r = await w.run(H('Found Co', 'owner@found.com'));
+    ok(r.body.sent === true && w.make.length === 1, 'a client found once in our GHL: the webhook goes to Make');
+    const m = w.make[0];
+    ok(m.event === 'onboarding_complete' && m.client === 'Found Co' && m.client_email === 'owner@found.com' && m.secret === CRON
+        && m.completed_at === '2026-10-16T21:59:00Z' && JSON.stringify(m.services) === '["ads","seo"]', "Make gets the same fields the trigger used to send, with the secret its filter checks");
+    ok(!w.db.tables.tasks.length && w.db.tables.client_ghl_contacts[0].status === 'found', 'no "not sent" task, and the check result is recorded');
+}
+for (const [label, client, email] of [['missing', 'Missing Co', 'nobody@missing.com'], ['duplicate', 'Dup Co', 'dup@dup.com'], ['no_email', 'No Email Co', ''], ['near miss', 'Near Co', 'pat@near.com']]) {
+    const w = await handoffWorld(contacts);
+    const r = await w.run(H(client, email));
+    ok(r.body.sent === false && w.make.length === 0, `${label}: nothing is sent to Make`);
+    const task = w.db.tables.tasks[0];
+    ok(task && task.title === NOT_SENT_TITLE && task.client === client && task.client_visible === false && /wasn't sent/.test(task.notes),
+        `${label}: a task tells the team, hidden from the client`);
+    await w.run(H(client, email));
+    ok(w.db.tables.tasks.length === 1, `${label}: a repeat raises no second task`);
+}
+{
+    const w = await handoffWorld(contacts, { GHL_MIDAS_TOKEN: '' });
+    const r = await w.run(H('Found Co', 'owner@found.com'));
+    ok(r.status === 200 && r.body.sent === false && !w.make.length && w.db.tables.tasks.length === 1 && /couldn't reach GHL/.test(w.db.tables.tasks[0].notes),
+        'with the GHL key missing nothing is sent, and the task still appears');
+}
+{
+    const w = await handoffWorld(contacts);
+    ok((await w.run(H('Found Co', 'owner@found.com'), { Authorization: 'Bearer admin-jwt' })).status === 403 && !w.make.length, 'only the database can ask for a handoff, not even an admin');
+    ok((await w.run(H('Found Co', 'owner@found.com'), { 'x-cron-secret': 'wrong' })).status === 403 && !w.make.length, 'a wrong secret is refused');
 }
 
 console.log(`${pass} passed, ${fail} failed`);

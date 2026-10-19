@@ -429,3 +429,9 @@ verify_jwt = false
 # our own agency (GHL_COMPANY_ID) is stored.
 [functions.app-oauth]
 verify_jwt = false
+
+# ghl-contact-check: the onboarding trigger calls it from Postgres (pg_net) with x-cron-secret and no user JWT, to check
+# the client is in our Midas GHL before sending the onboarding-complete webhook. The function checks every caller itself
+# (cron secret, or a signed-in admin through _shared/admin-auth.ts), so the gateway's JWT check is off for it.
+[functions.ghl-contact-check]
+verify_jwt = false

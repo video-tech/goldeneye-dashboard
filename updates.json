@@ -4,6 +4,13 @@
     {
       "date": "2026-10-16",
       "area": "Onboarding",
+      "title": "The onboarding-complete text only goes to clients found in our GHL",
+      "what": "When a client finishes onboarding, Golden Eye first checks they are a contact in our Midas GHL exactly once, and only then sends the tag that texts them. If they are missing, in GHL twice, or have no email, nothing is sent and a task \"Onboarding-complete text not sent\" tells the team why, instead of it failing silently.",
+      "action": "Run supabase/sql/onboarding_handoff_contact_gate.sql"
+    },
+    {
+      "date": "2026-10-16",
+      "area": "Onboarding",
       "title": "Golden Eye checks each client is in our GHL",
       "what": "The onboarding-complete text only reaches a client who is a contact in our Midas GHL with the same email. Golden Eye now checks that every morning and right after you add a client. If a client is missing, or in GHL twice, their Onboarding Progress shows a warning, and their Roster profile says either way, with a Check now button.",
       "action": "Create a read-only Contacts key in our Midas GHL and set it as GHL_MIDAS_TOKEN (with GHL_MIDAS_LOCATION_ID), then run supabase/sql/ghl_contact_check.sql, rename_client.sql and supabase/functions/ghl-contact-check/schedule.sql"
