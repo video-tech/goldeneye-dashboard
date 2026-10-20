@@ -30,6 +30,8 @@ function world({ contacts = [], missingColumns = false } = {}) {
     w.__missing = missingColumns;
     w.eval(`
         var currentActiveClient = 'Acme Decks', currentUserName = 'Pat', clientEmail = 'pat@acme.com';
+        // A Base client (SEO-only clients get no login box: tests/seo-only-package.test.mjs)
+        function clientIsSeoOnly() { return false; }
         var globalContactsData = ${JSON.stringify(contacts)};
         function isCheckinContact(c) { return c.checkin_texts !== false; }
         async function obCompleteStep(id) { window.__completed = id; }

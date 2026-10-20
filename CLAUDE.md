@@ -558,6 +558,32 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
   - **UI:** a lightning bolt marks self-closing tasks in the client's onboarding list.
   - **Tests:** 19 PGlite checks.
 
+**SEO only: a package with no Base (built 2026-10-20, `supabase/sql/seo_only_package.sql`).** Two packages:
+**Base + add-ons** (`clients.base_package` null or `yes`, the default, exactly what every client had before) and
+**SEO only** (`base_package = 'no'`): no GHL account, no texting, no free website, no automations.
+- **It's a client fact, so the one rule still decides.** `base_package` is in `onboarding_fact_defaults()` (unset = `yes`) and
+  `onboarding_client_facts()`. Every GHL, texting or free-site step is tagged `{"base_package": ["yes"]}`: the client steps Quick
+  start, Registering your texting number, Texting and your service area and Your new website; our tasks Connect their GHL, Register
+  their texting number, Build their website, Turn on automations, Final check and test, and Build the lead send. **Their setup steps
+  (`stage_templates`) are tagged too**, because steps are raised separately from their group's task: an untagged one would reach an
+  SEO-only client and hold up the move out of Onboarding.
+- **"Your service area"** (`{"base_package": ["no"]}`) is the three service-area questions (`c_area`, `c_radius`, `c_exclude`) copied
+  from "Texting and your service area", so SEO-only clients answer them without the texting ones. Base clients never see it.
+- **No organic lead tracking for SEO only.** Website leads reach Golden Eye only through a webhook in the client's own GHL
+  (`ghl-lead-webhook`), so the "Leads —" SEO setup step is tagged Base and their Leads from Google tile stays empty.
+- **ghl-account refuses them** ("SEO only: no GHL account"), in the sweep and in an admin retry. Its clients query is
+  `select("*")` so it works before the SQL. **Deploy it with the SQL**, and set nobody to SEO only until both are done.
+- **Set by an admin only:** the Package select in Add Client and Edit Client, which require SEO Growth ticked. Clients can't change it:
+  `set_client_onboarding_facts()` ignores the key and only admins write `clients`. Before the SQL, a Base save retries without the
+  column and an SEO-only save is refused with the file to run, never saved as Base. The Roster profile shows the package.
+- **Order:** app.js first. The Templates editor saves only the tags it has chips for (`readConditions`), so a Templates save with an
+  app.js that has no Package chips would strip every Base tag. Then the SQL, then deploy ghl-account.
+- **Portal:** `clientIsSeoOnly()`. The portal reads `base_package` in its own query (naming it in the main `clients` select would
+  empty `portalClientRows` before the SQL). SEO-only clients get no "Give them a login" box on the team step.
+- **Tests:** `supabase/sql/seo_only_package.test.mjs` runs the real service_onboarding, onboarding_facts and facts-fix SQL, then
+  this file, in PGlite: Base + SEO and Base only get exactly the steps they got before, SEO only gets none of the Base ones, re-running
+  changes nothing. 22 checks, 4 of 4 breakages caught. `tests/seo-only-package.test.mjs` (jsdom), 18 checks, 3 of 3 caught; ghl-account 3 more.
+
 **Questions steps (built 2026-09-15)** are a step type answered inside Golden Eye rather than an
 embedded GHL form, for forms nothing in GHL uses. The SEO intake is one. Schema is in
 `supabase/sql/onboarding_questions.sql`.

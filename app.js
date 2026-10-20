@@ -744,6 +744,12 @@
             // If RLS won't let a client read their own row this stays empty and the email
             // prefill falls back to the address they signed in with, as it did before.
             portalClientRows = results[9].status === 'fulfilled' ? (results[9].value.data || []) : [];
+            // Its own query: naming base_package in the one above would empty portalClientRows until
+            // seo_only_package.sql has run. A failure here just means everyone is Base.
+            try {
+                const { data: pkgRows } = await supabaseClient.from('clients').select('name, base_package').in('name', allowedClients);
+                (pkgRows || []).forEach(p => portalClientRows.filter(r => r.name === p.name).forEach(r => { r.base_package = p.base_package; }));
+            } catch (e) { console.warn('Package not loaded:', e); }
 
             // client_name is matched here rather than in the query: the column holds
             // free text and reports are saved with whatever name was selected, so an
@@ -1354,6 +1360,8 @@ window.submitPortalRequest = async function() {
 // user when it fills their new account. A login needs an email, so the box is ticked only when there's an address to use.
 function obTeamRowHtml(stepId, contact, isOwner = false) {
     const login = contact ? contact.ghl_login !== false : true;
+    // SEO only: there's no GHL account to log in to
+    const offerLogin = !clientIsSeoOnly(currentActiveClient);
     return `<div class="ob-team-row flex flex-wrap gap-2 items-center"${isOwner ? ' data-owner="1"' : ''}>
         ${isOwner ? '<span class="text-xs font-bold text-amber-400 w-full">You (the owner)</span>' : ''}
         <input type="text" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-name" placeholder="${isOwner ? 'Your name' : 'Name'}"
@@ -1362,9 +1370,9 @@ function obTeamRowHtml(stepId, contact, isOwner = false) {
                value="${escapeAttr(stripSlashEscapes(contact?.phone))}">
         <input type="email" class="glass-input !py-2 flex-1 min-w-[160px] ob-team-email" placeholder="Email"
                value="${escapeAttr(stripSlashEscapes(contact?.email))}">
-        <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer whitespace-nowrap" title="They get their own login to your CRM and the phone app, where new leads come in">
+        ${offerLogin ? `<label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer whitespace-nowrap" title="They get their own login to your CRM and the phone app, where new leads come in">
             <input type="checkbox" class="row-checkbox ob-team-login" ${login ? 'checked' : ''}> Give them a login
-        </label>
+        </label>` : ''}
         ${isOwner ? '' : `<button type="button" onclick="this.closest('.ob-team-row').remove()"
                 class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
             <i class="fa-solid fa-xmark"></i>
@@ -1424,6 +1432,7 @@ window.obSaveTeam = async function(stepId, justMe) {
             contact_name: r.querySelector('.ob-team-name').value.trim(),
             phone: r.querySelector('.ob-team-phone').value.trim(),
             email: (r.querySelector('.ob-team-email')?.value || '').trim().toLowerCase(),
+            // No box (SEO only) = no login
             ghl_login: !!r.querySelector('.ob-team-login')?.checked
         }));
     const ownerP = people.find(p => p.owner);
@@ -2146,6 +2155,13 @@ window.renderGetStarted = function() {
 function obAnswersFor(clientName, stepId) {
     const want = normalize(clientName);
     return globalOnboardingAnswers.find(a => normalize(a.client_name) === want && a.step_id === stepId) || null;
+}
+
+// SEO only (clients.base_package = 'no', seo_only_package.sql): no GHL account, so nothing GHL is offered.
+function clientIsSeoOnly(clientName) {
+    const want = normalize(clientName || '');
+    const row = portalClientRows.find(c => normalize(c.name) === want) || globalClientsData.find(c => normalize(c.name) === want);
+    return row?.base_package === 'no';
 }
 
 function obClientWebsiteStatus(clientName) {
@@ -4246,7 +4262,7 @@ window.submitClientRequest = async function() {
     else if (page === 'clients') { document.getElementById('page-clients').classList.remove('hidden'); setTimeout(() => initClientsPage(), 50); }
     else if (page === 'sales') { if(salesPage) salesPage.classList.remove('hidden'); setTimeout(() => { if(typeof renderSalesBoard === 'function') renderSalesBoard(); if(typeof initSalesSortable === 'function') initSalesSortable(); }, 50); }
     else if (page === 'templates') { if(tplPage) tplPage.classList.remove('hidden'); }
-    else if (page === 'settings') { if(setPage) setPage.classList.remove('hidden'); setTimeout(() => { if(typeof initSettingsPage === 'function') initSettingsPage(); }, 50); }
+    else if (page === 'settings') { if(setPage) setPage.classList.remove('hidden'); setTimeout(() => { if(typeof switchSettingsView === 'function') switchSettingsView('users'); }, 50); }  // Users is the default tab, so load it now rather than on a click
     else if (page === 'creatives') { if(crPage) crPage.classList.remove('hidden'); setTimeout(() => { if(typeof renderAdminCreatives === 'function') renderAdminCreatives(); }, 50); } 
     
     // 👇 NEW LINES ADDED HERE: Trigger the audits page to show up 👇
@@ -12253,7 +12269,10 @@ const WEBSITE_STATUS_LABELS = {
 // for the page and "No CRM" for the CRM, so a tag on the other value never reaches someone who wasn't asked.
 const FACT_LABELS = {
     facebook_page: { label: 'Facebook page', values: { yes: 'Has one', no: 'Needs one', unsure: 'Not sure' } },
-    crm_choice: { label: 'CRM', values: { no: 'No CRM', yes: 'Wants leads sent to one' } }
+    crm_choice: { label: 'CRM', values: { no: 'No CRM', yes: 'Wants leads sent to one' } },
+    // seo_only_package.sql. Set by an admin in Add / Edit Client, never by a question. Unset = Base.
+    // Tag a step "Base" when it's GHL, texting or the free website, so SEO-only clients skip it.
+    base_package: { label: 'Package', values: { yes: 'Base', no: 'SEO only' } }
 };
 // False until onboarding_facts.sql has run, so the editor does not offer tags it could not save
 function factsSupported() {
@@ -12469,6 +12488,8 @@ window.runOnboardingPreview = async function() {
     const pg = document.getElementById('ob-preview-page')?.value, crm = document.getElementById('ob-preview-crm')?.value;
     if (pg) pickedFacts.facebook_page = pg;
     if (crm) pickedFacts.crm_choice = crm;
+    const pkgPick = document.getElementById('ob-preview-package')?.value;
+    if (pkgPick) pickedFacts.base_package = pkgPick;
     const seq = ++obPreviewSeq;
     out.innerHTML = '<span class="text-gray-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading…</span>';
 
@@ -14016,6 +14037,8 @@ window.openEditClientModal = function() {
     const editPkgs = document.getElementById('edit-client-services');
     if (editPkgs) editPkgs.innerHTML = packageRowsHtml(c.name, 'edit');
     document.getElementById('edit-client-website-status').value = c.website_status || '';
+    const editPkgSel = document.getElementById('edit-client-base-package');
+    if (editPkgSel) editPkgSel.value = c.base_package === 'no' ? 'no' : '';
     renderEditClientPeopleSummary(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
     document.getElementById('edit-client-business-id').value  = c.business_id || '';
@@ -14707,6 +14730,7 @@ function rosterBusinessView(c, prof) {
         ['Website', site],
         ['Address', prof?.address ? rosterEsc(prof.address).replace(/\n/g, '<br>') : '—'],
         ['Industry', rosterEsc(c.industry || '—')],
+        ['Package', c.base_package === 'no' ? 'SEO only (no GHL)' : 'Base + add-ons'],
         ['Website setup', siteStatus],
         ['Client since', rosterDate(c.client_since || c.created_at)],
     ]) + (clientProfilesReady ? '' : `<p class="text-[11px] mt-3" style="color:var(--t3);">Phone, website, address and notes can be saved once supabase/sql/client_directory.sql has been run.</p>`);
@@ -15164,6 +15188,10 @@ window.saveClientEdits = async function(e) {
     if (renaming && !confirm(`Rename "${originalName}" to "${newName}"?\n\nTheir tasks, health record, check-ins, reports and team access will all be moved across.`)) return;
 
     const servicePlan = planPackageRows(document.getElementById('edit-client-services'));
+    const basePackage = document.getElementById('edit-client-base-package')?.value === 'no' ? 'no' : null;
+    if (basePackage === 'no' && !document.querySelector('#edit-client-services .pkg-row[data-key="seo"] .pkg-box:checked')) {
+        alert('SEO only needs SEO Growth ticked under Add-ons.'); return;
+    }
     if (servicePlan.end.length && !confirm(`End ${servicePlan.end.map(serviceName).join(', ')} for ${newName}?\n\nIts onboarding steps stop applying. Their history and completed steps are kept.`)) return;
 
     const original = btn.innerHTML;
@@ -15194,6 +15222,8 @@ window.saveClientEdits = async function(e) {
             industry: document.getElementById('edit-client-industry').value.trim() || null,
             client_email: document.getElementById('edit-client-email').value.trim() || null,
             website_status: document.getElementById('edit-client-website-status').value || null,
+            // null = Base + add-ons, 'no' = SEO only (seo_only_package.sql)
+            base_package: basePackage,
             ad_account_id: adAccountId || null,
             business_id: document.getElementById('edit-client-business-id').value.trim() || null,
             // Blank means no target, so the audit falls back to their own baseline. Zero or a
@@ -15225,6 +15255,12 @@ window.saveClientEdits = async function(e) {
         };
 
         let { error } = await supabaseClient.from('clients').update(payload).eq('id', id);
+        // Before seo_only_package.sql: save the rest, but never quietly drop an SEO-only choice
+        if (error && /base_package/.test(`${error.message || ''} ${error.details || ''}`)) {
+            if (payload.base_package === 'no') throw new Error("SEO only can't be saved until supabase/sql/seo_only_package.sql has been run.");
+            delete payload.base_package;
+            ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
+        }
         if (error && /seranking_local_id/.test(`${error.message || ''} ${error.details || ''}`)) {
             console.warn('clients.seranking_local_id missing: run supabase/sql/gbp.sql. Saved without it.', error);
             delete payload.seranking_local_id;
@@ -15507,12 +15543,21 @@ window.saveNewClient = async function(e) {
         contract_start_date: new Date().toISOString().split('T')[0],
         website_status: document.getElementById('new-client-website-status').value || null,
         current_stage: 'Onboarding',
+        // null = Base + add-ons, 'no' = SEO only (seo_only_package.sql). Left off when Base, so adding a client works
+        // before that SQL has run.
+        ...(document.getElementById('new-client-base-package')?.value === 'no' ? { base_package: 'no' } : {}),
         status: 'active'
     };
 
     // clients.name has no unique constraint, and a name stored twice broke the onboarding view for every client
     // (onboarding_client_facts_fix.sql). Archived clients count: their history is filed under the name.
     const dupe = globalClientsData.find(c => normalize(c.name || '') === normalize(payload.name));
+    if (payload.base_package === 'no' && !document.querySelector('#new-client-services .client-service-box[value="seo"]:checked')) {
+        alert('SEO only needs SEO Growth ticked under Add-ons.');
+        btn.innerHTML = 'Create Client Profile';
+        btn.disabled = false;
+        return;
+    }
     if (!payload.name || dupe) {
         alert(payload.name ? `There's already a client called "${stripSlashEscapes(dupe.name)}"${dupe.status === 'archived' ? ' (archived)' : ''}. Use a different name, or open that client instead.` : 'Give the client a name.');
         btn.innerHTML = 'Create Client Profile';
@@ -15522,6 +15567,9 @@ window.saveNewClient = async function(e) {
 
     try {
         const { data, error } = await supabaseClient.from('clients').insert([payload]).select();
+        if (error && /base_package/.test(`${error.message || ''} ${error.details || ''}`)) {
+            throw new Error("SEO only can't be saved until supabase/sql/seo_only_package.sql has been run. The client wasn't created.");
+        }
         if (error) throw error;
 
         // Add to local cache and refresh UI
