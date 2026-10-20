@@ -7,7 +7,8 @@
 //   - their onboarding is finished (the "Onboarding complete" handoff task exists);
 //   - they answered the new questionnaire ("About your business", with a business name). Clients on the old GHL forms,
 //     and every existing client, never qualify;
-//   - no ghl_accounts row: Golden Eye never makes a second account for the same client.
+//   - no ghl_accounts row: Golden Eye never makes a second account for the same client;
+//   - not SEO only (clients.base_package = 'no', seo_only_package.sql): those clients have no GHL account at all.
 // Writes only through _shared/ghl-write.ts (allow-list + log), and only into accounts it created itself, until they are
 // filled. GHL_AUTO_CREATE=on is the switch: off, the sweep only reports what it would do. At most MAX_PER_SWEEP new
 // accounts per run.
@@ -196,7 +197,8 @@ async function answersFor(deps: Deps, client: string) {
 
 // Who gets an account now, with the reason each other onboarding client doesn't (so a report explains itself).
 export async function candidates(deps: Deps) {
-    const { data: clients, error } = await deps.db.from("clients").select("name, status, current_stage, ghl_location_id").eq("current_stage", "Onboarding");
+    // "*" rather than a column list, so this keeps working before supabase/sql/seo_only_package.sql adds base_package
+    const { data: clients, error } = await deps.db.from("clients").select("*").eq("current_stage", "Onboarding");
     if (error) throw new Error(`Couldn't read clients: ${error.message}`);
     const { data: handoffs } = await deps.db.from("tasks").select("client").eq("title", HANDOFF_TITLE);
     const finished = new Set((handoffs ?? []).map((t: any) => norm(t.client)));
@@ -212,6 +214,7 @@ export async function candidates(deps: Deps) {
     const waiting: { client: string; why: string }[] = [];
     for (const c of clients ?? []) {
         const why = c.status !== "active" ? "not active"
+            : c.base_package === "no" ? "SEO only: no GHL account"
             : String(c.ghl_location_id ?? "").trim() ? "already has a GHL location ID"
             : made.has(c.name) ? "Golden Eye already made their account"
             : !finished.has(norm(c.name)) ? "onboarding not finished"

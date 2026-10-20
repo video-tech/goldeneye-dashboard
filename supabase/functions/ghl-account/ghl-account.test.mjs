@@ -258,6 +258,31 @@ ok(!writeAllowed('DELETE', '/locations/NewLoc00000000000001') && !writeAllowed('
     ok(!r.body.ready.includes('Running Ads') && !why['Running Ads'], 'clients past onboarding are never considered');
 }
 {
+    // SEO only (clients.base_package = 'no'): finished, on the new questionnaire, otherwise exactly Acme. No account, ever.
+    const clients = [
+        { name: 'Acme Decks', status: 'active', current_stage: 'Onboarding', ghl_location_id: null, base_package: 'yes' },
+        { name: 'Seo Only Co', status: 'active', current_stage: 'Onboarding', ghl_location_id: null, base_package: 'no' },
+    ];
+    const w = await world({ clients, handoffs: ['Acme Decks', 'Seo Only Co'], answers: [...ANSWERS('Acme Decks'), ...ANSWERS('Seo Only Co')] });
+    const r = await w.call({ mode: 'status' }, 'admin');
+    const why = Object.fromEntries(r.body.waiting.map((x) => [x.client, x.why]));
+    ok(r.body.ready.join() === 'Acme Decks' && /SEO only/.test(why['Seo Only Co'] || ''), 'an SEO-only client is never ready for a GHL account: ' + JSON.stringify(r.body));
+    const before = w.g.calls.length;
+    await w.call({ mode: 'sweep' });
+    const creates = w.g.calls.slice(before).filter((c) => c.method === 'POST' && c.path === '/locations/');
+    ok(creates.length === 1 && !w.tables.ghl_accounts.some((a) => a.client_name === 'Seo Only Co'), 'the sweep creates for Acme only, nothing for the SEO-only client');
+}
+{
+    // A failed creation on record, then the client is switched to SEO only: an admin retry must still be refused
+    const clients = [{ name: 'Seo Only Co', status: 'active', current_stage: 'Onboarding', ghl_location_id: null, base_package: 'no' }];
+    const w = await world({ clients, handoffs: ['Seo Only Co'], answers: ANSWERS('Seo Only Co') });
+    w.tables.ghl_accounts.push({ client_name: 'Seo Only Co', status: 'failed', location_id: null, last_error: 'boom' });
+    const before = w.g.calls.length;
+    const rr = await w.call({ mode: 'retry', client: 'Seo Only Co', confirm: true }, 'admin');
+    ok(rr.status === 409 && /SEO only/.test(rr.body.error || ''), 'an admin retry is refused for an SEO-only client: ' + JSON.stringify(rr.body));
+    ok(!w.g.calls.slice(before).some((c) => c.method === 'POST' && c.path === '/locations/'), 'and no account is created');
+}
+{
     const many = ['A1', 'A2', 'A3'].map((n) => ({ name: n, status: 'active', current_stage: 'Onboarding', ghl_location_id: null }));
     const w = await world({ clients: many, handoffs: ['A1', 'A2', 'A3'], answers: ['A1', 'A2', 'A3'].flatMap(ANSWERS) });
     const r = await w.call({ mode: 'sweep' });

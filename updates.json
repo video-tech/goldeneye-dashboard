@@ -3,6 +3,14 @@
   "updates": [
     {
       "date": "2026-10-20",
+      "area": "Onboarding",
+      "title": "New package: SEO only",
+      "what": "Add Client and Edit Client have a Package choice: Base + add-ons (what every client gets today, unchanged) or SEO only. An SEO-only client skips everything GHL: no GHL account is made for them, and they aren't asked about texting, the free website, automations or a CRM. They still do the welcome video, the setup call, About your business, their sales team, a short service area step and the SEO steps. Templates has a matching Package tag and preview option.",
+      "note": "SEO-only clients have no organic lead tracking, because website leads reach Golden Eye through the client's own GHL.",
+      "action": "Run supabase/sql/seo_only_package.sql, then deploy ghl-account. Don't set anyone to SEO only until both are done."
+    },
+    {
+      "date": "2026-10-20",
       "area": "Data",
       "title": "Settings opens with the user list loaded",
       "what": "Opening Settings used to show an empty Users & Roles tab until you clicked it. The list now loads as soon as Settings opens."
