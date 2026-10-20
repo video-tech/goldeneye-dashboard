@@ -2,6 +2,12 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-20",
+      "area": "Data",
+      "title": "Settings opens with the user list loaded",
+      "what": "Opening Settings used to show an empty Users & Roles tab until you clicked it. The list now loads as soon as Settings opens."
+    },
+    {
       "date": "2026-10-19",
       "area": "Onboarding",
       "title": "Change a client's packages from Edit Client, the Roster or their Accounts page",
@@ -237,18 +243,6 @@
       "title": "Every admin can archive and edit tasks",
       "what": "Only three named logins were allowed to change tasks, so for anyone else archiving, moving, editing or deleting a task could silently not save. Every admin can now manage tasks, and if a change is ever refused you now get a message instead of nothing.",
       "action": "Run supabase/sql/tasks_admin_access.sql"
-    },
-    {
-      "date": "2026-10-06",
-      "area": "Tasks",
-      "title": "Board and List are different again, and the Board can archive",
-      "what": "Clicking List used to leave the Board showing, so the two looked the same and the List's checkboxes and Archive button were easy to miss. List now replaces the Board. The Board's Done column also has an Archive done button that archives every finished task the current filters show."
-    },
-    {
-      "date": "2026-10-06",
-      "area": "Data",
-      "title": "Settings opens with the user list loaded",
-      "what": "Opening Settings used to show an empty Users & Roles tab until you clicked it. The list now loads as soon as Settings opens."
     },
     {
       "date": "2026-10-06",
