@@ -44,6 +44,9 @@ function makeWorld() {
         var globalOnboardingSteps = [], globalOnboardingAnswers = [], globalClientsData = [], portalClientRows = [];
         var globalPrivateAnswerKeys = new Set(), globalPrivateAnswers = [], globalSecretsMeta = [];
         var currentActiveClient = 'Acme Decks', clientEmail = 'owner@acme.com', currentUserRole = 'client';
+        // Applicability not loaded, so every question is asked (per-question services: tests/question-services.test.mjs)
+        function obFor() { return null; }
+        var globalServices = [];
         var supabaseClient = {
             from: (t) => ({ upsert: async (row, opts) => { __calls.push({ kind: 'upsert', table: t, row, opts }); return { error: __fake.upsertError }; },
                             delete: () => { const filters = []; const ch = { eq: (k, v) => { filters.push([k, v]); return ch; },

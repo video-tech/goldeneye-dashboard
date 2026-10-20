@@ -596,6 +596,12 @@ embedded GHL form, for forms nothing in GHL uses. The SEO intake is one. Schema 
 - **Submitting** (`obSubmitAnswers`) saves the answers, then completes the step through
   `obCompleteStep`, so the handoff trigger treats it like any step. Editing later just re-saves.
 - **Website-conditioned questions** are asked only when the client's `website_status` matches.
+- **Service-conditioned questions (2026-10-20):** a question's `service_keys` (any-of, empty = everyone) limits it to clients
+  with one of those add-ons, onboarding or active. `obQuestionsFor()` applies it (every question is asked when applicability
+  isn't loaded), and Templates has "Only ask clients with" chips, which `readObQuestions` saves. Quick start's two Facebook
+  questions are tagged Ads (`supabase/sql/quick_start_facebook_ads_only.sql`), so Base + SEO is asked only about a CRM. Push
+  app.js before running the SQL: the editor rebuilds questions from its fields, so an old editor would drop the tag.
+  Tests: `tests/question-services.test.mjs` (10, 2 of 2 breakages caught), the SQL's 6 in PGlite.
 - **RLS:** read, insert and update via `client_row_visible`; delete is admin only. It's in
   `rename_client.sql`.
 - **Admin view:** answers show under the client's onboarding list, with a Copy button (plain text,

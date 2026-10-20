@@ -4,6 +4,13 @@
     {
       "date": "2026-10-20",
       "area": "Onboarding",
+      "title": "Quick start only asks about a Facebook page when the client has Ads",
+      "what": "Clients without Ads (for example Base + SEO) are now asked only the CRM question in Quick start, not whether they have a Facebook page. In Templates, any question can now be limited to clients with certain add-ons (\"Only ask clients with\").",
+      "action": "Run supabase/sql/quick_start_facebook_ads_only.sql"
+    },
+    {
+      "date": "2026-10-20",
+      "area": "Onboarding",
       "title": "New package: SEO only",
       "what": "Add Client and Edit Client have a Package choice: Base + add-ons (what every client gets today, unchanged) or SEO only. An SEO-only client skips everything GHL: no GHL account is made for them, and they aren't asked about texting, the free website, automations or a CRM. They still do the welcome video, the setup call, About your business, their sales team, a short service area step and the SEO steps. Templates has a matching Package tag and preview option.",
       "note": "SEO-only clients have no organic lead tracking, because website leads reach Golden Eye through the client's own GHL.",

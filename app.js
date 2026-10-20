@@ -2171,12 +2171,18 @@ function obClientWebsiteStatus(clientName) {
 }
 
 // The questions this client is asked: a question tagged with website situations only shows when
-// the client's website situation is one of them (unknown means it isn't asked).
+// the client's website situation is one of them (unknown means it isn't asked), and one tagged with
+// services (service_keys, any-of) only when the client has one of them, onboarding or active. The
+// Facebook page questions are tagged Ads, so a client without Ads isn't asked about a page.
+// Before service_onboarding.sql (no applicability loaded) every question is asked, as before.
 function obQuestionsFor(step, clientName) {
     const web = obClientWebsiteStatus(clientName);
+    const a = obFor(clientName);
+    const svc = a ? (a.services || []).filter(r => r.service_key !== 'base').map(r => r.service_key) : null;
     return (Array.isArray(step.questions) ? step.questions : [])
         .filter(q => q && q.id && q.label)
-        .filter(q => !(q.website_statuses || []).length || (web && q.website_statuses.includes(web)));
+        .filter(q => !(q.website_statuses || []).length || (web && q.website_statuses.includes(web)))
+        .filter(q => !(q.service_keys || []).length || !svc || q.service_keys.some(k => svc.includes(k)));
 }
 
 // ---- private and secret answers (onboarding_questionnaire.sql) ----
@@ -13121,6 +13127,7 @@ function obQuestionRowHtml(q) {
     q = q || {};
     const id = q.id || `q_${Math.random().toString(36).slice(2, 8)}`;
     const webs = q.website_statuses || [];
+    const svcs = q.service_keys || [];
     const showIf = q.show_if || {};
     return `
         <div class="ob-q-row bg-black/20 border border-white/5 rounded-lg p-2 space-y-2" data-qid="${escapeAttr(id)}">
@@ -13155,6 +13162,13 @@ function obQuestionRowHtml(q) {
                     <button type="button" class="ob-chip ob-chip-web ob-q-web" data-key="${k}" aria-pressed="${webs.includes(k)}"
                         onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true')">${label}</button>`).join('')}
                 <span class="text-[10px] text-gray-500">(none picked = always ask)</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">Only ask clients with</span>
+                ${globalServices.filter(sv => sv.active !== false || svcs.includes(sv.key)).map(sv => `
+                    <button type="button" class="ob-chip ob-q-svc" data-key="${escapeAttr(sv.key)}" aria-pressed="${svcs.includes(sv.key)}"
+                        onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true')">${escapeAttr(sv.name)}</button>`).join('')}
+                <span class="text-[10px] text-gray-500">(none picked = everyone)</span>
             </div>
             <div class="flex flex-wrap items-center gap-2">
                 <span class="text-[10px] uppercase tracking-widest text-gray-500">Only ask if</span>
@@ -13225,6 +13239,9 @@ function readObQuestions(stepRow) {
             options: ['choice', 'multi'].includes(type) ? split(r.querySelector('.ob-q-options').value) : [],
             website_statuses: [...r.querySelectorAll('.ob-q-web[aria-pressed="true"]')].map(b => b.dataset.key)
         };
+        // Only clients with one of these add-ons are asked (none = everyone). Left off when empty, as before.
+        const qSvcs = [...r.querySelectorAll('.ob-q-svc[aria-pressed="true"]')].map(b => b.dataset.key);
+        if (qSvcs.length) q.service_keys = qSvcs;
         if (showQ) q.show_if = { q: showQ, any: showAny };
         if (type === 'style') {
             q.styles = [...r.querySelectorAll('.ob-style-row')].map(sr => ({
