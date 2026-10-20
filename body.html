@@ -12,6 +12,92 @@
            which the desktop sidebar uses, and that sidebar is hidden below md anyway. */
         @media (max-width: 767px) { html, body { overflow-x: hidden; } }
 
+        /* The loading screen. It is in the markup, so it is up the moment this file lands, and app.js takes it
+           down once the first page is drawn. Without it the sign-in card flashed on every load. */
+        #ge-preload { position: fixed; inset: 0; z-index: 100000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--bg, #16110c); transition: opacity .35s ease; }
+        #ge-preload.done { opacity: 0; pointer-events: none; }
+        #ge-preload.gone { display: none; }
+        /* The logo is a transparent PNG, so it sits straight on the screen with a faint gold glow */
+        #ge-preload .pre-mark { width: 96px; height: 96px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 6px 28px rgba(217,180,99,.28)); }
+        #ge-preload .pre-mark img { width: 96px; height: 96px; object-fit: contain; }
+        #ge-preload .pre-name { font-family: Archivo, system-ui, sans-serif; font-size: 22px; font-weight: 600; letter-spacing: .02em; color: var(--t1, #f2ece0); }
+        #ge-preload .pre-bar { width: min(240px, 60vw); height: 3px; border-radius: 2px; background: var(--inset, #241e16); overflow: hidden; }
+        #ge-preload .pre-bar i { display: block; height: 100%; width: 0%; background: var(--goldSolid, #d9b463); transition: width .5s ease; }
+        #ge-preload .pre-bar.wait i { width: 35%; animation: pre-slide 1.1s ease-in-out infinite; }
+        #ge-preload .pre-text { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--t3, #968c7a); min-height: 14px; }
+        @keyframes pre-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+        @media (prefers-reduced-motion: reduce) { #ge-preload .pre-bar.wait i { animation: none; width: 50%; } #ge-preload { transition: none; } }
+        #ge-preload .pre-slow { display: none; font-size: 12px; color: var(--t2, #a79d8c); text-align: center; max-width: 280px; line-height: 1.5; }
+        #ge-preload.slow .pre-slow { display: block; }
+        /* The office on Settings > Users & Roles: little characters at their desks. */
+        #office-panel { --oc-line: var(--border, rgba(255,255,255,.08)); }
+        .oc-room, .oc-lounge { border: 1px solid var(--oc-line); border-radius: 12px; padding: 14px 14px 10px; background: linear-gradient(180deg, rgba(217,180,99,.05), rgba(0,0,0,.18)); }
+        .oc-lounge { margin-top: 10px; background: rgba(0,0,0,.14); }
+        .oc-roomhead { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--t3, #968c7a); display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .oc-live { width: 8px; height: 8px; border-radius: 50%; background: #4a9a6a; box-shadow: 0 0 0 0 rgba(74,154,106,.6); animation: oc-pulse 2s infinite; }
+        .oc-row { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-end; }
+        .oc-person { width: 132px; display: flex; flex-direction: column; align-items: center; position: relative; padding-top: 34px; text-align: center; }
+        .oc-stage { position: relative; width: 100px; height: 96px; }
+        .oc-svg { position: absolute; left: 14px; top: -6px; width: 72px; height: 94px; overflow: visible; }
+        .oc-desk { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; border-radius: 6px 6px 3px 3px; background: linear-gradient(180deg, #6b4f33, #4d3822); box-shadow: 0 6px 10px rgba(0,0,0,.35); }
+        .oc-screen { position: absolute; right: 5px; top: -14px; width: 26px; height: 18px; border-radius: 3px; background: #14202b; border: 2px solid #2d3a47; box-shadow: 0 0 12px rgba(120,190,255,.25); }
+        .oc-screen::after { content: ""; position: absolute; left: 3px; right: 3px; top: 4px; height: 2px; background: rgba(140,200,255,.7); box-shadow: 0 4px 0 rgba(140,200,255,.45), 0 8px 0 rgba(140,200,255,.3); }
+        .oc-name { margin-top: 6px; font-weight: 700; font-size: 13px; color: var(--t1, #f2ece0); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .oc-you { font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--goldInk, #2a2113); background: var(--goldSolid, #d9b463); padding: 1px 5px; border-radius: 6px; vertical-align: middle; }
+        .oc-what { font-size: 11px; color: var(--t2, #a79d8c); line-height: 1.3; min-height: 28px; max-width: 120px; overflow-wrap: anywhere; }
+        .oc-what i { margin-right: 3px; opacity: .8; }
+        .oc-bubble { position: absolute; top: 0; left: 50%; transform: translateX(-50%); max-width: 132px; min-width: 40px; padding: 5px 9px; border-radius: 10px; background: var(--t1, #f2ece0); color: #1d1710; font-size: 11px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; box-shadow: 0 3px 10px rgba(0,0,0,.35); animation: oc-pop .35s ease-out; z-index: 2; }
+        .oc-bubble::after { content: ""; position: absolute; left: 50%; bottom: -5px; margin-left: -5px; border: 5px solid transparent; border-top-color: var(--t1, #f2ece0); border-bottom: 0; }
+        .oc-offline .oc-svg { filter: grayscale(.85) brightness(.7); transform: translateY(14px); }
+        .oc-offline .oc-desk { opacity: .45; }
+        .oc-offline .oc-screen { background: #0c1117; box-shadow: none; }
+        .oc-offline .oc-screen::after { display: none; }
+        .oc-offline .oc-name, .oc-offline .oc-what { opacity: .65; }
+        .oc-away .oc-svg { transform: translateX(-8px); }
+        .oc-away .oc-screen { box-shadow: none; opacity: .7; }
+        .oc-head { transform-box: fill-box; transform-origin: 50% 90%; animation: oc-bob 4s ease-in-out infinite; }
+        .oc-eye { transform-box: fill-box; transform-origin: center; animation: oc-blink 5s infinite; }
+        .oc-arm { transform-box: fill-box; transform-origin: 50% 0; }
+        .oc-act-type .oc-arm-l { animation: oc-type .28s ease-in-out infinite alternate; }
+        .oc-act-type .oc-arm-r { animation: oc-type .28s ease-in-out .14s infinite alternate; }
+        .oc-act-chart .oc-arm-r { animation: oc-type .5s ease-in-out infinite alternate; }
+        .oc-act-build .oc-arm-r, .oc-act-paint .oc-arm-r { animation: oc-wave 1.1s ease-in-out infinite alternate; }
+        .oc-act-look .oc-head { animation: oc-look 5s ease-in-out infinite; }
+        .oc-act-cog .oc-head { animation: oc-look 3s ease-in-out infinite; }
+        .oc-act-phone .oc-arm-r { transform: rotate(-150deg); animation: oc-talk 1.2s ease-in-out infinite alternate; }
+        .oc-act-coffee .oc-arm-r { transform: rotate(-120deg); }
+        .oc-offline .oc-head, .oc-offline .oc-eye { animation: none; }
+        .oc-offline .oc-eye { transform: scaleY(.15); }
+        .oc-phone { position: absolute; left: 0; top: 4px; color: #9fb4c8; font-size: 15px; transform: rotate(-12deg); }
+        .oc-cup { position: absolute; right: -4px; top: 40px; color: #e9dcc3; font-size: 14px; }
+        .oc-cup em { position: absolute; left: 3px; top: -10px; width: 3px; height: 8px; border-radius: 3px; background: rgba(255,255,255,.55); animation: oc-steam 1.6s ease-in-out infinite; }
+        .oc-zzz { position: absolute; right: 0; top: 4px; font-weight: 800; color: #9fb4c8; font-size: 15px; }
+        .oc-zzz i, .oc-zzz b { position: absolute; font-style: normal; opacity: 0; }
+        .oc-zzz { animation: oc-z 2.6s ease-in-out infinite; }
+        .oc-zzz i { left: 9px; top: -9px; font-size: 12px; animation: oc-z 2.6s ease-in-out .5s infinite; }
+        .oc-zzz b { left: 17px; top: -17px; font-size: 10px; animation: oc-z 2.6s ease-in-out 1s infinite; }
+        .oc-editor-grid { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+        .oc-preview { position: relative; width: 110px; height: 140px; flex: none; border-radius: 12px; background: rgba(0,0,0,.25); border: 1px solid var(--oc-line); }
+        .oc-preview .oc-svg { left: 18px; top: 12px; width: 74px; height: 96px; }
+        .oc-controls { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 220px; }
+        .oc-swatches, .oc-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+        .oc-sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+        .oc-sw.on { border-color: var(--t1, #f2ece0); transform: scale(1.12); }
+        .oc-pill { padding: 4px 10px; border-radius: 14px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--oc-line); color: var(--t2, #a79d8c); background: transparent; }
+        .oc-pill.on { background: var(--goldSolid, #d9b463); color: var(--goldInk, #2a2113); border-color: transparent; }
+        @keyframes oc-pulse { 70% { box-shadow: 0 0 0 7px rgba(74,154,106,0); } 100% { box-shadow: 0 0 0 0 rgba(74,154,106,0); } }
+        @keyframes oc-pop { 0% { transform: translateX(-50%) scale(.6); opacity: 0; } 100% { transform: translateX(-50%) scale(1); opacity: 1; } }
+        @keyframes oc-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.2px); } }
+        @keyframes oc-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
+        @keyframes oc-type { from { transform: rotate(-9deg); } to { transform: rotate(9deg); } }
+        @keyframes oc-wave { from { transform: rotate(-4deg); } to { transform: rotate(26deg); } }
+        @keyframes oc-look { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-6deg); } 65% { transform: rotate(6deg); } }
+        @keyframes oc-talk { from { transform: rotate(-152deg); } to { transform: rotate(-142deg); } }
+        @keyframes oc-steam { 0% { opacity: 0; transform: translateY(4px); } 50% { opacity: 1; } 100% { opacity: 0; transform: translateY(-6px); } }
+        @keyframes oc-z { 0% { opacity: 0; transform: translateY(6px); } 35% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+        @media (prefers-reduced-motion: reduce) { .oc-live, .oc-head, .oc-eye, .oc-arm, .oc-bubble, .oc-zzz, .oc-zzz i, .oc-zzz b, .oc-cup em { animation: none !important; } .oc-zzz i, .oc-zzz b { opacity: 1; } }
+        #ge-preload .pre-slow button { margin-top: 10px; background: var(--goldSolid, #d9b463); color: var(--goldInk, #2a2113); border: 0; border-radius: 2px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+
         /* Paint the canvas itself, so pinching out shows more of the same colour rather
            than white. Only <html> — the GHL containers above stay transparent, which is
            what stops the dashboard fighting the page it's pasted into. #16110c / #f7f3ec
@@ -342,6 +428,14 @@
 
     <div id="theme-wrapper">
 
+        <div id="ge-preload" role="status" aria-live="polite">
+            <div class="pre-mark"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" alt=""></div>
+            <div class="pre-name">Golden Eye</div>
+            <div class="pre-bar wait" id="ge-pre-bar"><i id="ge-pre-fill"></i></div>
+            <div class="pre-text" id="ge-pre-text">Starting</div>
+            <div class="pre-slow" id="ge-pre-slow"><span id="ge-pre-slow-msg">This is taking longer than usual.</span><br><button type="button" onclick="location.reload()">Reload</button></div>
+        </div>
+
         <div id="client-preview-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:10000; background:linear-gradient(90deg,#7c3aed,#2563eb); color:white; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; align-items:center; justify-content:center; gap:10px 16px; flex-wrap:wrap; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,0.4);">
             <span class="text-sm font-bold"><i class="fa-solid fa-eye mr-2"></i>Client preview &mdash; viewing as <span id="client-preview-name">Client</span></span>
             <button onclick="exitClientPreview()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white btn btn-sm text-xs transition">
@@ -352,7 +446,7 @@
         <div id="drawer-overlay" onclick="closeAllDrawers()"></div>
 
         <div id="auth-container" class="glass p-12 max-w-md mx-auto text-center mt-20">
-            <div class="bg-white w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-xl"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" class="w-12" alt="Logo"></div>
+            <div class="mx-auto mb-6 flex items-center justify-center" style="width:96px; height:96px; filter:drop-shadow(0 6px 28px rgba(217,180,99,.28));"><img src="https://assets.cdn.filesafe.space/HSLxIrFGc74MvO2Jqqzc/media/69b2f3daef8487e7a7c16d57.png" style="width:96px; height:96px; object-fit:contain;" alt="Logo"></div>
             <h2 class="text-2xl font-bold mb-2 text-white">Midas HQ</h2>
             <p class="text-gray-400 text-sm mb-8">Sign in to access your dashboard.</p>
 
@@ -478,6 +572,9 @@
                 </header>
 
                 <div id="page-goldeneye" class="p-4 md:p-8 block">
+                    <!-- Make's daily ads pull reads clients through a Search Rows step limited to 10 (deliberately: a
+                         higher limit caused an error once). This tells admins when they have reached it. -->
+                    <div id="ov-make-limit" class="hidden" role="alert" style="margin-bottom:16px; padding:12px 16px; border-radius:3px; font-size:13px; line-height:1.5;"></div>
 
                     <!-- Hero band: MRR and Network Health used to be two separate panels;
                          one bordered section with a hairline between them reads as a single
@@ -586,6 +683,24 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Ask Golden Eye: a chat that looks things up in the live data (overview-chat function).
+                         Admin only, shown by renderGoldenEye. Read-only: it can answer, never change anything. -->
+                    <div id="ov-chat" class="glass p-6 hidden" style="margin-top:24px;">
+                        <div class="flex flex-wrap items-baseline justify-between gap-2">
+                            <div>
+                                <h3 class="ge-title" style="font-size:18px;">ask golden eye.</h3>
+                                <p class="text-xs" style="margin-top:5px; color:var(--t2);">Ask about any client, ads, tasks, check-ins, SEO or onboarding. It looks the numbers up live and cannot change anything.</p>
+                            </div>
+                            <button type="button" id="ov-chat-reset" onclick="ovChatReset()" class="ge-label hidden" style="color:var(--gold); cursor:pointer; background:none; border:none;">New chat</button>
+                        </div>
+                        <div id="ov-chat-msgs" class="flex flex-col gap-3 overflow-y-auto" style="margin-top:14px; max-height:440px;"></div>
+                        <div id="ov-chat-suggest" class="flex flex-wrap gap-2" style="margin-top:12px;"></div>
+                        <form onsubmit="ovChatSubmit(event)" class="flex gap-2" style="margin-top:14px;">
+                            <input type="text" id="ov-chat-input" class="glass-input flex-1" maxlength="1000" autocomplete="off" placeholder="Which clients are over their target CPL this week?">
+                            <button type="submit" id="ov-chat-send" class="btn-primary btn text-sm shrink-0">Ask</button>
+                        </form>
+                    </div>
                 </div>
 
                 <!-- Roster: every client, filterable, with a profile that opens under the row (rosterProfileHtml).
@@ -611,6 +726,9 @@
                         <div class="flex flex-wrap items-center gap-3 mb-5">
                             <div id="roster-status-filter" class="flex" style="border:1px solid var(--line); border-radius:3px; overflow:hidden;"></div>
                             <select id="roster-service-filter" class="glass-input" style="width:auto; min-width:170px; padding-top:7px; padding-bottom:7px;" onchange="rosterSetService(this.value)"></select>
+                            <button id="btn-roster-add-client" type="button" onclick="openAddClientModal()" class="hidden btn-primary btn text-xs transition whitespace-nowrap">
+                                <i class="fa-solid fa-plus mr-2"></i>Add client
+                            </button>
                             <div style="display:flex; align-items:center; gap:9px; background:var(--inset); border:1px solid var(--line); border-radius:3px; padding:7px 12px; flex:1 1 200px; max-width:320px; margin-left:auto;">
                                 <i class="fa-solid fa-magnifying-glass" style="font-size:11px; color:var(--t3);"></i>
                                 <input type="text" id="roster-search" placeholder="Search clients or people…" autocomplete="off"
@@ -753,6 +871,7 @@
                             </div>
                             <span id="c-stage-chip" class="hidden ge-label" style="color:var(--gold); border:1px solid var(--goldLine); padding:5px 10px; border-radius:2px; text-transform:none;"></span>
                             <span id="c-summary-line" class="hidden text-xs" style="color:var(--t2);"></span>
+                            <button type="button" id="c-packages-btn" class="hidden ge-label" style="color:var(--t2); border:1px solid var(--line); padding:5px 10px; border-radius:2px; text-transform:none; background:transparent; cursor:pointer;" onclick="openPackagesModal(cSelectedAccount)" title="Change this client's packages"></button>
 
                             <div id="global-health-pill" class="glass-pill hidden cursor-pointer" onclick="switchClientView('health')" title="Relationship health — click for detail">
                                 <i id="global-health-icon" class="fa-solid fa-heart-pulse mr-2" style="color:var(--t3);"></i>
@@ -879,6 +998,8 @@
                             </div>
                         </div>
 
+                        <div id="ad-activity-panel" class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden"></div>
+
                         <div id="ai-box-container" class="glass p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hidden" style="background:var(--goldWash); border-color:var(--goldLine);">
                             <div class="flex-1">
                                 <div class="flex items-center gap-2 mb-3">
@@ -959,15 +1080,31 @@
                                 <div id="c-checkins-list" class="overflow-x-auto"></div>
                             </div>
 
+                            <div id="c-stage-box" class="glass p-6 flex flex-col hidden" style="border-left:4px solid var(--goldSolid);">
+                                <div class="flex flex-wrap justify-between items-baseline gap-2 mb-4">
+                                    <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-route mr-2" style="color:var(--gold);"></i> Journey</h3>
+                                    <div class="flex items-center gap-3">
+                                        <span id="c-stage-summary" class="text-xs" style="color:var(--t2);"></span>
+                                        <button type="button" id="c-stage-checklist" onclick="openSetupChecklist()" class="hidden btn-primary btn text-xs" style="padding:5px 12px;"><i class="fa-solid fa-list-check mr-1.5"></i><span id="c-stage-checklist-label">Our checklist</span></button>
+                                    </div>
+                                </div>
+                                <div id="c-stage-steps" class="flex items-center gap-1 mb-3 text-[10px] uppercase tracking-widest" style="color:var(--t3);"></div>
+                                <div class="w-full overflow-hidden" style="height:8px; border-radius:4px; background:var(--inset); border:1px solid var(--line);" role="progressbar" id="c-stage-bar-track" aria-valuemin="0" aria-valuemax="100">
+                                    <div id="c-stage-bar" style="height:100%; width:0%; background:var(--goldSolid); border-radius:4px; transition:width .4s ease;"></div>
+                                </div>
+                                <p id="c-stage-detail" class="text-xs mt-2" style="color:var(--t3);"></p>
+                            </div>
+
                             <div id="c-onboarding-box" class="glass p-6 border-l-4 border-blue-500 flex flex-col hidden">
                                 <div class="flex justify-between items-center mb-4">
-                                    <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-flag-checkered mr-2 text-blue-400"></i> Onboarding Progress</h3>
+                                    <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400"><i class="fa-solid fa-flag-checkered mr-2 text-blue-400"></i> Onboarding &amp; Set up</h3>
                                     <div class="flex items-center gap-3">
                                         <span id="c-onboarding-summary" class="text-[10px] text-gray-500 uppercase tracking-widest"></span>
                                         <button id="c-onboarding-backfill" onclick="markOnboardingComplete()" class="hidden text-xs bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 btn btn-sm transition" title="Tick off every client step for a client who onboarded before the portal existed">Mark client steps done</button>
                                         <button onclick="addAdhocOnboardingTask()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white btn btn-sm transition">+ Task</button>
                                     </div>
                                 </div>
+                                <div id="c-onboarding-ghl"></div>
                                 <div id="c-onboarding-list" class="space-y-2"></div>
                             </div>
 
@@ -1761,13 +1898,14 @@
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <select id="tpl-stage-picker" class="glass-input !py-1.5 !w-52" onchange="renderStageTemplates()"></select>
-                                    <button onclick="addStageTemplateRow()" class="bg-blue-600 hover:bg-blue-500 text-white btn btn-sm text-xs shadow-lg transition">
+                                    <select id="tpl-stage-package" class="glass-input !py-1.5 !w-44" onchange="applyStagePackageFilter()" title="Show only one package's tasks"></select>
+                                    <button id="btn-add-stage-tpl" onclick="addStageTemplateRow()" class="bg-blue-600 hover:bg-blue-500 text-white btn btn-sm text-xs shadow-lg transition">
                                         <i class="fa-solid fa-plus mr-1"></i> Add Task
                                     </button>
                                 </div>
                             </div>
 
-                            <div class="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-widest text-gray-500 px-1 mb-2">
+                            <div id="tpl-stage-headers" class="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-widest text-gray-500 px-1 mb-2">
                                 <div class="col-span-4">Task Title</div>
                                 <div class="col-span-2">Assignee</div>
                                 <div class="col-span-2">Sub-phase</div>
@@ -1822,6 +1960,15 @@
                                     <option value="existing">Website: they have one</option>
                                     <option value="none">Website: none</option>
                                 </select>
+                                <select id="ob-preview-page" class="glass-input !py-1.5 !w-48" onchange="runOnboardingPreview()">
+                                    <option value="">Facebook page: has one</option>
+                                    <option value="no">Facebook page: needs one</option>
+                                    <option value="unsure">Facebook page: not sure</option>
+                                </select>
+                                <select id="ob-preview-crm" class="glass-input !py-1.5 !w-48" onchange="runOnboardingPreview()">
+                                    <option value="">CRM: none</option>
+                                    <option value="yes">CRM: wants leads sent</option>
+                                </select>
                             </div>
                             <div id="ob-preview-result" class="text-sm"></div>
                         </div>
@@ -1847,6 +1994,24 @@
                     <div id="s-view-users" class="space-y-6 block glass p-6">
                         <div class="flex justify-between items-center mb-4">
                             <div><h3 class="text-lg font-bold">Users & Roles</h3><p class="text-gray-400 text-sm">Manage user roles and client access.</p></div>
+                        </div>
+
+                        <div id="office-panel" class="mb-6">
+                            <button type="button" id="office-toggle" class="px-3 py-2 text-sm text-blue-300 hover:text-blue-200 mb-2" onclick="officeToggle()" aria-expanded="false"><i class="fa-solid fa-users-viewfinder mr-1"></i> <span id="office-toggle-label">Show characters</span></button>
+                            <div id="office-body" class="hidden">
+                            <div class="flex flex-wrap items-end gap-3 mb-3">
+                                <div class="flex-1 min-w-[240px]">
+                                    <label class="modal-label" for="office-status-input">What are you up to?</label>
+                                    <input type="text" id="office-status-input" class="glass-input" maxlength="80" placeholder="Writing hooks for PANDEN, on a call until 3..." oninput="this.dataset.touched=1" onkeydown="if(event.key==='Enter')officeSetStatus()">
+                                </div>
+                                <button type="button" class="btn-primary px-4 py-2 text-sm" onclick="officeSetStatus()">Set status</button>
+                                <button type="button" class="px-3 py-2 text-sm text-gray-400 hover:text-white" onclick="officeClearStatus()">Clear</button>
+                                <button type="button" class="px-3 py-2 text-sm text-blue-300 hover:text-blue-200" onclick="officeToggleEditor()"><i class="fa-solid fa-user-pen mr-1"></i> My character</button>
+                            </div>
+                            <div id="office-editor" class="hidden bg-black/20 p-4 rounded-xl border border-white/5 mb-3"></div>
+                            <div id="office-scene"></div>
+                            <p class="text-xs text-gray-500 mt-2">Shows teammates who have Golden Eye open. Your status clears itself after 4 hours.</p>
+                            </div>
                         </div>
 
                         <div class="bg-black/20 p-5 rounded-xl border border-white/5 mb-6">
@@ -2059,6 +2224,20 @@
         <iframe id="seo-case-study-frame" class="w-full flex-1 rounded-lg bg-white" frameborder="0" sandbox="allow-modals"></iframe>
     </div>
 </div>
+
+<div id="setup-checklist-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:flex-start; justify-content:center;" onclick="if (event.target === this) closeSetupChecklist()">
+                    <div class="glass" style="max-width: 760px; width: 100%; margin: auto; padding: 2rem 2.25rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);" role="dialog" aria-label="Our checklist">
+                        <div class="flex justify-between items-start mb-5">
+                            <div>
+                                <p class="ge-label mb-1">Our checklist</p>
+                                <h2 class="ge-title" style="font-size:22px;" id="setup-checklist-client">client.</h2>
+                                <p class="text-xs" style="margin-top:5px; color:var(--t2);">Everything we do for this client after they finish onboarding. Tick a step off, or open it as a task to assign someone or change the date. The group tasks on the board tick themselves.</p>
+                            </div>
+                            <button type="button" onclick="closeSetupChecklist()" aria-label="Close" style="color:var(--t3); font-size:20px; line-height:1;">&#10005;</button>
+                        </div>
+                        <div id="setup-checklist-body" style="max-height:68vh; overflow-y:auto; padding-right:6px;"></div>
+                    </div>
+                </div>
 
 <div id="stage-transition-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
                     <div class="glass" style="max-width: 500px; width: 100%; margin: auto; padding: 2.5rem; box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
@@ -2762,7 +2941,7 @@
                                 </div>
                         </div>
                     </div>
-                    <div><label class="modal-label">Stage</label><select id="t-stage" class="glass-input"><option value="Onboarding">Onboarding</option><option value="Camp. Building">Camp. Building</option><option value="Camp. Learning">Camp. Learning</option><option value="Optimizing">Optimizing</option><option value="Offboarding">Offboarding</option></select></div>
+                    <div><label class="modal-label">Stage</label><select id="t-stage" class="glass-input"><option value="Onboarding">Onboarding / Set up</option><option value="Camp. Building">Camp. Building</option><option value="Camp. Learning">Camp. Learning</option><option value="Optimizing">Optimizing</option><option value="Offboarding">Offboarding</option></select></div>
                     <div><label class="modal-label">Assignee</label><input type="text" id="t-assignee" required class="glass-input" placeholder="John Doe"></div>
                     <div><label class="modal-label">Task type</label><select id="t-type" class="glass-input"><option value="One-off">One-off</option><option value="Recurring">Recurring</option><option value="Checklist">Checklist</option><option value="Milestone">Milestone</option><option value="Client Request">Client Request</option></select></div>
                     <div class="col-span-2"><label class="modal-label">Due date</label><input type="date" id="t-due" class="glass-input"></div>
@@ -2784,6 +2963,7 @@
             </div>
             <div class="p-6 flex flex-col gap-3" style="border-top:1px solid var(--line); background:var(--inset);">
                 <button type="submit" id="t-save-btn" class="btn-primary btn text-sm w-full">Save task</button>
+                <button type="button" id="t-notify-btn" onclick="notifyTaskAssignee()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--goldLine); color:var(--gold);"><i class="fa-solid fa-message mr-2"></i>Text the assignee</button>
                 <button type="button" id="t-delete-btn" onclick="archiveTask()" class="btn text-sm w-full hidden" style="background:transparent; border:1px solid var(--line); color:var(--t2);"><i class="fa-solid fa-box-archive mr-2"></i>Archive task</button>
             </div>
         </form>
@@ -2928,6 +3108,24 @@
             </div>
         </div>
 
+        <!-- PACKAGES MODAL (the Roster profile and the Accounts page). Admin only. -->
+        <div id="packages-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;" onclick="if (event.target === this) closePackagesModal()">
+            <div class="glass p-6 w-full max-w-lg mx-4">
+                <div class="flex justify-between items-center mb-1">
+                    <h3 class="text-lg font-bold text-white">Packages</h3>
+                    <button type="button" onclick="closePackagesModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <p id="packages-modal-client" class="text-xs text-gray-400 mb-4"></p>
+                <p class="text-[11px] text-gray-500 mb-3">Base comes with every client. Tick the add-ons they have.</p>
+                <div id="packages-modal-rows" class="space-y-2"></div>
+                <p id="packages-modal-msg" class="text-xs hidden mt-3"></p>
+                <div class="flex justify-end gap-2 mt-5">
+                    <button type="button" onclick="closePackagesModal()" class="btn-secondary btn text-sm">Cancel</button>
+                    <button type="button" id="packages-modal-save" onclick="savePackagesModal()" class="bg-green-600 hover:bg-green-500 text-white btn text-sm">Save packages</button>
+                </div>
+            </div>
+        </div>
+
         <!-- EDIT CLIENT MODAL -->
         <div id="edit-client-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.85); backdrop-filter:blur(8px); overflow-y:auto; padding:2rem 1rem; align-items:center; justify-content:center;">
             <div class="glass p-8 w-full max-w-lg mx-4">
@@ -2963,7 +3161,7 @@
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">Add-ons</label>
-                            <div id="edit-client-services" class="flex flex-wrap gap-x-4 gap-y-2"></div>
+                            <div id="edit-client-services" class="space-y-2"></div>
                             <p class="text-[10px] mt-1" style="color:var(--t3);">Ticking a new add-on starts its onboarding: its steps show on their Get Started. Unticking ends it, and its history stays.</p>
                         </div>
                         <div class="col-span-2">

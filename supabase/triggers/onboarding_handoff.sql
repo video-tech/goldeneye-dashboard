@@ -77,7 +77,8 @@ set search_path to 'public'
 as $function$
 declare
   v_title    constant text := 'Onboarding complete — ready for campaign build';
-  v_hook     constant text := 'https://hook.us2.make.com/hucrpp6hm43ps165n7wxut8v9rn3dksu';
+  -- The contact check sends Make's webhook once the client is found in our Midas GHL (ghl-contact-check, mode "handoff")
+  v_fn       constant text := 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ghl-contact-check';
   v_key      text := lower(regexp_replace(coalesce(NEW.client_name, ''), '[^a-zA-Z0-9]', '', 'g'));
   v_client   text;
   v_email    text;
@@ -174,23 +175,13 @@ begin
           5, 4, 1, 92, current_date + 1,
           v_client || ' finished every onboarding step in their portal.', now());
 
-  -- No usable email means no text. Make finds the client in GHL by email, and GHL's contact
-  -- search is fuzzy. On 2026-09-14 a single completion came back with 10 contacts, all
-  -- leads, which Make tagged, and GHL texted every one "onboarding complete". Make now
-  -- filters for an exact email match too, but a blank or malformed email must never leave
-  -- here at all. The handoff task above is still raised, so an admin sees the client finished.
-  if v_email !~ '^[^@\s,]+@[^@\s,]+\.[^@\s,]+$' then
-    raise warning 'onboarding handoff: no usable client_email for %, text not requested', v_client;
-    return NEW;
-  end if;
-
-  -- A Make outage must never roll back the client's own progress save
+  -- The text goes through the GHL contact check. GHL's contact search is fuzzy, and on 2026-09-14 one completion with no
+  -- email tagged and texted 10 leads; the function sends Make's webhook only on one EXACT email match in our Midas GHL,
+  -- and raises a "not sent" task otherwise (a missing or malformed email included).
+  -- A failure here must never roll back the client's own progress save.
   begin
-    -- The hook URL is public (this file is in a public repo), and on 2026-09-11 an EMPTY
-    -- request to it, not sent by this trigger, texted 10 leads. So Make only acts when the body
-    -- carries this secret. It lives in Supabase Vault, never in the repo. With it missing,
-    -- nothing is sent: an unannounced completion is recoverable, a text to the wrong person
-    -- isn't.
+    -- The cron secret proves this call is ours. It lives in Supabase Vault, never in the repo. With it missing,
+    -- nothing is sent: an unannounced completion is recoverable, a text to the wrong person isn't.
     select s.decrypted_secret into v_secret
     from vault.decrypted_secrets s
     where s.name = 'make_onboarding_hook_secret'
@@ -202,19 +193,19 @@ begin
     end if;
 
     perform net.http_post(
-      url     := v_hook,
-      headers := '{"Content-Type": "application/json"}'::jsonb,
+      url     := v_fn,
+      headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', v_secret),
       body    := jsonb_build_object(
-                   'event',        'onboarding_complete',
+                   'mode',         'handoff',
                    'client',       v_client,
                    'client_email', v_email,
                    'completed_at', NEW.completed_at,
-                   'services',     v_services,
-                   'secret',       v_secret
-                 )
+                   'services',     v_services
+                 ),
+      timeout_milliseconds := 30000
     );
   exception when others then
-    raise warning 'onboarding handoff webhook failed for %: %', v_client, sqlerrm;
+    raise warning 'onboarding handoff request failed for %: %', v_client, sqlerrm;
   end;
 
   return NEW;
@@ -244,7 +235,7 @@ execute function raise_onboarding_handoff_task();
 --   select tgname, tgrelid::regclass, pg_get_triggerdef(oid) from pg_trigger
 --   where tgname = 'trg_onboarding_handoff';
 --
--- Did Make accept the last few? pg_net keeps responses for about six hours.
+-- Did the contact check send Make the webhook? ({"sent":true} / {"sent":false,"status":…}). pg_net keeps responses ~6 hours.
 --   select r.created, r.status_code, r.content, r.error_msg
 --   from net._http_response r order by r.created desc limit 20;
 --

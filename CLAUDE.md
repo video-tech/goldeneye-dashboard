@@ -367,6 +367,33 @@ and `morning-audit` share a hook, so the filter went in only after that function
   - **Order:** run the SQL, then deploy `client-summary`, which selects the column. Saving a task
     marked hidden before the SQL exists is refused rather than saved visible.
   - **Tests:** 6 PGlite checks.
+- **`clients` policies, fixed 2026-10-02** (`supabase/sql/clients_rls.sql`). This was the same bug as
+  `daily_reports`/`weekly_reports`/`tasks`, but worse. Five `authenticated` policies said `true`
+  for SELECT, INSERT (twice), UPDATE and DELETE, so any portal client could read every client's
+  retainer, payment status, emails and ad account id, and could edit or delete any client row.
+  - **Now:** `Admins manage all clients` (ALL, `current_user_is_admin()` on both using and with
+    check) and `Clients read their own client row` (SELECT, `client_row_visible(name)`), plus
+    `Investor Read Access` left untouched (the intentional investor exception, like
+    `Admin and Investor Task Access`).
+  - **Members** read through `user_client_access`, which `client_row_visible` covers. Nobody but an
+    admin writes. A non-admin UPDATE/DELETE silently matches 0 rows, and an INSERT gets 42501.
+  - **No recursion:** `client_row_visible()` reads `clients`, but it's SECURITY DEFINER owned by
+    postgres (the table owner, no FORCE RLS), so its inner read bypasses RLS.
+  - **app.js:** the auto-overdue `payment_status` write in `fetchAllGlobalData` used to run for
+    whoever was signed in. It's now admin-only, and the screen still shows overdue for everyone.
+    The Payments tab's Save / Log Payment buttons are hidden and guarded for non-admins.
+  - **Unaffected:** edge functions (service_role), Make (its connection can't be anon, since anon
+    never had a policy and the pull has always worked), the SECURITY DEFINER functions, the invoker
+    SEO RPCs (a client reads their own row), and the `daily_reports`/`tasks` policies that look
+    into `clients` (they only need rows this policy still shows).
+  - **Known limit:** the portal's daily_reports auto-match resolves ad account → client name
+    by reading `clients`, so a person matched only by `daily_reports.client_email`, with no
+    access row and not in `clients.client_email`, now gets the Meta account name. Nobody signed
+    in is in that position today. One 3Sixty daily_reports email isn't in its `client_email`.
+  - **Tests:** `clients_rls_tests.sql` applies the change in a rolled-back transaction and
+    simulates 8 JWTs: an access-row client, an email-fallback client, both, a member, a signed-in
+    user with no access, anon, the investor and an admin. All 8 pass in PGlite, and against the
+    old policies 7 fail (the control).
 - **`client_row_visible(text)`, added 2026-09-10** — the RLS helper every client-facing table
   added from here on should use. Wraps admin / `user_has_client_access()` / `client_email`
   fallback into one call so the fallback cannot be forgotten. See SEO measurement for why that
@@ -483,6 +510,13 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
     `onboarding`, an unticked one becomes `ended` (after a confirm), and re-ticking an ended one
     restarts it.
   - **Tests:** 26 jsdom checks.
+  - **Package controls (2026-10-19):** **Edit Client**, **Edit** on the Roster profile's services section and the packages button beside the stage chip on the Accounts page (`#packages-modal`,
+    admins only) share `packageRowsHtml` / `planPackageRows` / `applyPackagePlan` in app.js. A newly ticked add-on defaults to
+    **Already running** (saved `active`, no onboarding), with **New** (saved `onboarding`) as the choice that starts its steps; an
+    add-on they have gets an Active / Onboarding / Paused select; unticking ends it after a confirm. Add Client keeps the plain
+    checkboxes (a new client's add-ons start onboarding). Writes `client_services` only, which has no trigger, so nothing is sent.
+    Nothing about packages is in the client portal. `tests/packages-modal.test.mjs`, 24 jsdom checks,
+    3 of 3 breakages caught.
 - **Switched over 2026-09-15:** Get Started, agency tasks, stage checklists and `trg_onboarding_handoff`
   all use the tags now.
   - **One source:** app.js loads `onboarding_steps_for_clients` and `service_onboarding_status_for_clients`
@@ -676,9 +710,71 @@ Two traps worth knowing:
 - **The prompt must permit an empty section.** Forcing three populated columns every
   morning guarantees invention on a quiet day.
 
-`clients.target_cpl` is read if present and degrades to "no CPL target set". Without it
-the model can only compare a client to their own past, so it cannot tell a good $60 CPL
-from a terrible one.
+**`clients.target_cpl` (set in Edit Client, added 2026-09-21) is the yardstick when present.**
+Without one, the audit compares a client to their own last 28 days and cannot tell a good
+$60 CPL from a terrible one, and a client whose own history is poor reads as fine for being
+consistently poor. `supabase/sql/target_cpl.sql` is the migration; the column already existed.
+- **The bad side (CRITICAL / WATCH) is judged against the target.** Expected leads = recent spend
+  ÷ target, and `cplDelta` is against the target. The baseline-leads floor doesn't apply, since a
+  target is a given rather than an estimate. `signal.yardstick` / `yardstickKind` say which was used.
+- **The good side (IMPROVING / SCALE_CANDIDATE) always uses their own baseline.** Beating a target
+  isn't the same as improving, and using it there would call every client with an easy target a
+  scale candidate every morning. The driver decomposition also stays against their own past.
+- **The spend rule** (`burnCplMultiple` 2×, `burnMinSpend` $200): CPL at least double the
+  yardstick on $200+ of spend is CRITICAL with **no significance test**, and it runs *before* the
+  volume gate. That gate is what made a $300-a-week account unreadable: at that size 3 leads
+  against 7 expected is one bad week, however much it cost. Zero leads on $200+ counts. Its note
+  reads "…is 2.3× the $45 target" and the model is told to call it a week that cost too much, not a
+  proven decline.
+- **What it costs in texts.** A 7-day window slides daily, so a bad week stays CRITICAL for several
+  weekday mornings, and each one texts both admins. Small accounts also swing (3Sixty's last 8
+  weekly CPLs: $32, 48, 280, 44, 47, 105, 42, 103), so expect the occasional luck-driven text.
+- **Tested 2026-09-21** on the real weekly figures (26 checks): 3Sixty and SimpliBlinds go CRITICAL,
+  PANDEN stays STABLE with no target, and with one goes WATCH at $45 and CRITICAL at $40.
+
+### Per-ad flags in the morning audit (built 2026-10-12, `morning-audit/ads.js`)
+
+Which individual ads are at or over their client's `target_cpl`, appended to the saved card. Needs
+**meta-sync data** and a **target CPL** on the client. Alerts only: nothing is paused or changed.
+- **Decided in code, never by the model.** `computeAdFlags` builds the list and `renderAdFlagsHtml`
+  appends it after the model's text, so the model never sees an ad name or an ad figure (its prompt
+  still says it has account-level data only). Ad and ad set names are escaped.
+- **The rules** (last 7 days, the audit's own window): an ad is flagged when it spent at least
+  `targetMultiple` × target **and** either has no leads or its CPL is at least that. Skipped: an ad
+  under 4 days old (still learning), and one with no spend in the last 2 days (already off).
+- **`AD_ALERT_CONFIG.targetMultiple` is 1 (at target), the team's choice on 2026-10-12.** A 90-day look
+  back at the real ad data, with suggested targets, found that of ads flagged at 1× about 22% were
+  back under target the next week, at 2× about 14%; the money spent on ads that stayed bad the
+  following week was $5,803 at 1× against $867 at 2×. Raise it to 1.5 or 2 to flag fewer ads: it
+  moves both tests at once.
+- **Leads are Meta's, scaled to the daily pull.** Meta's lead count runs well above Make's for some
+  accounts (Anxiety Solutions, Oct 5-11: Meta 37 and Meta's own Ads Manager 37, Make 15; the other
+  clients line up). GHL is the source of truth for leads, and Make's pull is what the audit uses, so
+  each ad's Meta leads are multiplied by (the pull's leads ÷ Meta's leads for the account), within 0 to
+  1.5 and only when the pull covered 80% of the window. The card says when it did this.
+- **Read through the same lens as the rest of the audit:** one yardstick for the account and its ads.
+- **What the card says about clients it skipped:** no target CPL (named, so it nudges), no ad data
+  synced yet, or data more than 2 days behind the audit window (meta-sync late).
+- **ADS OFF (`applyAdsOff`, same file).** Make writes no row for a day with no spend, so a client whose ads
+  are switched off looked exactly like a broken pull and was reported as "the daily pull looks broken".
+  A DATA STALE or DATA GAPS client becomes **ADS OFF** when meta-sync ran for it within 48 hours without
+  an error, covered the audit's window, and Meta shows no spend for the last 3 days of it. The note
+  gives the last day with spend, and the model is told to say the data is fine and ask the team to
+  confirm it is intended. Anything meta-sync could not check (an error, no recent run, no sync record)
+  keeps its old verdict, so a real broken pull is never hidden. Ads running with rows missing (Sunset's
+  4 of 7 days) stays DATA GAPS. ADS OFF is a calm marker, never a text, and the dashboard's
+  Intelligence card ignores it. First seen 2026-10-13: Alta Vista (ads off since Sep 29).
+- **No new texts.** The critical-alert text is unchanged. The chat's context (`mode: "context"`) also
+  carries the flagged ads.
+- **Fails safe:** if `meta_ad_daily` is missing or unreadable the section is left out and the card is
+  saved as before. Rows are read per client and paged past PostgREST's 1000-row cap.
+- **Not built:** automatic pausing. When it is, per the plan: a second System User with its own token
+  (the sync's stays view-only), a separate function that only sets an ad to paused, a per-client switch,
+  a log of every pause, never an ad under about 4 days old or a client's last running ad, and a dry-run
+  period first. The look-back found little to gain: about $870 in three months at 2×.
+- **Tests:** `ads.test.mjs` (node), 46 checks on the flags, the scaling, the rendering and ADS OFF, with 20
+  deliberate breakages all caught; `loader.test.mjs` (node with `--experimental-strip-types`) runs the real
+  loader against a fake database, including paging and its fallbacks; `index.ts` type-checks.
 
 ### Meta restates the past — checked, and it does not bite us
 
@@ -1034,6 +1130,15 @@ that folder, then `supabase/sql/rename_client.sql`, then deploy.
   midasmediafirm.com on 2026-09-11:** a real Google search, then the site, then Book, arrived
   tagged `utm_source=google&utm_medium=organic&src_restored=1`. A client without the snippet
   shows a high `self_referral` rate, which is the signal to install it.
+- **`clients.lead_hosts` (2026-10-12, `supabase/sql/lead_hosts.sql`) narrows "on the client's own site"
+  to an allow-list of hosts.** Midas's domain also hosts client landing pages
+  (`everoakcabinetry.midasmediafirm.com`, `astrarealestate.midasmediafirm.com`), and the domain
+  rule filed their paid leads under Midas Media: 42 of its 43 rows. Midas now lists
+  `midasmediafirm.com` and `goldeneye.midasmediafirm.com` (its booking host). Empty or null keeps the
+  whole-domain rule, so other clients are unchanged. **Run the SQL before deploying the function**; the
+  function falls back to asking without the column, but the list does nothing until it exists.
+  The SQL also deletes the 42 mislabeled rows. The log line now carries the GHL `location` id.
+  12 checks run the real `decide()`, including the column-missing fallback.
 - **Every new SEO client needs one real Google-search test lead** before their organic count is
   trusted, because each site's form or booking setup decides whether the source survives.
 - **Security.** `verify_jwt = false` for this one function, because GHL can't send the gateway
@@ -1699,8 +1804,25 @@ The client-facing plan (what 3Sixty must supply) is claude.ai/code/artifact/dc85
   3. Connect 3Sixty's QuickBooks in Make, build the scenario from the contract (filter on `secret`
      first; exact-email customer match, never a fuzzy search result), test with a fake customer.
   4. `supabase secrets set DECK_ESTIMATE_HOOKS=...` and the panel appears.
-- **Unverified until the first real estimate:** whether QuickBooks takes the negative adjustment as
-  an ordinary line or needs a discount line, and how it rounds qty × rate on fractional square feet.
+- **Prices come from 3Sixty's own sheet (2026-10-12):** Google Sheet "Pricing sheet", owner
+  ashley@3sixty-industries.com. Decking per sqft, **stairs per stair by material** (4 ft wide, plus a
+  per-foot charge for wider), railing per foot, RainEscape $22, demo $8/sqft, soffit and gutters
+  $8/ft, underside paint $5/sqft, concrete footings $350. Checked against ten of their real
+  estimates: deck lines miss by 3.8% on average, 6.7% at worst. It replaced rates fitted to those
+  estimates a week earlier. A price change is made in `estimator.html` **and**
+  `estimator-simple.html` (separate configs), then rebuilt.
+- **Line kinds:** decking, footings, railing, steps, waterproofing, demo, `addon` (priced add-on),
+  `custom`, adjustment, `addon_tbd` ($0, quoted on site). `validate.ts` lists them; a kind the
+  calculator adds must be added there too, and a test feeds the real snippet to the real validator.
+- **Custom line items (portal copy only):** up to 3, a name and a price a rep types. Added exactly as
+  entered and left out of the 2.5% adjustment; a negative one is a discount. `customLineItems` is 0
+  on every public build, so a website visitor is never offered a box to type a price.
+- **3Sixty's own QuickBooks estimates are lump-sum lines** ("Deck build", "Railing", "Deck Demo",
+  "Deck stairs", "Discount"), each quantity 1 with the detail in the description, and one already
+  carries a negative "Discount" line. So QuickBooks accepts negative lines, and the Make scenario may
+  want to group our lines the same way rather than map them one to one.
+- **Unverified until the first real estimate:** how QuickBooks rounds qty × rate on fractional
+  square feet.
 - **Tests:** 30 node checks on the function (validation, access, hook scoping, every Make outcome,
   double clicks), with mutations of the access check and hook routing confirmed caught; 12 jsdom
   checks on the real panel markup and app.js code; strict `tsc` on `validate.ts`/`handler.ts`; and
@@ -1744,10 +1866,571 @@ account totals and the morning audit; this adds what it can't say: which ad, and
   ad's spend, leads and cost per lead. Never a person's name: "we", or "Meta" for Meta's own
   changes. Budget amounts are shown only when the entry says they're money (minor units / 100).
   No rows, no block, and the report reads as before.
+- **Connecting a client (learned 2026-10-12, took most of a day).** The System User and the Meta app must
+  live in the **Midas Media LLC** Business (ID `1729931754111310`), the one that owns the agency's own ad
+  accounts. The first attempt was made with 3Sixty's Business selected in the picker, so the app and System
+  User were created there and only 3Sixty's account could be assigned. Now: the app is **Golden Eye
+  Internal** (`1081732768027916`, Marketing API use case, `ads_read`), assigned to the System User
+  `Golden Eye Sync` with Manage app (a second admin has to approve that), and the token never expires.
+  Each client then does two things: **their** Business shares the ad account with Midas Media LLC (Business
+  Settings → Users → Partners → Add → the ID above → the ad account, View performance only), and in
+  **Midas Media LLC** the account is assigned to `Golden Eye Sync` (Ad Accounts → the account → Add People →
+  System Users, View performance). "No permissions available" on Generate Token means the app is not
+  assigned to the System User or lacks the Marketing API. "Ad account owner has NOT grant ads_management or
+  ads_read" in a check means the sharing has not happened yet. Connected 2026-10-12: 3Sixty, PANDEN,
+  Caliber, Anxiety Solutions, Alta Vista, Sunset. Astra waits on its owner's approval; KLH and SimpliBlinds
+  are skipped on purpose. Check with `{"mode":"check"}` and read `net._http_response`.
+- **Meta sometimes refuses a big request** with `OAuthException 2: Service temporarily unavailable`
+  (Caliber Cabinets, at 30 and 90 days, while its 8-day daily pull worked). `syncAccount` now tries the
+  whole window first, and on a refusal pulls it in 7-day pieces (`windowsInChunks`), each retried once. A
+  piece that still fails is skipped and named in `meta_sync_state.last_error` as `partial: …`, the rest
+  load, a rate limit stops everything at once, and nothing loading at all raises the last error as before.
+  `chunks.test.mjs` (node with `--experimental-strip-types`) runs the real code against a fake Meta that
+  refuses anything over 8 days; 24 checks, 9 breakages caught.
+  **Time:** Meta's refusal of the big request itself takes about a minute, and each piece about 14 seconds, so
+  a 90-day load of a refused account does not fit in one 150-second call (Caliber loaded back to Sep 1 and
+  was cut off). No piece starts past 135 seconds from the start of the request, and any left over are named
+  as "out of time" in the sync state instead of the call being killed. For such an account use
+  `{"mode":"backfill","days":90,"client":"<name>","chunked":true,"skip_days":42}`: `chunked` goes straight to
+  pieces, and `skip_days` leaves out the newest days already loaded. A run with `skip_days` does not touch
+  `last_window`, so the sync still reads as current to the audit's ADS OFF check.
+- **Meta's lead counts are not the daily pull's.** For the same week, Anxiety Solutions: Meta's own Ads
+  Manager 37 leads, meta-sync 37, Make 15. Spend matches within 1%, and the other clients' leads line up
+  (Sunset 59 vs 59). **GHL is the source of truth for leads and Make's feed was deliberately left alone**, so
+  anything that mixes the two scales Meta's per-ad leads to the account's daily-pull total (see per-ad flags).
 - **Setup order:** `schema.sql` → `rename_client.sql` → set the token → deploy → `schedule.sql` →
   check → backfill. app.js can ship before any of it.
 - **Tests:** 37 parser checks (real SimpliBlinds extra_data), 14 PGlite checks (schema, RLS,
   rename), 22 jsdom checks on the report block (5 mutations, all caught), strict `tsc`.
+
+## Text the assignee (built 2026-10-13)
+
+"Text the assignee" in the task drawer (existing tasks only) texts whoever a task is assigned to.
+`supabase/sql/task_notify.sql` adds `notify_task_assignee(task_id)` and `team_contacts` (name, phone).
+- **No Make change:** it posts to scenario #6's hook with `event: client_request`, `kind: task_nudge`, a
+  one-person recipients list and the Vault secret, so route 1 sends it like any admin alert.
+- **Who it reaches:** `team_contacts` first, then `admin_alert_recipients` (active only), by full or first
+  name. "Tenny, Aidan" / "&" / "and" texts both. "Client", blank and unknown names come back as "no number
+  on file", never an error. **KJ is seeded in `team_contacts`** (+63, Philippines: a number typed with a leading `+` keeps its
+  country code, anything else is treated as US). The account manager still needs a row (example at the bottom of the SQL file).
+- **Message:** one line, no quotes or backslashes (Make's raw-text module), title + client + due date.
+  Notes are never sent. Admin only (checked inside the function); anon has no EXECUTE.
+- The database reads the saved assignee, so app.js refuses while the drawer has an unsaved change.
+- **Tests:** 23 PGlite checks (one mutation caught), 7 handler checks.
+
+## Activity panel on the Ads tab (built 2026-10-13)
+
+`#ad-activity-panel` under the charts, admin only, drawn by `renderAdActivityPanel(s, e)` after the KPI strip.
+- **Two halves:** the change timeline (`meta_activity`, significant rows only, one per object per kind per day, newest
+  first) and the ads table (`meta_ad_daily`: spend, share of spend, Meta leads, CPL). CPL is red at or over `target_cpl`,
+  the same 1x rule as the audit; an ad with spend and no leads counts when its spend alone reaches the target.
+- **Same wording as the weekly report** through `describeAdChange` / `adChangeEffect`. The panel passes the person's name
+  (`actorLabel`); the report never does and still says "we". No SQL, no deploy.
+- **Hidden** for All, non-admins, a client with no ad account, nothing synced, or a failed query. A render token drops
+  stale responses. The range is clamped to 120 days; ad rows are paged past the 1000-row cap.
+- **Tests:** 20 checks (one mutation caught) plus a check that the report's wording is unchanged.
+
+## The setup checklist: "Our checklist" (built 2026-10-14)
+
+What we do after a client finishes onboarding, for Base and Ads. Data: `supabase/sql/setup_checklist.sql` (generated by a script, so
+the quoting is never by hand). UI: the **Our checklist** button in the Health tab's Journey box and on the highlighted
+Onboarding Progress row, opening `#setup-checklist-modal`.
+- **Groups are ordinary tasks, steps are hidden tasks.** Three groups: **Get ready for GHL** (11 steps) and **Set up GHL** (31,
+  A2P right after the account, tests last) are our agency steps in the Onboarding stage, and **Launch ads** (5) is a Campaign
+  Building checklist item. Each step is a task with `type = 'Setup step'` and `checklist_group` = its group's name. The board shows
+  only the group tasks. **Steps and group tasks are `client_visible = false`**, so clients never see them (enforced by RLS).
+- **Templates → Stage Checklists (2026-10-19):** the stage picker labels Onboarding "Set up (our tasks)" (`stageTemplateLabel`; display only, the stored stage stays `Onboarding`, which the triggers, ghl-account and the stage advance key on). A package picker (`tpl-stage-package`: All, Base = untagged, each offered service) hides rows that don't match; it never removes them, so Save keeps every row. Add Task under a package starts tagged with it. The picker's first entry, **Onboarding (client steps)** (`CLIENT_ONBOARDING_VIEW`), lists the client's live steps from `onboarding_steps` read only (filterable, no Add/Save, a link to Client Onboarding, where they are edited). `tests/stage-package-filter.test.mjs`, 21 jsdom checks, 2 of 2 breakages caught.
+- **Where the definitions live:** steps are `stage_templates` rows (`task_type = 'Setup step'`), including stage `Onboarding`, which
+  the Templates > Stage Checklists picker now offers as "Onboarding (our setup steps)". The two onboarding groups are the existing
+  agency rows in `onboarding_steps`, renamed in place. Steps are tagged like everything else: untagged = Base, `ads` = Ads only.
+  A step title is `Section — Step`; the checklist draws the section as a small label.
+- **Not on the board query.** `fetchAllGlobalData` and the portal load skip `type = 'Setup step'`; `loadSetupSteps()` loads them
+  separately (admins only, paged past 1000) into `globalSetupSteps`. That keeps about 40 tasks per client off every board, report
+  and feed, and out of the 1000-row cap. `openTaskDrawer` also finds them, so "Edit" assigns someone or changes a date.
+- **Raised with the agency tasks** (`generateStageTasks`, Onboarding branch) for the services being onboarded, and with the
+  Campaign Building checklist on entering that stage. A group's task is hidden from the client by title match.
+- **A group ticks itself** (`syncSetupSummaries`): In Progress once a step is done, Complete when the last is. Forward only, so a
+  mis-click never reopens a finished group. It runs in the lifecycle catch-up, before the stage advance.
+- **The stage advance counts the steps.** `autoAdvanceCompletedOnboarding` also waits for every Onboarding-stage step, so a client
+  reaches Campaign Building when GHL is set up, not when ads are live. **That moved "Build and launch ads" out of Onboarding**
+  (the row is switched off); launching is now the Campaign Building group "Launch ads", and **Move Stage to Campaign Learning stays manual**.
+- **Auto-ticks:** three steps carry an existing auto-check (ad account saved, GHL location saved, ad data flowing). The next ones to
+  add are "target CPL set", "meta-sync ran without error", and whatever the GHL API setup can prove, as new keys in
+  `onboarding_auto_checks`. When the GHL account is created through the API, its steps become auto-checks the same way.
+- **Clients already past Onboarding** show our onboarding steps as done in Onboarding Progress (`agencyStepImplicitlyDone`): they
+  predate these steps, so no task was ever raised for them, and the stage move itself means that work was finished. Not the steps of an
+  add-on they are still onboarding (those need their task). Their own client steps are ticked with the existing **Mark client steps done** button.
+- **Existing clients** do not get one: the steps are raised when onboarding finishes or Campaign Building starts. The overview chat
+  ignores steps (`tasks` and `onboarding` tools).
+- **Tests:** 22 PGlite checks on the SQL (re-runnable, tags, order, group names match their task), 42 on the checklist logic and
+  drawer, 15 on generation and the advance rule (5 breakages caught), 71 on the chat tools.
+
+### Version 2 (2026-10-16, `supabase/sql/setup_checklist_v2.sql`, run after v1)
+
+Rewritten for the onboarding rebuild. It replaces every step template in the three groups (templates only; no client had a
+step task yet) and keeps "Draft Copywriting Hooks V1". Groups: **Get ready for GHL** 9, **Set up GHL** 37, **Launch ads** 5,
+and a new **First week live** (Campaign Learning, Ads: first real lead end to end, day 3, day 7), raised by the manual stage move.
+- **Golden Eye will create the GHL account** from MasterV.1 once a client's answers are in (not built yet: until then the
+  step says to create it by hand), so our step is **installing the Golden Eye app on it**, which GHL won't do for us.
+- **New steps:** a "what happens next" message to the client (sent by hand; the step's notes hold a template); website
+  steps tagged by `website_statuses` (4 for a site we build, 1 for an existing site's form); a **Final check** before the tests.
+- **Funnel (Ads):** build the funnel, build the survey, connect both to the Conversions API and lead follow-up (survey)
+  workflows, paste the pixel and token by hand.
+- **Workflows stay unpublished until the final check**, except lead to Golden Eye (everyone) and, for Ads, the Conversions
+  API and lead follow-up (survey) workflows. GHL's API can list workflows but
+  not edit or publish them, so that part stays by hand.
+- **Steps the account automation will take over** (create the account, business info, custom values, people) are written as
+  checks, so they still read right once Golden Eye does the work. New auto-checks for them go in `onboarding_auto_checks`.
+- **"Delete their stored website password"** is an SEO agency step (existing sites), added switched off; the questionnaire
+  go-live switches it on. It uses the new admin-only **Delete** button beside Reveal (`deleteOnboardingSecret`, which treats
+  a delete that removed no row as a failure).
+- **Tests:** `supabase/sql/setup_checklist_v2.test.mjs` runs v1 then v2 twice in PGlite, 25 checks, 4 of 4 breakages caught.
+  The delete button: 5 jsdom checks in `tests/onboarding-questionnaire.test.mjs`, 2 of 2 caught.
+
+### Clients see our tasks (2026-10-16, `supabase/sql/show_setup_tasks_to_clients.sql`)
+
+The setup tasks are shown in the client's portal, so they see what we're doing; their steps stay hidden. Renamed to read well to a
+client (one title serves both sides): Set up your CRM, Register your texting number, Build your website, Turn on your automations and
+add your team, Set up your blog articles (was Set up Cuppa); the rest unchanged. Descriptions are written for the client ("We
+register your business texting number…"). app.js raises group tasks with `client_visible` true and steps false. The portal shows a
+task's title and status only. The names in the v3 section below are the pre-rename ones. Tests: 10 PGlite checks, 3 jsdom checks
+(`tests/stage-tasks.test.mjs`), breakages caught.
+
+### Version 3 (2026-10-16, `supabase/sql/setup_checklist_v3.sql`, run after v2): smaller tasks
+
+The user's model: **a task is a piece of work, its checklist is the steps inside it.** v2's "Set up GHL" had 37 steps; v3 splits
+the work into these tasks (agency rows in `onboarding_steps`, steps in `stage_templates` with `checklist_group` = the task's title):
+
+| Task | Who | Steps |
+|---|---|---|
+| Connect Meta | Ads | 4 |
+| Connect their GHL to Golden Eye (install the app, location ID, review what Golden Eye filled) | all | 6 |
+| Register their texting number (website on their GHL, submit, number when approved) | all | 5 |
+| Build their website (`website_statuses` new_build / existing on the task itself) | site | 5 / 1 |
+| Build the funnel and survey | Ads | 7 |
+| Turn on automations and add their team | all | 6 |
+| Final check and test | all | 8 |
+| Set up SEO tracking | SEO | 9 |
+| Set up Cuppa | SEO | 4 |
+| Launch ads (Campaign Building; ends with checking the first real lead) | Ads | 6 |
+
+- **Gone, by the user's choice:** "Review their answers" (EIN check moved to A2P, logo check to the website), creating the GHL
+  account by hand (Golden Eye will create it), "First week live", and the separate SEO tasks: six are switched off, and the old
+  "Set up Cuppa" row became the Cuppa task (auto_check cleared, so it ticks from its steps). Every auto-tick moved to a step.
+- **The website task carries `website_statuses` {new_build, existing}**, so a client with no website situation never gets an
+  empty task that could never complete (and would hold up the move to Campaign Building).
+- **The arrow on a task (app.js, `setupGroupForTask`, `taskStepsToggleHtml`, `taskStepsPanelHtml`):** a group's task card on
+  the board, and its row in the list, shows "N of M steps"; the arrow opens the steps underneath, like a Roster row, ticked right
+  there through `toggleSetupStep`. Clicks inside never open the task drawer, the board's Sortable ignores drags that start there,
+  and `refreshSetupViews` redraws the board so the count and column follow. Admins only. **Our checklist** on the Health tab
+  draws the same rows (`setupStepRowsHtml`).
+- **Tests:** `supabase/sql/setup_checklist_v3.test.mjs` runs v1, v2 and v3 twice, 42 checks, 3 of 3 breakages caught;
+  `tests/task-steps.test.mjs` runs the real board, list and checklist code in jsdom, 22 checks, 5 of 5 breakages caught.
+
+## "Set up": a label, not a stage (2026-10-19)
+
+The Onboarding stage is shown as two phases everywhere a client's stage appears: **Onboarding** while the client still has their
+own steps to do, **Set up** once they've finished (the handoff task exists, or every client step that applies is done). Only the
+screen changes: `current_stage` and `tasks.stage` still say `Onboarding`, and every rule (the handoff trigger, ghl-account,
+the contact check, auto-ticks, `autoAdvanceCompletedOnboarding`, filters) still compares against it.
+- **Helpers** (app.js, after `lifecycleStages`): `clientPhase(row)`, `clientFinishedOwnSteps(name)`, `stageLabelForOurWork(stage)`,
+  `displayStages` (six steps). Display only: never compare their result or save it.
+- **Where:** Overview active roster, Roster stage column (sorted in journey order), the Accounts page stage chip, the portal profile,
+  the Journey box (Onboarding counts the client's steps, Set up counts our onboarding tasks), the Onboarding & Set up list (two
+  sections, theirs then ours), the Our checklist modal's stage tag, Move Stage (current phase; the option keeps value
+  `Onboarding`, labelled "Onboarding / Set up"), and the task drawer's stage option (same).
+- **The Onboarding & Set up box past Onboarding** (`onboardingItemsToShow`): only the steps of an add-on being onboarded now
+  (`service_status = 'onboarding'`, the portal's `getStartedSteps` rule), otherwise hidden. Steps added after a long-running
+  client onboarded (the questionnaire) aren't owed, and used to show as outstanding for clients like 3Sixty.
+- **Stages corrected 2026-10-19** (`supabase/sql/fix_client_stages_2026_10_19.sql`): Anxiety Solutions, Astra, KLH and Midas Media
+  to Optimizing. A direct `current_stage` update fires nothing: `clients` only has an INSERT trigger, and stage tasks come only
+  from Move Stage or the automatic move out of Onboarding.
+- **Not changed:** the database, edge functions, the chat tools, the morning audit and the client summary.
+- **Tests:** `tests/setup-phase.test.mjs`, 21 jsdom checks on the real code, 2 of 2 breakages caught, plus checks that the label is
+  never saved and the stage advance still reads the stored stage.
+
+## Loading screen (built 2026-10-14)
+
+`#ge-preload` at the top of `#theme-wrapper` in body.html: logo, name, progress bar and a status line. It is in the markup, so it is up the
+moment body.html lands, and **it fixed the sign-in card flashing on every load** (that card is visible by default until `initApp`
+finds a session).
+- **`gePreload` in app.js** (defined before `geStartupMark`, which drives it): the startup marks move the bar forward and never back
+  (`app.js running` 12%, `signed in` 28, `role checked` 42, `15 tables loaded` 72, `onboarding rules loaded` 88, `data loaded` 94).
+  It comes down in `initApp` after the first page is drawn, after the portal, on the pending screen, when there is no session (the
+  sign-in card becomes the page), and `fail()` shows a message and a Reload button if `initApp` throws. A 20 second watchdog offers a
+  reload if it is still up. Signing in reloads the page, so it shows again.
+- **`goldeneye.html` also paints a plain boot screen** (`#ge-boot`, colors written out because the tokens do not exist yet) before
+  body.html is fetched, and removes it when body.html is injected, since the two look the same. **That half only works once the
+  updated loader is re-pasted into GHL**; the dashboard half needs no re-paste.
+- 16 checks on the controller and its wiring (one breakage caught); the layout was checked in a browser.
+
+## Make pull limit notice (built 2026-10-14)
+
+Make's daily ads pull (scenario #1, "Midas Dashboard", id 4288195) fetches clients with a Supabase Search Rows step **limited to 100**
+(read from the blueprint 2026-10-14; this section used to say 10, which was wrong). It takes every client whose status is not
+paused or archived, then skips any without an ad account and business id. `showMakeLimitNotice()` (Overview, admins only) warns at
+`MAKE_PULL_LIMIT` (100) active clients with an ad account and goes red above it. Counted: `status` active and a non-empty
+`ad_account_id`. 6 checks.
+
+**Error handling (added 2026-10-14, after a second rate-limit failure).** On 2026-10-14 Meta returned `Application request limit
+reached (4)` mid-run (8 of ~18 operations; the same failure as 2026-09-23). The Facebook Insights step and the `daily_reports` write
+now have **Ignore** handlers and the Google Sheets step a **Resume** one, so one client's failure no longer stops the clients behind it,
+and a replay skips rows that already exist (the write is still a plain insert, so the duplicate-key error is what gets ignored). Replaying
+an execution works with no manual deleting now. A replay re-runs the Sheets step, so the "master data" sheet can get duplicate rows
+for clients that had already written. **The alert (built 2026-10-14, `supabase/sql/daily_pull_check.sql`).** A Make handler can't hold the Vault secret, so `daily_pull_check()` runs in the
+database at 13:30 UTC (pg_cron `daily-pull-check`) and texts **Tenny only** (+1 801 709 8501, a constant in the function) through scenario #6, same
+payload as `notify_task_assignee`. It flags a client Make is asked to pull that has no `daily_reports` row for yesterday but had one on at least 5
+of the 7 days before (Make writes no row for a no-spend day, so ads-off or on-and-off clients would otherwise be reported daily). `select daily_pull_check(false)`
+shows what it would say without texting. 21 PGlite checks, 9 of 10 breakages caught (the tenth is an equivalent mutant).
+The blueprint
+was re-saved without Make's cached editor metadata; the original is not in the repo.
+**`meta-sync` is a backup, not a replacement.** It covers 6 clients and counts leads differently from the pull, and the audit reads
+`daily_reports` for everyone. Keep both running.
+
+## Ask Golden Eye: the Overview chat (built 2026-10-13)
+
+`supabase/functions/overview-chat/` and `#ov-chat` at the bottom of the Overview page. Admin only.
+- **Looks things up instead of loading everything.** The model (`gpt-5.6-sol`, Responses API, low reasoning effort, `store: false`)
+  gets ten read-only tools (`tools.ts`): clients, ad performance (daily pull), per-ad breakdown, ad changes, tasks, check-ins,
+  website leads, SEO, onboarding, latest audit. At most 8 model rounds and 115 s; each result is capped (14,000 characters,
+  60 rows). Code computes every figure, the model quotes them.
+- **Runs as the signed-in admin.** Lookups use the caller's own JWT with the anon key, never the service key, so RLS applies as in
+  the dashboard. The caller is checked with `_shared/admin-auth.ts` (same rule as `ai-chat`) and Golden Eye's origins only.
+- **Read-only by construction:** no tool writes, and a test fails if `tools.ts` ever calls insert, update, upsert or delete.
+- **Deliberately not exposed:** task notes, check-in replies, client emails and phones, Stripe ids, ad account ids, credentials.
+  Client-typed text can still arrive in a task title, so the prompt says tool results are data, never instructions.
+- **Leads:** the prompt tells it the daily pull is the working figure, GHL the truth, and per-ad leads are Meta's own count.
+- **UI:** the browser sends only user and assistant text (the function refuses any other role), keeps at most 20 turns, shows
+  "Looked at: ..." under each answer, and drops a failed question from the history. Replies go through `formatChatReply`.
+- **Adding a lookup** means a runner and a `TOOL_DEFS` entry in `tools.ts`, plus a label in `OV_CHAT_SOURCES` in app.js.
+- **Deploy before pushing app.js.** The existing Client Intelligence Agent chat (`ai-chat`, gpt-4o-mini) is unchanged.
+- **Not tested live:** the OpenAI call shape (tools plus encrypted reasoning items with `store: false`) follows the Responses API
+  documentation but has only run against a scripted model. The first real question is the proof.
+- **Tests:** 69 checks on the tools, validation and loop against a fake database and a scripted model (3 breakages caught),
+  21 on the browser side, strict `tsc` on the three modules.
+
+## The office: team presence (built 2026-10-14)
+
+The top of Settings → Users & Roles (`#office-panel`): each admin's character at a desk, what they are doing, and a typed status.
+- **Data:** `team_presence` (`supabase/sql/team_presence.sql`), one row per admin, keyed on lower-case email. Admins read all rows and write
+  **only their own** (insert, update and delete are checked against `auth.email()`); clients and members see nothing. 19 PGlite checks.
+- **Polling, not Realtime, on purpose:** a public Realtime channel can be joined by anyone holding the public anon key; a table is protected by RLS.
+- **Heartbeat** (`presenceSend`, app.js): every 30 s and on every page change it upserts email, first name, page, the client on the Accounts page,
+  `away` (tab hidden or untouched for 5 min) and `last_seen`. **It never names `character` or `status`**, so it can't overwrite them.
+  Online = heartbeat under 90 s old. A missing table turns the heartbeat off after one warning.
+- **Characters are five whitelisted palette indexes** (skin, hair, style, shirt, extra), cleaned by `officeCleanCharacter` and drawn by
+  `officeCharacterSvg`, so stored text can never reach the markup. Default character comes from a hash of the email. Names and statuses use `escapeAttr`.
+- **Activity** comes from the page (`OFFICE_PAGES`): typing on Tasks, phone on Roster/Sales, and so on. Away = coffee, offline = asleep in Off duty.
+  A status expires after 4 hours. The office polls every 20 s, only while the Users view is showing.
+- **Off by default:** a Show characters / Hide characters button (`#office-toggle`) shows the office; the choice is kept per browser in `ge-office-on`. Off means no queries and no polling, but your own heartbeat keeps going, so teammates who have it on still see you.
+- **Adding an activity** means a line in `OFFICE_PAGES`, an icon in `OFFICE_ICONS` and (if it needs a new move) a CSS animation in body.html.
+- **Tests:** 55 node checks on the helpers, heartbeat and wiring (12 mutations caught); layout checked in the browser pane.
+
+## Onboarding rebuild: answers that pick the video (phase 1 started 2026-10-14)
+
+The plan is the "Golden Eye Onboarding Rebuild" doc (Claude Docs, dd7a6e98-99c2-482b-aae1-502ba8eca4b9, also exported as a PDF). First built piece: the
+two early questions, "Do you have a Facebook page?" and "Do you have a CRM you want leads sent to?", and the machinery behind them.
+- **Facts on the client** (`supabase/sql/onboarding_facts.sql`): `clients.facebook_page` (yes/no/unsure), `crm_choice` (no/yes), `crm_name`, `crm_method`
+  (email/webhook/unsure). Written only through **`set_client_onboarding_facts(client, facts)`**, which checks `client_row_visible` and validates every value.
+  It is a function rather than a column update because the `clients` policies are still open (Known gaps).
+- **Tags: `fact_conditions jsonb`** on `onboarding_steps` and `stage_templates`, such as `{"facebook_page": ["no"]}`. Several keys must all match, several values
+  are any-of, `{}` is everyone. **One rule still:** `onboarding_condition_matches()` gained a six-argument form that ANDs in `onboarding_facts_match()`, and
+  `onboarding_steps_for_client`, `stage_templates_for_client` and `onboarding_preview` pass the facts, so the portal, the admin view, the handoff trigger and the
+  Templates preview still cannot disagree. A tag on a fact that does not exist hides the step.
+- **Unanswered counts as the default** (`onboarding_fact_defaults()`: page yes, no CRM), so every existing client is unchanged and a step tagged "no" never reaches someone
+  who simply was not asked.
+- **Questions steps grew up** (app.js, "question logic" block): `show_if: {q, any}` (a question that depends on an earlier answer, evaluated live), `fact` and
+  `fact_values` (save the answer on the client; values line up with the choices), `dest` (where it goes in GHL later, recorded only), types phone/email/link with
+  validation (a link without a scheme gets https), and **drafts save by themselves** 1.5 s after the last change. Answers under a hidden question are not saved.
+  A changed fact reloads that client's steps (`loadOnboardingApplicability`) before the list re-renders. **Choices must not contain commas**: the editor splits on them.
+- **Templates editor:** every step and checklist item has "Answered" chips beside the service and website tags (only shown once the SQL has run, and only then saved);
+  each question has "Only ask if", "Saves to" and a later-destination field; Preview a Client has page and CRM pickers.
+- **Seeded hidden (active = false):** the Quick start questions step (second, right after the welcome video) and four of our tasks (help create a page, confirm partner access,
+  follow up if unsure, build the CRM lead send). **No new videos:** the two Facebook videos already existed as live steps, "not sure" gets the create video (which should open with
+  a short "check first" part) plus our follow-up task, and a client with their own CRM is rare enough that the task covers it with no video.
+- **Going live is a decision, not part of the SQL: `supabase/sql/onboarding_quick_start_go_live.sql`.** The app.js is live (pushed 2026-10-15) but this has NOT been run: the user wants it off until the whole rebuild is done, because a client is mid-onboarding. It switches Quick start and our four answer-driven tasks on, tags the two
+  existing videos ("Give us access to your Facebook" for a page, "Create your Facebook Page" for no page or not sure), and removes the two dropped video placeholders if they are still
+  hidden with no link. **Run it only after the new app.js is being served:** the old code shows every question and requires "Which CRM?" even after "no CRM", which would trap a
+  client. 20 PGlite checks, 6 of 6 breakages caught, including a client who answers nothing (sees the access video only), "no", "not sure" and "CRM yes".
+- **Still to build** (plan phases 2 to 5): the style-picker question type, the GHL account function (phase 0 is proven, see ghl-provision and the
+  Marketplace app below), and retiring Make #3.
+- **Tests:** 48 PGlite checks on the SQL (13 breakages tried, all caught), 44 node checks on the question logic (14 caught), 36 browser checks on the real form and builder,
+  9 on the tag chips.
+
+### The questionnaire (built 2026-10-15, **LIVE since 2026-10-16**): `supabase/sql/onboarding_questionnaire.sql`
+
+**Went live 2026-10-16** after a full GE Test Client run (questionnaire, tasks, GHL account, fill, users): teardown, then
+`onboarding_quick_start_go_live.sql`, then `onboarding_questionnaire_go_live.sql`. Ironshell Roofing (no GHL account) is the first real
+client on it; ghl-account makes their account when they finish.
+
+Six Questions steps replace the three GHL forms, agreed with the user question by question. **All added with `active = false`**.
+**Going live is `supabase/sql/onboarding_questionnaire_go_live.sql`, run only when the user says the rebuild is done** (a client is
+mid-onboarding). In one transaction it switches the six steps on, the three form steps ("Tell us about your business", "Your service area and
+hours", "Offers and preferences") off, and takes `q_services` and `q_liked_sites` out of the SEO step "Tell us about your business for SEO",
+since the questionnaire now asks both (old answers stay). Re-runnable.
+- **Services are asked once, for everyone:** `a_services` "Which services do you want more calls for?" in About your business
+  (`custom_value:services_list`). Jobs and offers no longer asks it; its job-value question reads "for each of your main services".
+  **The SEO step's Copy for Cuppa still carries services:** `clientAnswersHtml` adds the answer to any question saving to
+  `custom_value:services_list` to the copy of a step tagged `seo`, unless that step already holds a services answer of its own.
+- **Steps:** About your business (everyone), Registering your texting number (everyone, all private), Texting and your service area
+  (everyone; the call-handling question was dropped 2026-10-16), Your jobs and offers (Ads), Access to your website (**SEO, existing site only**, the user's call). Business hours stay on the SEO
+  questions. Dropped on purpose: personal email, Facebook login (Quick start already asks for the page link), area codes, ad-image policy.
+- **Every question has a `dest`** saying where its answer goes: `ghl:<location field>` (set when the account is created), `custom_value:<key>`
+  (Master's own keys), `a2p:<field>` (GHL's Business Profile, typed in during A2P registration), `admin:<field>`, `access:<field>`,
+  `ad_brief:` and `task:` (recorded; raising the calculator/rendering tasks isn't built). Phase 3 reads it.
+- **Private answers (`private: true`):** never go into `onboarding_answers` (client-readable). `save_private_onboarding_answers()` stores them in
+  `onboarding_private_answers` (admins read, admins delete, nobody writes directly). **The server decides what's private from the step's own
+  questions**, never from what the browser sends. The client can submit and change them but never read them back:
+  `private_onboarding_answer_keys()` tells the portal only which questions are answered, so the form says "Saved" and a required private
+  question counts as answered. Private: mobile, legal name, business type, EIN, job values, close rate, website login page/username/2FA contact.
+- **Secrets (`secret: true`, only the website password):** encrypted with pgcrypto in `onboarding_secrets`, key `onboarding_secret_key` in
+  Supabase Vault (created by the SQL, never in the repo). Admins see it masked and click **Reveal** (`reveal_onboarding_secret`, admin only);
+  every reveal is logged in `onboarding_secret_reveals`. Delete the row once we have our own access.
+- **app.js:** private fields never prefill (a password box for the secret, "Only our team can see this"), EIN type (9 digits, saved as
+  12-3456789), the admin answers list shows private answers (lock) and secrets (key, Reveal; shown with `textContent`), and Copy leaves both out.
+  Templates has "Only our team sees it" and "Encrypt" per question; the editor refuses a question depending on a private answer, a private fact,
+  and an encrypted choice. Missing SQL degrades: keys load empty, and a private save fails loudly instead of dropping the answer.
+- **All three tables are in `rename_client.sql`.**
+- **"Your new website" (added 2026-10-16)**, for every client whose website situation is "We're building it" (`{new_build}`, not only SEO):
+  a **style picker** plus 16 questions (likes and dislikes, brand colors, logo, lettering, feel, pages, features, domain, content ready).
+  - **The style picker** (question type `style`) shows looks as cards like the website-options pages the team sends (Red Valley,
+    claude.ai/artifact/YRun7Fkpye9fiN5sCnaDmc): picture, name, a line, color swatches, "See the example site" (new tab), and a **1st and
+    2nd choice**, saved as `[first, second]`. The looks are **data on the question** (`styles: [{name, note, colors, image, link}]`), edited
+    in Templates ("Style picker (looks)" type, Add a look), so swapping them needs no code. Only `#hex` colors and `https` pictures and links
+    reach the page (`obStyleLooks`), and the editor refuses fewer than two looks, duplicates, bad colors and non-https links.
+  - **Starting looks** (Bold and local, Sharp and modern, Warm and friendly, Refined and premium) come from the Red Valley directions 1, 3, 4
+    and 5, with **pictures and example-site links empty**: the user is building four clickable example sites (Red Valley option 1,
+    claude.ai/artifact/PkBs8x6iwdoZdUHkMtcdJX, is the first), and their links go in Templates when ready.
+- **Tests:** `supabase/sql/onboarding_questionnaire.test.mjs` (PGlite **0.2.x**: 0.3.x crashes after an error raised in a function; pgcrypto is
+  stood in, since PGlite can't load it), 85 checks including the go-live file, 6 of 6 breakages caught. `tests/onboarding-questionnaire.test.mjs`
+  (jsdom), 67 checks on the real app.js code, 10 of 10 caught. Both need the package dir in `PGLITE_DIR` / `JSDOM_DIR`. `qdemo.html` (not committed) runs the real code
+  against a pretend database in the browser pane, served by `preview-server.js` at /qdemo.html.
+
+### ghl-setup: Master's custom values, contact fields and pipeline over REST (phase 0, built and run 2026-10-14)
+
+`supabase/functions/ghl-setup/`. **GHL's MCP connector (`ghl-master`) has a fixed tool list with no custom-values tools**
+and no create for custom fields, tags or pipelines, so its write scopes can't be used through it. This function does it over REST.
+- **Master only:** the location id is the `GHL_MASTER_LOCATION_ID` secret, never the request, so no call can reach a client's account.
+  The token is `GHL_MASTER_TOKEN` (Master's Private Integration token: custom values, custom fields, opportunities).
+- **Three independent sections** in one answer (`values`, `fields`, `pipeline`); one failing never stops the others.
+- **Modes:** `check` (default) compares Master with `plan.ts`; `create` alone says what it would create; `create` with
+  `confirm: true` creates what's missing (values **empty**: each client's answers fill them in phase 3), waits 2.5 s, then reads back.
+  The wait is there because GHL lists a new item a moment late: the first run reported a created field and the pipeline as missing.
+- **Contact fields, 23 in 3 packs** (`MASTER_FIELD_FOLDERS` in `plan.ts`): **Lead Info** (5: timeline, budget, how they heard,
+  homeowner, financing interest), **Cost Quiz: Kitchen Remodel** (7, keys `kitchen_*`) and **Cost Quiz: Home Builder** (11, keys
+  `build_*`). Service Requested and Quiz Estimate were deleted in GHL on purpose on 2026-10-15 and removed from the plan. GHL makes a field's key from its name, so each pack's names start with its trade
+  and packs can't collide. **A new trade's quiz is one more entry there, then a create run.** Choices go as `options` (not in
+  GHL's spec; it worked) and are read back: a field saved without its choices is reported under `choices_missing`, never deleted.
+- **A field's GHL name is its question** (GHL shows the name as the question on forms and surveys), so each field has a short
+  `name` (reports), a `key` and a `question` (its GHL name). Renaming keeps the key (verified 2026-10-14: 24 renamed,
+  `contact.kitchen_size` etc. unchanged, every choice intact). A create run renames any field whose name isn't its question,
+  resending the placeholder and choices with it, since an update without them may clear them. A new field made where GHL picks
+  the key from the name gets `slug(question)` as its key, which `plan.ts` accepts as an alias, so it's never made twice.
+- **Folders can't be made by API.** GHL: "Api does not support objectKey of type contact or opportunity", and no endpoint moves a
+  field. So the fields were created unfiled and are **sorted into folders by hand** in Settings → Custom Fields. The function
+  still tries the folder API, and with no folder list it creates no folder and deletes nothing (it would recreate today's 4
+  lead fields inside a folder it could see: allow-listed by key, added on or after 2026-10-14). A check will keep listing every
+  field under `outside_folder`; that's expected.
+- **Pipeline "Lead Pipeline"**: New lead, Contacted, Estimate scheduled, Estimate sent, Won, Lost. `POST /opportunities/pipelines`
+  with `Version: v3` (the docs page's only version; it worked), falling back once to 2021-07-28 on 400/404. Not in GHL's
+  public OpenAPI spec. Names are unique per location, so a retry can't duplicate it. A starting point only: never forced on a client.
+- **Master's own names count (aliases in `plan.ts`)**, so no duplicate is made next to them: `physical_address` (business_address),
+  `business_name` (company_name), `google_review_link`, `facebook_page_url`, `instagram_handle`, `hours_of_operation` and
+  `marketing__website_booking_page_url` (booking_link). **Phase 3 must fill these keys, not the plan doc's names.**
+- **Pixel and CAPI stay manual (decided 2026-10-15).** The CAPI workflow copied into Master is set up by hand per client as part
+  of ads setup: admin access already reaches the client's dataset, most clients have one (with two, a person picks: 3Sixty's
+  account carries its own "MAIN 3Sixty Industries" and our "Midas Deck & Patio Pixel"), and the CAPI token can only be generated
+  in Events Manager. So the plan has no pixel or token custom values. Never put one Midas token in every client's GHL: custom
+  values are readable by the client's staff, and that token could send fake events to every client's pixel.
+- **Client users** aren't carried by a snapshot: each is invited per sub-account, as role User with Workflows switched off
+  (the lead workflow holds the webhook secret). Manual for now; the account function could create them later (agency token).
+- **Callers:** an admin, or the SQL Editor with the cron secret (`run.sql`, same headers as meta-sync's one-off calls).
+- **Run 2026-10-14:** the check returned 200 (the token reads custom values over REST: phase 0's read half proven), then create
+  added the other 12 empty (GHL accepts an empty value), none failed, and the read-back showed nothing missing. Master also holds
+  values the plan doesn't name (main_offer, promotion_name, primary_service, business_niche, logo_url, favicon_url,
+  business_legal_name, new_booking_ty_url); they were left alone. `business_legal_name` stays empty: the legal name lives in
+  Golden Eye's compliance record.
+  The second run created the 4 contact fields (both choice fields with all 5 choices) and Lead Pipeline with its 6 stages, all
+  confirmed through the connector. Master's own 2 review fields and 3 client pipelines were left alone. A third run created
+  the other 21 fields (the 3 new Lead Info fields and both quiz packs), none failed, all choices read back.
+- **Not done yet:** tags, workflows, forms and templates (built by hand), and creating a sub-account from a snapshot (needs an
+  agency-level token, the rest of phase 0).
+- **Tests:** `ghl-setup.test.mjs` (node `--experimental-strip-types`), 91 checks against a fake GHL, including Master as the real
+  check found it, the folder fallbacks, the delete guards and the rename; 11 of 11 breakages caught.
+
+### ghl-provision: the phase 0 account test (built 2026-10-15)
+
+`supabase/functions/ghl-provision/`, `run.sql` beside it. Proves the rest of phase 0: create a sub-account from the Master
+snapshot, then read and write its custom values. **Test only:** it names every account it makes "GE TEST <date time>" with
+made-up details (a 555 number, example.com), only reads or writes an account named "GE TEST", never Master and never one a
+client has as `ghl_location_id`, refuses a fourth test account, never deletes, and never returns a token.
+- **Secrets:** `GHL_AGENCY_TOKEN` (an **agency** Private Integration token; creating a sub-account is agency-only, `locations.write`)
+  and `GHL_COMPANY_ID` (`aO4gguGsn5P1gl647qjV`). Callers: an admin, or the SQL Editor with the cron secret.
+- **Modes:** `snapshots` (find Master v1.0's id), `create_test` (dry run without `confirm: true`), `inspect` (custom values,
+  fields, pipelines, workflows that arrived), `fill_test` (writes business_name and owner_name, reads them back).
+- **The open question it answers:** whether the agency token works on the new account's own endpoints. It tries, and on
+  401/403 exchanges it for a location token (`POST /oauth/locationToken`) and says which worked.
+- **Tests:** `ghl-provision.test.mjs`, 31 checks against a fake agency; 4 of 4 guard breakages caught.
+- **Run 2026-10-15:** the agency token (GHL offers it only **Locations** and **Snapshots** scopes) listed 45 snapshots (ours is
+  **MasterV.1**, `XySR40RNsweVul9Gxtlp`; an older "Master Snapshot" also exists) and **created "GE TEST 2026-10-15 16:40"
+  (`iezHGamWbxcwOYybQx7u`) from it**. Getting inside the new account failed: its custom values refused the agency token, and
+  `/oauth/locationToken` answered "The token is not authorized for this scope". So **an agency Private Integration token can
+  create accounts but not get inside them.** A second inspect (16:52) read 30 custom values (all empty), 25 contact fields, 4
+  pipelines and 19 workflows, **but `GHL_AGENCY_TOKEN` then held a token made by hand inside the test account**, not the agency
+  one: it proves a per-account token reads everything, not that the agency token can. (The function reported "agency token"
+  because it only knows which secret it used.) The ways in stay: a token made by hand in each new account, or a private
+  Marketplace app. (`GHL_AGENCY_TOKEN` was unset 2026-10-15: with the app installed ghl-provision uses the app's key; creating an account through the app is still untested.) GHL's built-in
+  `{{location.name}}`, `.phone`, `.address`, `.website`, `.email` are filled at creation, so templates using them need no
+  custom value for those.
+- **What the snapshot brought, worth tidying in Master:** "5.leads to ghl" (the Golden Eye lead webhook) and "1. Missed Call
+  Text Back" arrive as drafts, so they must be published per account; "6. Capi - Lead 3Sixty" is a draft named for one client;
+  "OLD (leave drafted) - Fayetteville NC …" is a leftover.
+
+### Golden Eye's private GHL Marketplace app (built and installed 2026-10-15: phase 0 proven end to end)
+
+**Proven 2026-10-15 on "GE TEST 2026-10-15 16:40" (`iezHGamWbxcwOYybQx7u`):** created from MasterV.1 with the agency token,
+then through the app: inspect read 30 custom values (empty), 25 fields, 4 pipelines and 19 workflows ("access: app location
+token"), and fill_test wrote business_name "GE Test Co" and owner_name "Test Owner" and read both back.
+- **The app only reaches sub-accounts it is installed on.** The install screen (Target user Sub-account, installed by the agency)
+  offers a list of sub-accounts and **no "future sub-accounts" option**; `install_to_future` came back false. `ghl-provision`
+  mode `app_locations` lists where it is installed (installed now: Master, "Y (Demo) Test Location" and GE TEST).
+  **Tested 2026-10-15 22:08:** the app's own key **creates** an account from MasterV.1 ("GE TEST 2026-10-15 22:08",
+  `ryYoSWzzVyF3Ycb0ze8N`, no hand-made token), but **can't get inside it**: GHL answered "accessToken does not have access to
+  following location". So the app is **not** installed automatically on accounts it creates. Plan for phase 2: after creating an
+  account, Golden Eye shows the install link and a person ticks the new account (about 20 seconds); GHL's install webhook can
+  let Golden Eye carry on by itself once it's installed. No auto-install setting or install API was found in GHL's docs; a
+  public app with bulk install exists but needs GHL's review. A private app is limited to 5 agencies (we use one).
+- **Gotchas from the install:** GHL refuses a Redirect URL containing "ghl"; the custom values and fields scopes appear only with
+  Target user Sub-account; a reinstall shows already-installed accounts and only offers the rest, so a fresh code needs one more
+  account picked (or an uninstall from one); `GHL_COMPANY_ID` had been overwritten at 16:46 and refused our own agency until it
+  was set back to `aO4gguGsn5P1gl647qjV`; Supabase serves edge-function pages as text/plain, so the callback answers in plain text.
+
+Why: an agency Private Integration token can create a sub-account but never get inside one (`/oauth/locationToken` needs
+`oauth.write`, which those tokens can't have). An installed Marketplace app gets a Company token that **can** be exchanged
+for a token to any sub-account, so Golden Eye can create an account and fill it with no token made by hand.
+- **`_shared/ghl-oauth.ts`:** stores the agency's keys, renews them, and hands out location tokens. Access token ~24 h,
+  refresh token 1 year or until used (each renewal returns a new one and kills the old). Renewal saves only if the stored
+  refresh token is still the one it spent, so two requests renewing at once can't leave a dead key stored.
+- **`ghl_oauth_tokens`** (`supabase/sql/ghl_oauth.sql`): one row per agency, **tokens encrypted** (AES-GCM, `GHL_TOKEN_KEY`
+  edge secret, set 2026-10-15), RLS on with no policies. The SQL revokes it from Claude's read-only role, **but that role can
+  still select it** (checked 2026-10-15: `has_table_privilege` true; Supabase gives the role a read-everything grant that a table
+  revoke doesn't override). That's why the encryption is the real protection: the decryption key exists only in edge secrets,
+  never in the database. This one key reaches every
+  sub-account, live clients included, so the app gets setup scopes only (no contacts, conversations or payments).
+- **`app-oauth`** is the app's Redirect URL (`https://hugnttsqucetldllfgoi.supabase.co/functions/v1/app-oauth`,
+  `verify_jwt = false`). It trades the install's code for the keys and accepts only a **Company** install on **our** agency
+  (`GHL_COMPANY_ID`), so nobody can plant another agency's keys. It warns if "future sub-accounts" wasn't chosen.
+  **GHL refuses a Redirect URL containing "ghl"/HighLevel**, which is why it's `app-oauth`, not `ghl-oauth` (renamed and
+  the old deployment deleted 2026-10-15). The shared helper file keeps its name; only the URL matters.
+- **App settings that matter:** Private; Target user **Sub-account** (with Agency, GHL lists only agency-level scopes and the
+  custom values and fields scopes don't appear); installed by the agency for all current and future sub-accounts.
+- **Scopes are broad on purpose (the user's decision, 2026-10-15):** read and write on ad publishing, AI agent, calendars, chat
+  widget, companies, conversation AI, custom fields, custom values, email, forms, funnels, knowledge base, locations, media,
+  opportunities, pipelines, surveys, users and workflows, so Golden Eye can check and change setup. Not contacts or
+  conversations. Scopes only limit a **stolen** key, so the rules below limit **our own code** instead.
+- **Rules for anything that uses the app's key. Build these before any write reaches a real client account (phase 2):**
+  1. **One gate for every write.** All GHL writes go through a single helper with an allow-list of the changes we've built
+     (create an account, fill a custom value, create a field, invite a user…). Any other method/endpoint is refused even though
+     the key could do it. This guards against bugs and against a model being talked into something; nothing calls GHL around it.
+  2. **A log of every write:** account, endpoint, a summary of what changed (never a token or personal data), when, and who or
+     what triggered it, in an admin-only table.
+  3. **Live accounts need an admin.** Setup writes run freely only on accounts Golden Eye created that have no live client yet;
+     a write to an account linked to an active client (`clients.ghl_location_id`) must be started by a signed-in admin in
+     Golden Eye, never by a schedule or a chat.
+  4. **No key ever leaves the server:** never shown, logged, returned, or given to Claude. Claude works through these
+     functions and their guards, never with the key itself.
+- **Kill switch:** uninstall the app in GHL (agency → the app → uninstall) and every key it issued stops working at once.
+  If the client secret might be exposed, rotate it in the Developer Portal (Manage → Secrets) and update
+  `GHL_APP_CLIENT_SECRET`. To wipe the stored keys too: `delete from ghl_oauth_tokens;` in the SQL Editor.
+- **`ghl-provision` uses the app** once `GHL_APP_CLIENT_ID`, `GHL_APP_CLIENT_SECRET`, `GHL_TOKEN_KEY` and `GHL_COMPANY_ID`
+  are all set ("access: app location token"); until then it falls back to `GHL_AGENCY_TOKEN`.
+- **Unconfirmed:** whether private apps cost anything (GHL's docs are silent), and whether accounts created after the install
+  are reachable (`installToFutureLocations` says so at install time; the GE TEST re-run proves it).
+- **Tests:** `app-oauth/app-oauth.test.mjs`, 31 checks (encryption, the install's guards, renewal and the race, location
+  tokens, scrubbing, ghl-provision on the app); 3 of 3 breakages caught.
+
+### ghl-account: Golden Eye makes each new client's GHL account (built and deployed 2026-10-16)
+
+`supabase/functions/ghl-account/`, the real version of what ghl-provision proved. A pg_cron sweep every 10 minutes
+(`schedule.sql`) creates a client's sub-account from MasterV.1 with their business details, saves the location ID on the
+client (the checklist step ticks itself), waits for the install click, then fills every custom value from their answers.
+- **Who qualifies, checked every time:** active, in Onboarding, no `ghl_location_id`, onboarding finished (the handoff task
+  exists), answered the new questionnaire (About your business with a business name), and no `ghl_accounts` row. Clients on
+  the old GHL forms (Ironshell) and every existing client never qualify. `{"mode":"status"}` says why each one waits.
+- **The only manual step is the install click.** GHL won't install the app on a new account. The sweep checks
+  `/oauth/installedLocations` and fills as soon as it appears (`GHL_APP_INSTALL_URL` is shown in the report and the step).
+- **What goes in:** `dest` on each question: `ghl:<field>` builds the account (name, phone in +1 format, email, address,
+  city, state, zip, website; the time zone comes from the state, Mountain when unknown), `custom_value:<key>` fills values,
+  matched through `plan.ts` aliases (`facebook_url` fills Master's `facebook_page_url`). "Yes" to the texting window becomes
+  "8am to 8pm, every day". **Private and encrypted answers never go to GHL.** The fill report lists keys the snapshot lacks.
+- **The rules for the app's key, built:** every write goes through `_shared/ghl-write.ts`, whose allow-list is create a
+  sub-account and fill a custom value, nothing else. Every write is logged in `ghl_write_log` *before* it is sent (no log, no
+  write), with a summary, never a token or a value. Writes only reach accounts Golden Eye created, until they are filled;
+  never Master. A location ID typed into Edit Client meanwhile is never overwritten.
+- **Safety:** the `ghl_accounts` row is written before the account is created, so its primary key stops a second account;
+  at most 2 per sweep; `GHL_AUTO_CREATE=on` is the switch (off: the sweep reports who it would create). A failed creation
+  is never retried by the schedule; an admin runs `{"mode":"retry","client":…,"confirm":true}`, allowed only when no account
+  was made.
+- **Setup:** `supabase/sql/ghl_accounts.sql` (tables, admin-read RLS, updated step notes), `rename_client.sql`, deploy, then
+  `schedule.sql` (copies the anon key from the meta-sync job). Secrets: `GHL_SNAPSHOT_ID` (MasterV.1, `XySR40RNsweVul9Gxtlp`)
+  and `GHL_AUTO_CREATE=on` set 2026-10-16; `GHL_APP_INSTALL_URL` optional.
+- **The client's team becomes GHL users (added 2026-10-16).** The onboarding team step lists the owner first (`role`
+  'owner', can't be removed) and asks per person "Give them a login", which needs an email (`supabase/sql/team_ghl_logins.sql`
+  adds `client_contacts.ghl_login` and `ghl_user_id`; app.js saves without them until it runs). When the account is filled,
+  each person with a login and no `ghl_user_id` is added with `POST /users/` (on the allow-list): role user, this account
+  only, permissions `TEAM_PERMISSIONS` (contacts, conversations, calls, calendar, reviews, opportunities on; workflows,
+  triggers, settings, payments off: workflows hold the Golden Eye webhook secret). The password GHL requires is random and
+  never stored, logged or returned; people set their own with "Forgot password". A refused person is reported, never
+  retried by the schedule; `{"mode":"add_users","client":…}` (admin, filled accounts only) adds people added later.
+  **Unconfirmed:** whether GHL emails new users, and whether editing pipeline stages needs settingsEnabled.
+- **EIN, legal name, authorized representative can't be filled:** GHL's public location API has no such fields (checked its
+  OpenAPI spec 2026-10-16: name, phone, address, city, state, country, postalCode, website, timezone, prospectInfo,
+  settings, social, twilio, mailgun, snapshot). So "Connect their GHL to Golden Eye" has a step, **"Review — Paste the A2P
+  details into their Business Profile"** (`supabase/sql/setup_checklist_a2p_profile.sql`, which also adds it to clients
+  whose task is already open), with a **Copy A2P details** button (`copyA2pDetails`, admin only): legal name, business type,
+  EIN, address, website and the representative's name, title, email and phone, in the order GHL asks. Found by each
+  question's `dest` (`a2p:legal_name`, `ghl:address`…), public and private answers together, one client only.
+- **Not built:** anything in workflows (GHL's API can't).
+- **Tests:** `ghl-account.test.mjs` (node `--experimental-strip-types`), 47 checks against a fake agency and an in-memory
+  database: the whole create, wait, install, fill cycle, who qualifies, the gate and its log, the switch, the lock, failures,
+  retries, callers and team users. 63 checks, 24 of 24 deliberate breakages caught. `tests/team-step.test.mjs` (jsdom), 13
+  checks on the team step, 4 of 4 caught.
+
+### Duplicate client names broke the admin onboarding view (found and fixed 2026-10-16)
+
+`onboarding_client_facts()` read `(select … from clients where name = p_client)` as one value. Two archived August placeholders
+("Custom Professional Renovations", "SUNDARA Medical") were stored twice, so every admin load's `onboarding_steps_for_clients`
+call failed with "more than one row returned by a subquery used as an expression" (500, found in postgres_logs), probably since
+onboarding_facts.sql ran. app.js then fell back to "every step applies to everyone", so a finished client's tasks were never
+raised. `supabase/sql/onboarding_client_facts_fix.sql` takes the newest row (`limit 1`), and
+`delete_duplicate_placeholder_clients.sql` deletes the older copy of each by id. **`clients.name` has no unique constraint**:
+anything that reads one client by name as a single value must `limit 1`.
+
+### ghl-contact-check: is each client in our Midas GHL? (built 2026-10-16)
+
+Make scenario #4 (the onboarding-complete tag and text) finds the client in **our Midas GHL** by the email the onboarding
+trigger sends (the first address in `client_email`, spaces removed) and acts only on one exact match, so a missing or
+duplicated contact silently means no tag and no text. `supabase/functions/ghl-contact-check/` looks each client up the same
+way and records found / missing / duplicate / no_email / error in `client_ghl_contacts` (`supabase/sql/ghl_contact_check.sql`,
+admin-read, in `rename_client.sql`).
+- **Read only, separate key:** `GHL_MIDAS_TOKEN` is a Private Integration token on our Midas GHL account with one scope,
+  Contacts read, plus `GHL_MIDAS_LOCATION_ID`. GET requests only, through `ghlRead`. The Golden Eye app still has no contacts
+  scope. GHL's search is fuzzy (`GET /contacts/?query=`, the same kind Make's Search Contacts runs); only contacts whose own
+  email equals the client's count, and an empty email is never searched.
+- **When:** pg_cron `ghl-contact-check` at 14:00 UTC for every active client in Onboarding (`schedule.sql`), right after Add
+  client (in the background), and **Check now** (admins).
+- **Where it shows:** a warning on the client's Onboarding Progress when they aren't found exactly once, and a line at the top of
+  their Roster profile (found or not). Clients never see it.
+- **It gates the onboarding-complete webhook (2026-10-16, `supabase/sql/onboarding_handoff_contact_gate.sql`).**
+  `trg_onboarding_handoff` no longer posts to Make #4. It posts `{"mode":"handoff", client, client_email, completed_at,
+  services}` to ghl-contact-check with the Vault secret as `x-cron-secret`. The function checks the client and sends Make
+  the same body (plus `secret` from `MAKE_WEBHOOK_SECRET`) **only when found exactly once**. Otherwise it sends nothing and raises
+  one task, "Onboarding-complete text not sent: check them in our GHL" (hidden from the client, with the reason). That covers a missing
+  key and a client with no email too. Only the cron secret may ask for a handoff, not an admin. **`verify_jwt = false`** for this
+  function (config.toml) so Postgres can call it without a user JWT; the function checks every caller itself.
+  `supabase/triggers/onboarding_handoff.sql` carries the same function. **Deploy before running the SQL.**
+- **Tests:** 38 node checks on the function (5 breakages caught), 11 PGlite checks on the trigger (1 caught), 13 jsdom checks on
+  the notices and Check now.
 
 ## Tasks page filters (2026-10-02)
 
@@ -1762,24 +2445,6 @@ account totals and the morning audit; this adds what it can't say: which ad, and
   can't reach hidden tasks. Client onboarding pseudo-tasks show only under All and Client.
 - All three filters are remembered per browser (`ge-task-owner`, `ge-task-person`,
   `ge-task-client`); a remembered client or person that no longer exists resets.
-- **Tests:** 29 jsdom checks (plus 4 mutations, 3 caught; the fourth was redundant code).
-
-- **Phone is unique per client** (`uniq_client_contacts_client_phone`), not table-wide, so one
-  website person can be listed at two clients. The portal team step upserts on
-  `client_name,phone` and falls back to `phone` (error 42P10) if the SQL hasn't run.
-- **People are edited only on the Roster.** Edit client shows a summary and links there. Its old
-  editor kept only rows with a phone and deleted the rest, which would have wiped email-only people.
-  The Roster saves by id: delete removed, update kept, insert new.
-- **`client_profiles`** (business phone, website, address, private notes) is **admin-only by RLS**
-  and keyed on exact `clients.name`, so it's in `rename_client.sql`. Not `clients` columns: the
-  clients row is readable by clients.
-- **RLS fixed in the same SQL:** `client_contacts` had `Auth manage contacts` = `for all using
-  (true)`, so any signed-in user could read, change or delete every client's contacts. Now admin
-  full access, and client select/insert/update via `client_row_visible()` (the email fallback is
-  what lets most clients save the team step). No client delete.
-- **Tests:** 64 jsdom checks on the real markup and app.js (filters, sorting, escaping, profile,
-  saving, validation, the 42P10 fallback, admin gating), 6 deliberate mutations all caught; 27
-  PGlite checks on the SQL against the live policy/index shape, including RLS as a client signing
 - **Done column paging (2026-10-05):** newest-finished first, 8 cards, then "View N more" in steps
   of 20 (`TASK_DONE_CAP`, `TASK_DONE_STEP`); the column count stays the total. Sortable only drags
   `.kanban-card`, so the button can't be dragged into a column.
@@ -1796,7 +2461,7 @@ account totals and the morning audit; this adds what it can't say: which ad, and
   by that client before archiving anyway.
 - **List view escapes task titles and client names now.** It printed them raw, and Client Request
   titles are typed by clients, so one could run script on our dashboard. The board already escaped.
-  in through the email fallback.
+- **Tests:** 29 jsdom checks (plus 4 mutations, 3 caught; the fourth was redundant code).
 
 ## Roster (built 2026-10-02)
 
@@ -1816,6 +2481,29 @@ by the user's choice) lives in app.js after the Roster comment block.
   with it off, and `isCheckinContact()` in app.js applies the same rule to the portal team step,
   profile and reporter counts. The Roster's new-person rows default it off.
   `checkin_reminder_secret.sql` is superseded for the function; don't re-run its function body.
+- **Phone is unique per client** (`uniq_client_contacts_client_phone`), not table-wide, so one
+  website person can be listed at two clients. The portal team step upserts on
+  `client_name,phone` and falls back to `phone` (error 42P10) if the SQL hasn't run.
+- **People are edited only on the Roster.** Edit client shows a summary and links there. Its old
+  editor kept only rows with a phone and deleted the rest, which would have wiped email-only people.
+  The Roster saves by id: delete removed, update kept, insert new.
+- **`client_profiles`** (business phone, website, address, private notes) is **admin-only by RLS**
+  and keyed on exact `clients.name`, so it's in `rename_client.sql`. Not `clients` columns: the
+  clients row is readable by clients.
+- **RLS fixed in the same SQL:** `client_contacts` had `Auth manage contacts` = `for all using
+  (true)`, so any signed-in user could read, change or delete every client's contacts. Now admin
+  full access, and client select/insert/update via `client_row_visible()` (the email fallback is
+  what lets most clients save the team step). No client delete.
+- **Tests:** 64 jsdom checks on the real markup and app.js (filters, sorting, escaping, profile,
+  saving, validation, the 42P10 fallback, admin gating), 6 deliberate mutations all caught; 27
+  PGlite checks on the SQL against the live policy/index shape, including RLS as a client signing
+  in through the email fallback.
+
+- **Add client on the Roster (2026-10-16):** `#btn-roster-add-client` beside the filters opens the same Add Client form
+  (admins only; members don't see it). After saving from there the Roster redraws. **`saveNewClient` now refuses a name that
+  normalizes to an existing client, archived ones included** (a duplicated name broke the onboarding view; see "Duplicate
+  client names"). `tests/add-client.test.mjs`, 9 checks.
+
 ## Weekly check-in
 
 `weekly_checkins`: estimates, closes, revenue, `indirect_leads` (ad-attributed but not
@@ -1880,6 +2568,24 @@ admins only**, load `egg.js` from the same place as app.js (`GE_ASSET_BASE`, rea
 - **Local preview only:** `window.__geEggDebug` exists only on localhost, for driving the game in tests.
 - **Tests:** map connectivity and cipher in node, 9 PGlite checks on the SQL, a full run in the browser.
 
+## Easter egg #2: Speed to Lead (built 2026-10-13)
+
+Type **5min** anywhere (admins only) and `speedlead.js` loads from the same place as app.js. The keys must follow each other
+within a second, and nothing counts while the cursor is in an input, textarea, select or editable area, or with a modifier
+held (`slKeyPressed` in app.js; the listener ignores it while either game is already open).
+- **The game:** 60 seconds. Leads text in (name, service, city); type the short reply shown, and wrong keys are refused rather
+  than counted against you. Letters, digits and spaces are typed, punctuation fills itself in. Faster is worth more (100 base +
+  up to 100 for speed), x1 to x5 multiplier (+1 per 3 in a row). **Tab** dismisses spam: +40 x multiplier. Replying to spam -100,
+  dropping a real lead -100, a real lead going cold -50 (all reset the streak, the score never goes below 0). Spam that goes
+  unseen costs nothing. The first lead is never spam, about one in five is.
+- **Difficulty:** spawn gap 5.2 s to 2.8 s and patience 17 s to 10 s across the minute, at most 4 waiting.
+- **Rules are plain functions** (`newState`, `tick`, `typeKey`, `dismiss`) that take elapsed time as an argument, so they run
+  under node; the overlay only draws them. Original work: HTML and CSS, WebAudio blips, no outside assets.
+- **Leaderboard:** `speed_lead_runs` (`supabase/sql/speed_lead_runs.sql`), admins read and insert as themselves, no updates, a
+  score must be 1 to 50,000. Separate from `egg_runs`, whose time check does not fit a score. Best score per person on the board.
+- **Touch-only devices** are told it needs a keyboard. `window.__geSpeedLeadDebug` exists only on localhost.
+- **Tests:** 35 checks on the rules (5 breakages caught), 25 on the trigger and the SQL, and a real run in the browser.
+
 ## Settings → Updates (built 2026-09-15)
 
 A plain-English list of every change to Golden Eye, from **`updates.json` in the repo root**, served
@@ -1893,24 +2599,6 @@ setup step is visible without reading a chat log.
 
 - **A file, not a table.** The entry ships and rolls back with its change, needs no RLS or migration,
   and stays readable in git. Nothing writes it from the app.
-## Gotchas that have each cost an hour
-
-- **PGRST204 "column not found"** — PostgREST caches the schema. After any `alter table`:
-  `notify pgrst, 'reload schema';`
-- **`daily_reports."Leads"` has a capital L.** Make built the table from a Google Sheet,
-  so the header casing became a quoted — and therefore case-sensitive — Postgres
-  identifier. Every other column is lowercase. Two consequences: naming it in a
-  PostgREST `select` list fails with *column daily_reports.leads does not exist*, and
-  `row.leads` in JavaScript is `undefined`, not a lead count. **Both readers lowercase
-  every key on the way in** — `app.js` where it fills `globalAdsData`, and `loadSignals`
-  in the morning-audit function — so downstream code sees `leads` and neither has to
-  care. Select `*` from that table rather than a column list, or the query 400s before
-  the lowercasing ever runs.
-- **Make bundles run end-to-end, one at a time.** An error on the *last* module aborts the
-  whole scenario, silently skipping everything queued behind it. Add error handlers set to
-  Resume on modules that write.
-- **Make webhooks cache their data structure.** New payload fields need "Redetermine data
-  structure" + a re-send.
 - **Write for the person using the dashboard**, not as a commit message. Say what they can now do,
   and what it fixed if that matters.
 - **The badge** on the tab counts entries dated after the last visit, kept in `localStorage`
@@ -1929,6 +2617,24 @@ setup step is visible without reading a chat log.
   only correct inside inline `onclick`. Using it in `value="..."` added a backslash before
   every apostrophe on each save.
 
+## Gotchas that have each cost an hour
+
+- **PGRST204 "column not found"** — PostgREST caches the schema. After any `alter table`:
+  `notify pgrst, 'reload schema';`
+- **`daily_reports."Leads"` has a capital L.** Make built the table from a Google Sheet,
+  so the header casing became a quoted — and therefore case-sensitive — Postgres
+  identifier. Every other column is lowercase. Two consequences: naming it in a
+  PostgREST `select` list fails with *column daily_reports.leads does not exist*, and
+  `row.leads` in JavaScript is `undefined`, not a lead count. **Both readers lowercase
+  every key on the way in** — `app.js` where it fills `globalAdsData`, and `loadSignals`
+  in the morning-audit function — so downstream code sees `leads` and neither has to
+  care. Select `*` from that table rather than a column list, or the query 400s before
+  the lowercasing ever runs.
+- **Make bundles run end-to-end, one at a time.** An error on the *last* module aborts the
+  whole scenario, silently skipping everything queued behind it. Add error handlers set to
+  Resume on modules that write.
+- **Make webhooks cache their data structure.** New payload fields need "Redetermine data
+  structure" + a re-send.
 - **Supabase Search Rows defaults to a limit of 10.** Cross that many clients and the rest
   silently get nothing.
 - **pg_cron runs in UTC** — reminder times shift an hour at daylight saving.
@@ -1991,6 +2697,10 @@ GitHub Pages copy but not from the GHL domain.
 
 ## Known gaps
 
+- **The `clients` table's policies are all `true` for any signed-in user** (found 2026-10-02):
+  SELECT, INSERT, UPDATE and DELETE, so a client can read every client's retainer and emails and
+  change or delete any client row. Same class as the 2026-09-10 fixes; needs its own careful pass
+  (app.js writes to `clients` from a few places, including the auto-overdue update on load).
 - **`user_client_access` has rows for only 4 of the ~10+ active clients**, discovered
   while fixing `tasks`' RLS (see Database objects). Per the Access model section, a row
   is supposed to be created automatically when a client is created, and again when a
@@ -2009,10 +2719,6 @@ GitHub Pages copy but not from the GHL domain.
 - Deleting an onboarding step that has progress rows assumes the FK cascades; untested
 - Pipeline tab hidden pending a rebuild
 - Ad approvals never tested end to end with a client actually approving; pending
-- **The `clients` table's policies are all `true` for any signed-in user** (found 2026-10-02):
-  SELECT, INSERT, UPDATE and DELETE, so a client can read every client's retainer and emails and
-  change or delete any client row. Same class as the 2026-09-10 fixes; needs its own careful pass
-  (app.js writes to `clients` from a few places, including the auto-overdue update on load).
   approvals aren't surfaced in the dashboard notification feed yet
 - The onboarding form chain has broken twice on email identity and hasn't been
   re-tested since the hidden-field fix
@@ -2020,15 +2726,18 @@ GitHub Pages copy but not from the GHL domain.
   removed
 - Morning audit thresholds in `AUDIT_CONFIG` are reasoned defaults, not tuned against
   real history — worth a backtest over a few months of `daily_reports`
-- `clients.target_cpl` is read by the audit but the column does not exist yet
+- No client has a `target_cpl` set until someone fills it in Edit Client, so every client is still
+  compared with their own last 28 days
 - `preview/app.js` and `preview/body.html` are a stale snapshot that predates the signal
   engine and still carries the dead OpenAI key box. The deploy serves the repo root, so
   they affect nothing — but they will mislead anyone who greps
 - The audit returns raw HTML injected with `innerHTML`; JSON plus client-side rendering
   would be cheaper, safer, and restyleable without re-running the model
-- No ad-level performance data exists anywhere — `daily_reports` is account-level, so
-  "which ad should we turn off" is unanswerable until the Make pull fetches Insights at
-  `level=ad`
+- Ad-level data now comes from meta-sync (`meta_ad_daily`), connected 2026-10-12 for 3Sixty, PANDEN,
+  Anxiety Solutions, Alta Vista, Sunset and (once its rerun lands) Caliber. **Astra Real Estate** is
+  waiting on its owner's approval. `daily_reports` (Make) is still the source for account totals.
+  Meta's lead counts differ from Make's for some accounts (Anxiety Solutions: Meta, and Meta's own
+  Ads Manager, count about 2.5× Make's). GHL is the source of truth; Make's feed was left alone.
 - **A `client_email` value had 2 bytes of hidden trailing whitespace** (length 23 for a
   21-character address — almost certainly `\r\n`), discovered while testing the `tasks`
   RLS fix below. Only confirmed on that one row, but `client_email` is what several

@@ -8,8 +8,48 @@
         // Startup timings, printed once as a table in the console (look for [STARTUP]).
         // Times are ms since the page began loading, so the first row shows how long the
         // GHL page, the libraries and body.html/app.js took before this code even ran.
-        const geStartupMarks = [];
-        function geStartupMark(label) {
+        // The loading screen (#ge-preload in body.html). Startup marks move its bar forward, never back, and
+        // it comes down when the first page is drawn, when there is no session (the sign-in card is then the
+        // page), or when loading fails. If it is still up after 20 seconds it offers a reload.
+        const gePreload = (() => {
+            const STEPS = {
+                'app.js running': [12, 'Starting up'], 'signed in': [28, 'Signed in'], 'role checked': [42, 'Checking your access'],
+                '15 tables loaded': [72, 'Loading your clients'], 'onboarding rules loaded': [88, 'Almost there'], 'data loaded': [94, 'Almost there']
+            };
+            let at = 0, down = false, slowTimer = null;
+            const q = (id) => document.getElementById(id);
+            function step(label) {
+                const s = STEPS[label];
+                if (!s || down || s[0] <= at) return;
+                at = s[0];
+                const fill = q('ge-pre-fill'), text = q('ge-pre-text'), bar = q('ge-pre-bar');
+                if (bar) bar.classList.remove('wait');
+                if (fill) fill.style.width = at + '%';
+                if (text) text.textContent = s[1];
+            }
+            function hide() {
+                if (down) return;
+                down = true;
+                clearTimeout(slowTimer);
+                const root = q('ge-preload');
+                if (!root) return;
+                const fill = q('ge-pre-fill'); if (fill) fill.style.width = '100%';
+                root.classList.add('done');
+                setTimeout(() => root.classList.add('gone'), 400);
+            }
+            function fail(message) {
+                const root = q('ge-preload');
+                if (!root || down) return;
+                const msg = q('ge-pre-slow-msg'); if (msg && message) msg.textContent = message;
+                const bar = q('ge-pre-bar'); if (bar) bar.classList.remove('wait');
+                root.classList.add('slow');
+            }
+            slowTimer = setTimeout(() => fail('This is taking longer than usual.'), 20000);
+            return { step, hide, fail };
+        })();
+
+        const geStartupMarks = [];        function geStartupMark(label) {
+            gePreload.step(label);
             if (geStartupReport.done) return; // later refetches aren't startup
             geStartupMarks.push({ step: label, at_ms: Math.round(performance.now()) });
         }
@@ -84,6 +124,7 @@
         let portalReports = [];
         let globalHealthData = {};
         let globalTasksData = [];
+        let globalSetupSteps = [];      // 'Setup step' tasks: the checklist steps, kept off the board and loaded separately
         let globalArchivedTasks = [];   // tasks with archived_at set, shown only in the Archived view
         let globalAdsData = [];
         let globalCreativesData = [];
@@ -98,6 +139,12 @@
         let globalServices = [];          // add-ons on top of Base, from services
         let globalClientServices = [];    // which add-ons each client has, from client_services
         let globalOnboardingAnswers = []; // answers to built-in Questions steps, from onboarding_answers
+        // Private and secret answers (onboarding_questionnaire.sql). A client never reads these back: the portal
+        // only knows WHICH questions are answered ("client|step|question" keys). Admins also load the private
+        // answers and the secrets' labels (never their values: those come one at a time from Reveal).
+        let globalPrivateAnswerKeys = new Set();
+        let globalPrivateAnswers = [];    // admins: onboarding_private_answers rows
+        let globalSecretsMeta = [];       // admins: onboarding_secrets rows without the encrypted value
         // Delays the manual "mark it done" fallback on form steps until the webhook has had a chance
         let obManualRevealTimer = null;
         let allRawSeo = [];
@@ -462,6 +509,7 @@
                         const savedPage = localStorage.getItem('midas_current_page') || 'goldeneye';
                         switchAppPage(savedPage);
                         geStartupMark('page shown');
+                        gePreload.hide();
 
                         runLifecycleCatchUp().then(changed => {
                             geStartupMark(changed ? 'catch-up done (changed data, redrawn)' : 'catch-up done (nothing changed)');
@@ -473,16 +521,22 @@
                     } else {
                         if (globalAllowedClients.length === 0) {
                             document.getElementById('auth-pending-view').classList.remove('hidden');
+                            gePreload.hide();
                         } else {
                             document.getElementById('client-portal-container').classList.remove('hidden');
                             await initClientPortal(globalAllowedClients);
                             geStartupMark('portal shown');
+                            gePreload.hide();
                         }
                         geStartupReport();
                     }
+                } else {
+                    // Nobody is signed in: the sign-in card is the page
+                    gePreload.hide();
                 }
             } catch(e) {
                 console.error("Critical error in initApp lifecycle initialization: ", e);
+                gePreload.fail('Golden Eye could not finish loading.');
             }
         }
         // The drawers sit inside client-portal-container in the markup, so on the admin
@@ -652,7 +706,7 @@
             const results = await Promise.allSettled([
                 // Paged past the 1000-row cap; RLS still limits a client to their own rows
                 fetchAllRows('daily_reports'),
-                supabaseClient.from('tasks').select('*').in('client', allowedClients),
+                supabaseClient.from('tasks').select('*').neq('type', 'Setup step').in('client', allowedClients),
                 clientLeadsQuery,
                 supabaseClient.from('ad_approvals').select('*').in('client_name', allowedClients),
                 supabaseClient.from('seo_metrics').select('*').in('client_name', allowedClients),
@@ -672,6 +726,7 @@
             ]);
             globalServices = results[11].status === 'fulfilled' ? (results[11].value.data || []) : [];
             globalOnboardingAnswers = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
+            await loadPrivateAnswerKeys(allowedClients);
 
             const rResData = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
             allRawReports = rResData.map(item => { const n = {}; for (let k in item) n[k.toLowerCase().trim()] = item[k]; return n; });
@@ -1295,18 +1350,25 @@ window.submitPortalRequest = async function() {
 // name/phone fields rather than a free-text answer, because "Mike 801-555-0100 and
 // Sarah" is exactly the sort of thing that can't be parsed reliably.
 
-function obTeamRowHtml(stepId, contact) {
-    return `<div class="ob-team-row flex flex-wrap gap-2 items-center">
-        <input type="text" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-name" placeholder="Name"
+// The first row is the owner (who can't be removed); each person can get a GHL login, which ghl-account turns into a GHL
+// user when it fills their new account. A login needs an email, so the box is ticked only when there's an address to use.
+function obTeamRowHtml(stepId, contact, isOwner = false) {
+    const login = contact ? contact.ghl_login !== false : true;
+    return `<div class="ob-team-row flex flex-wrap gap-2 items-center"${isOwner ? ' data-owner="1"' : ''}>
+        ${isOwner ? '<span class="text-xs font-bold text-amber-400 w-full">You (the owner)</span>' : ''}
+        <input type="text" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-name" placeholder="${isOwner ? 'Your name' : 'Name'}"
                value="${escapeAttr(stripSlashEscapes(contact?.contact_name))}">
         <input type="tel" class="glass-input !py-2 flex-1 min-w-[140px] ob-team-phone" placeholder="Mobile number"
                value="${escapeAttr(stripSlashEscapes(contact?.phone))}">
-        <input type="email" class="glass-input !py-2 flex-1 min-w-[160px] ob-team-email" placeholder="Email (optional)"
+        <input type="email" class="glass-input !py-2 flex-1 min-w-[160px] ob-team-email" placeholder="Email"
                value="${escapeAttr(stripSlashEscapes(contact?.email))}">
-        <button type="button" onclick="this.closest('.ob-team-row').remove()"
+        <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer whitespace-nowrap" title="They get their own login to your CRM and the phone app, where new leads come in">
+            <input type="checkbox" class="row-checkbox ob-team-login" ${login ? 'checked' : ''}> Give them a login
+        </label>
+        ${isOwner ? '' : `<button type="button" onclick="this.closest('.ob-team-row').remove()"
                 class="text-red-500/60 hover:text-red-400 px-2 py-1.5" title="Remove">
             <i class="fa-solid fa-xmark"></i>
-        </button>
+        </button>`}
     </div>`;
 }
 
@@ -1320,10 +1382,14 @@ function obTeamStepHtml(s, complete) {
                    Need to change this? Just let us know.</p>`;
     }
 
-    const rows = mine.length ? mine.map(c => obTeamRowHtml(s.id, c)).join('') : obTeamRowHtml(s.id, null);
+    // The owner first: the saved owner row, else the first saved person, else an empty owner row
+    const ownerRow = mine.find(c => c.role === 'owner') || null;
+    const others = mine.filter(c => c !== ownerRow);
+    const rows = obTeamRowHtml(s.id, ownerRow, true) + others.map(c => obTeamRowHtml(s.id, c)).join('');
 
     return `
         <div class="space-y-3 mb-4">
+            <p class="text-sm text-gray-400">Who should get your new leads? Start with yourself, then add anyone who answers or follows up on leads. Each person with a login can work your leads and pipeline in the CRM and the phone app.</p>
             <div id="ob-team-rows-${s.id}" class="space-y-2">${rows}</div>
             <button type="button" onclick="obAddTeamRow('${s.id}')" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
                 <i class="fa-solid fa-plus mr-1"></i> Add another person
@@ -1351,49 +1417,54 @@ window.obSaveTeam = async function(stepId, justMe) {
     const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
     if (err) err.classList.add('hidden');
 
-    let people;
+    // Every row on screen; "it's just me" keeps only the owner's
+    let people = [...document.querySelectorAll(`#ob-team-rows-${stepId} .ob-team-row`)]
+        .map(r => ({
+            owner: r.dataset.owner === '1',
+            contact_name: r.querySelector('.ob-team-name').value.trim(),
+            phone: r.querySelector('.ob-team-phone').value.trim(),
+            email: (r.querySelector('.ob-team-email')?.value || '').trim().toLowerCase(),
+            ghl_login: !!r.querySelector('.ob-team-login')?.checked
+        }));
+    const ownerP = people.find(p => p.owner);
+    if (!ownerP || !ownerP.contact_name || !ownerP.phone) {
+        show('Fill in your own name and mobile number first.');
+        return;
+    }
+    people = justMe ? [ownerP] : people.filter(p => p.owner || p.contact_name || p.phone || p.email);
 
-    if (justMe) {
-        // The address they signed in with is the one we already reach them on
-        people = [{ contact_name: currentUserName || clientEmail || 'Owner', phone: null }];
-    } else {
-        people = [...document.querySelectorAll(`#ob-team-rows-${stepId} .ob-team-row`)]
-            .map(r => ({
-                contact_name: r.querySelector('.ob-team-name').value.trim(),
-                phone: r.querySelector('.ob-team-phone').value.trim(),
-                email: (r.querySelector('.ob-team-email')?.value || '').trim().toLowerCase()
-            }))
-            .filter(p => p.contact_name || p.phone || p.email);
-
-        if (!people.length) {
-            show("Add at least one person, or choose “it's just me” below.");
-            return;
-        }
-        const incomplete = people.find(p => !p.contact_name || !p.phone);
-        if (incomplete) {
-            show('Every person needs both a name and a mobile number.');
-            return;
-        }
-        // Ten digits is what a US mobile reduces to; anything shorter is a typo
-        const badPhone = people.find(p => String(p.phone).replace(/\D/g, '').length < 10);
-        if (badPhone) {
-            show(`That number for ${badPhone.contact_name} doesn't look complete.`);
-            return;
-        }
-        const badEmail = people.find(p => p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email));
-        if (badEmail) {
-            show(`That email for ${badEmail.contact_name} doesn't look right.`);
-            return;
-        }
+    const incomplete = people.find(p => !p.contact_name || !p.phone);
+    if (incomplete) {
+        show('Every person needs both a name and a mobile number.');
+        return;
+    }
+    // Ten digits is what a US mobile reduces to; anything shorter is a typo
+    const badPhone = people.find(p => String(p.phone).replace(/\D/g, '').length < 10);
+    if (badPhone) {
+        show(`That number for ${badPhone.contact_name} doesn't look complete.`);
+        return;
+    }
+    const badEmail = people.find(p => p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email));
+    if (badEmail) {
+        show(`That email for ${badEmail.contact_name} doesn't look right.`);
+        return;
+    }
+    // A login is made from an email address
+    const noEmail = people.find(p => p.ghl_login && !p.email);
+    if (noEmail) {
+        show(`${noEmail.contact_name} needs an email for their login (or untick "Give them a login").`);
+        return;
     }
 
     try {
         // Email is always sent (prefilled above), so re-saving never blanks one we have
-        const rows = people.filter(p => p.phone).map(p => ({
+        const rows = people.map(p => ({
             client_name: currentActiveClient,
             contact_name: p.contact_name,
             phone: p.phone,
             email: p.email || null,
+            role: p.owner ? 'owner' : 'sales',
+            ghl_login: p.ghl_login,
             active: true
         }));
 
@@ -1401,11 +1472,15 @@ window.obSaveTeam = async function(stepId, justMe) {
             // Re-saving updates a person rather than adding them twice. A number is unique
             // per client since client_directory.sql; before that it was unique across the
             // table, so fall back to that if the new index isn't there yet (42P10).
-            let { data, error } = await supabaseClient.from('client_contacts')
-                .upsert(rows, { onConflict: 'client_name,phone' }).select();
-            if (error && error.code === '42P10') {
-                ({ data, error } = await supabaseClient.from('client_contacts')
-                    .upsert(rows, { onConflict: 'phone' }).select());
+            const save = async (list) => {
+                let res = await supabaseClient.from('client_contacts').upsert(list, { onConflict: 'client_name,phone' }).select();
+                if (res.error && res.error.code === '42P10') res = await supabaseClient.from('client_contacts').upsert(list, { onConflict: 'phone' }).select();
+                return res;
+            };
+            let { data, error } = await save(rows);
+            // team_ghl_logins.sql not run yet: save the team without the login choice rather than not at all
+            if (error && (error.code === 'PGRST204' || /ghl_login/.test(error.message || ''))) {
+                ({ data, error } = await save(rows.map(({ ghl_login, ...r }) => r)));
             }
             if (error) throw error;
             if (data?.length) {
@@ -1861,7 +1936,7 @@ window.renderCpProfile = function() {
     if (emailEl) emailEl.innerText = clientEmail || row?.client_email || '—';
 
     const stageEl = document.getElementById('cp-profile-stage');
-    if (stageEl) stageEl.innerText = row?.current_stage || 'Active';
+    if (stageEl) stageEl.innerText = row?.current_stage ? clientPhase(row) : 'Active';
 
     const obEl = document.getElementById('cp-profile-onboarding');
     if (obEl) {
@@ -2088,19 +2163,253 @@ function obQuestionsFor(step, clientName) {
         .filter(q => !(q.website_statuses || []).length || (web && q.website_statuses.includes(web)));
 }
 
+// ---- private and secret answers (onboarding_questionnaire.sql) ----
+// A question marked private (or secret) is saved through save_private_onboarding_answers(), never into
+// onboarding_answers, and the client can't read it back. The server decides what's private from the step itself.
+const obPrivateKey = (client, stepId, qid) => `${normalize(client || '')}|${stepId}|${qid}`;
+const obIsPrivate = q => !!(q && (q.private || q.secret));
+function obPrivateSaved(client, stepId, qid) { return globalPrivateAnswerKeys.has(obPrivateKey(client, stepId, qid)); }
+
+// Portal: which private questions each of these clients has answered. Missing SQL just means none.
+async function loadPrivateAnswerKeys(clients) {
+    const keys = new Set();
+    await Promise.all((clients || []).map(async c => {
+        const { data, error } = await supabaseClient.rpc('private_onboarding_answer_keys', { p_client: c });
+        if (error) return;
+        (data || []).forEach(r => keys.add(obPrivateKey(c, r.step_id, r.question_id)));
+    }));
+    globalPrivateAnswerKeys = keys;
+}
+
+// Admins: the private answers, and which secrets exist (label only; a value comes from Reveal, one at a time).
+async function loadPrivateAnswersForStaff() {
+    globalPrivateAnswers = []; globalSecretsMeta = [];
+    if (currentUserRole !== 'admin') return;
+    const [p, s] = await Promise.all([
+        supabaseClient.from('onboarding_private_answers').select('*'),
+        supabaseClient.from('onboarding_secrets').select('client_name, step_id, question_id, label, updated_at')
+    ]);
+    globalPrivateAnswers = p.error ? [] : (p.data || []);
+    globalSecretsMeta = s.error ? [] : (s.data || []);
+    const keys = new Set();
+    globalPrivateAnswers.forEach(r => Object.keys(r.answers || {}).forEach(qid => keys.add(obPrivateKey(r.client_name, r.step_id, qid))));
+    globalSecretsMeta.forEach(r => keys.add(obPrivateKey(r.client_name, r.step_id, r.question_id)));
+    globalPrivateAnswerKeys = keys;
+}
+
+// ---- Is the client a contact in our Midas GHL? (ghl-contact-check, supabase/sql/ghl_contact_check.sql) ----
+// The onboarding-complete tag and text only reach a client whose email matches exactly one contact in our Midas GHL.
+// The check runs every morning and after Add client; admins see the result here and can run it again.
+let globalGhlContacts = [];
+const GHL_CONTACT_FN = 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ghl-contact-check';
+
+async function loadGhlContactChecks() {
+    globalGhlContacts = [];
+    if (currentUserRole !== 'admin') return;
+    const { data, error } = await supabaseClient.from('client_ghl_contacts').select('*');
+    globalGhlContacts = error ? [] : (data || []);   // table not there yet: show nothing
+}
+
+function ghlContactFor(clientName) {
+    return globalGhlContacts.find(r => normalize(r.client_name || '') === normalize(clientName || '')) || null;
+}
+
+const GHL_CONTACT_SAYS = {
+    found: ['var(--pos)', 'fa-circle-check', 'In our GHL: the onboarding-complete text will reach them.'],
+    missing: ['var(--warn)', 'fa-triangle-exclamation', "Not in our GHL, so the onboarding-complete tag and text won't reach them. Add them as a contact with this email, or fix the email in Edit Client."],
+    duplicate: ['var(--warn)', 'fa-triangle-exclamation', 'More than one contact in our GHL has this email, so only one would get the tag. Merge them in GHL.'],
+    no_email: ['var(--warn)', 'fa-triangle-exclamation', 'No email on the client, so they can\'t be found in our GHL. Add one in Edit Client.'],
+    error: ['var(--neg)', 'fa-circle-xmark', "The check couldn't reach GHL"],
+};
+
+// opts.always: also show a quiet "found" line (the Roster profile); otherwise only problems are shown
+function ghlContactNoticeHtml(clientName, opts = {}) {
+    if (currentUserRole !== 'admin' || !clientName || clientName === 'ALL') return '';
+    const r = ghlContactFor(clientName);
+    if (!r && !opts.always) return '';
+    if (r?.status === 'found' && !opts.always) return '';
+    const [color, icon, text] = r ? (GHL_CONTACT_SAYS[r.status] || GHL_CONTACT_SAYS.error) : ['var(--t3)', 'fa-circle-question', 'Not checked against our GHL yet.'];
+    const when = r?.checked_at ? ` <span style="color:var(--t3);">Checked ${escapeAttr(new Date(r.checked_at).toLocaleDateString())}${r.email ? ' for ' + escapeAttr(r.email) : ''}.</span>` : '';
+    const detail = r?.status === 'error' && r.error ? `: ${escapeAttr(r.error)}` : '';
+    return `<div class="ghl-contact-notice text-xs" style="display:flex; gap:8px; align-items:flex-start; margin:0 0 12px; color:${color};">
+        <i class="fa-solid ${icon}" style="margin-top:2px;"></i>
+        <span style="flex:1;">${escapeAttr(text)}${detail}${when}</span>
+        <button type="button" class="text-xs font-bold" data-client="${escapeAttr(clientName)}" onclick="checkGhlContact(this.dataset.client, this)"
+            style="background:none; border:none; padding:0; color:var(--gold); cursor:pointer; white-space:nowrap;">Check now</button>
+    </div>`;
+}
+
+// Runs the check for one client and redraws what shows it. quiet: after Add client, no button to update.
+window.checkGhlContact = async function (clientName, btn, { quiet = false } = {}) {
+    if (currentUserRole !== 'admin' || !clientName) return;
+    if (btn) { btn.disabled = true; btn.innerText = 'Checking…'; }
+    try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch(GHL_CONTACT_FN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token || ''}` },
+            body: JSON.stringify({ mode: 'check', client: clientName })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `the check answered ${res.status}`);
+        (data.results || []).forEach(r => {
+            globalGhlContacts = globalGhlContacts.filter(x => normalize(x.client_name || '') !== normalize(r.client_name || ''))
+                .concat({ ...r, checked_at: new Date().toISOString() });
+        });
+        if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+        if (document.getElementById('page-roster') && !document.getElementById('page-roster').classList.contains('hidden') && typeof renderRoster === 'function') renderRoster();
+    } catch (e) {
+        if (!quiet) alert("Couldn't check GHL: " + e.message);
+        else console.warn('GHL contact check:', e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Check now'; }
+    }
+};
+
+// ---- question logic (pure; no page needed) ----
+// A question can depend on an earlier answer (show_if), save its answer onto the client as a fact (fact),
+// and carry a note of where it should end up in GHL later (dest). Which answers pick which video is decided
+// in SQL (onboarding_facts.sql); this only collects and saves them.
+//   show_if: {q: "<earlier question id>", any: ["Yes"]}   shown only when that question is showing and its
+//                                                         answer is one of these exact choices
+//   fact: "facebook_page" | "crm_choice" | "crm_name" | "crm_method"
+//   fact_values: one value per choice, same order, e.g. ["yes", "no", "unsure"]
+const OB_FACT_DEFAULT_VALUES = { facebook_page: ['yes', 'no', 'unsure'], crm_choice: ['no', 'yes'], crm_method: ['email', 'webhook', 'unsure'] };
+
+// The questions that are showing, given the answers so far (by question id). A question can only depend
+// on an earlier one, and a question whose parent is hidden is hidden too.
+function obVisibleQuestions(questions, values) {
+    const shown = new Set();
+    const out = [];
+    for (const q of questions || []) {
+        const c = q.show_if;
+        let ok = true;
+        if (c && c.q) {
+            const v = (values || {})[c.q];
+            const list = Array.isArray(v) ? v : (v ? [v] : []);
+            ok = shown.has(c.q) && (c.any || []).some(a => list.includes(a));
+        }
+        if (ok) { shown.add(q.id); out.push(q); }
+    }
+    return out;
+}
+
+// A style picker's looks (q.styles, edited in Templates), tidied for the page: only #hex colors and https links and
+// pictures get through, because they end up in a style attribute, an href and an img src.
+function obStyleLooks(q) {
+    return (Array.isArray(q?.styles) ? q.styles : []).filter(s => s && String(s.name || '').trim()).map(s => ({
+        name: String(s.name).trim(),
+        note: String(s.note || '').trim(),
+        colors: (Array.isArray(s.colors) ? s.colors : []).map(c => String(c).trim()).filter(c => /^#[0-9a-f]{3,8}$/i.test(c)).slice(0, 6),
+        image: /^https:\/\/\S+$/i.test(String(s.image || '').trim()) ? String(s.image).trim() : '',
+        link: /^https:\/\/\S+$/i.test(String(s.link || '').trim()) ? String(s.link).trim() : ''
+    }));
+}
+
+// Tidy one answer by type. Returns {value} or {error}. Blank is fine here: "required" is checked separately.
+function obCleanAnswer(q, raw) {
+    if (q.type === 'multi') return { value: Array.isArray(raw) ? raw.filter(Boolean) : [] };
+    if (q.type === 'style') {
+        // [first choice, second choice], each the name of one of the looks shown
+        const [first, second] = Array.isArray(raw) ? raw : [];
+        if (!first && !second) return { value: [] };
+        if (!first) return { error: 'Pick your first choice too' };
+        const names = new Set(obStyleLooks(q).map(l => l.name));
+        if (!names.has(first) || (second && !names.has(second))) return { error: 'Pick from the looks shown' };
+        if (second && second === first) return { error: 'Pick a different look for your second choice' };
+        return { value: second ? [first, second] : [first] };
+    }
+    const v = typeof raw === 'string' ? raw.trim() : '';
+    if (!v) return { value: '' };
+    if (q.type === 'email') return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v) ? { value: v } : { error: 'Enter a valid email address' };
+    if (q.type === 'phone') {
+        const digits = v.replace(/\D/g, '');
+        return digits.length >= 10 && digits.length <= 15 ? { value: v } : { error: 'Enter a phone number with the area code' };
+    }
+    if (q.type === 'ein') {
+        const digits = v.replace(/\D/g, '');
+        return digits.length === 9 ? { value: `${digits.slice(0, 2)}-${digits.slice(2)}` } : { error: 'An EIN is 9 digits, like 12-3456789' };
+    }
+    if (q.type === 'link') {
+        const withScheme = /^https?:\/\//i.test(v) ? v : 'https://' + v;
+        try {
+            const u = new URL(withScheme);
+            return u.hostname.includes('.') && !/\s/.test(v) ? { value: withScheme } : { error: 'Enter a full link, like www.example.com' };
+        } catch (e) { return { error: 'Enter a full link, like www.example.com' }; }
+    }
+    return { value: v };
+}
+
+// The client facts these answers set. `answers` is id -> value for the questions that are showing. A choice
+// is turned into its stored value by position (fact_values); a free-text answer is stored as typed. An
+// answer that was not given is left out, so it never overwrites an earlier one.
+function obFactsFromAnswers(questions, answers) {
+    const facts = {};
+    for (const q of questions || []) {
+        if (!q.fact) continue;
+        const v = (answers || {})[q.id];
+        if (v === undefined) continue;
+        const text = Array.isArray(v) ? v[0] : v;
+        if (!text) { facts[q.fact] = ''; continue; }
+        if (Array.isArray(q.fact_values) && q.fact_values.length) {
+            const i = (q.options || []).indexOf(text);
+            if (i < 0 || !q.fact_values[i]) continue;
+            facts[q.fact] = q.fact_values[i];
+        } else {
+            facts[q.fact] = text;
+        }
+    }
+    return facts;
+}
+// ---- end question logic ----
+
 function obQuestionsFormHtml(s, complete) {
     const questions = obQuestionsFor(s, currentActiveClient);
     const saved = obAnswersFor(currentActiveClient, s.id)?.answers || {};
     const valueOf = q => saved[q.id]?.value;
     const fieldId = q => `obq-${s.id}-${q.id}`;
+    const savedValues = {};
+    questions.forEach(q => { savedValues[q.id] = valueOf(q); });
+    const showing = new Set(obVisibleQuestions(questions, savedValues).map(q => q.id));
+    const INPUT_TYPES = { phone: 'tel', email: 'email', link: 'text', ein: 'text' };
+    const PLACEHOLDERS = { phone: '(801) 555-0100', email: 'name@company.com', link: 'www.example.com', ein: '12-3456789' };
 
     const field = q => {
-        const v = valueOf(q);
+        // A private answer is never shown back, even to the client who typed it: the field starts empty and
+        // says it's saved. Typing replaces it; leaving it empty keeps the saved one.
+        const priv = obIsPrivate(q);
+        const savedPriv = priv && obPrivateSaved(currentActiveClient, s.id, q.id);
+        const v = priv ? undefined : valueOf(q);
         const req = q.required ? ' <span class="text-red-400" title="Required">*</span>' : '';
         const label = `<label class="block text-sm font-bold text-white mb-1" for="${fieldId(q)}">${escapeAttr(q.label)}${req}</label>`;
+        const lock = priv ? `<p class="text-[11px] text-gray-500 mt-1"><i class="fa-solid fa-lock mr-1"></i>${savedPriv ? 'Saved. ' : ''}Only our team can see this${q.secret ? ', and it is stored encrypted' : ''}.${savedPriv ? (q.type === 'choice' || q.type === 'multi' ? ' Choose again to change it.' : ' Type here to change it.') : ''}</p>` : '';
         const opts = Array.isArray(q.options) ? q.options.filter(Boolean) : [];
+        if (q.type === 'style') {
+            // Cards like the website-options pages: picture, name, a line, colors, a link to the example site,
+            // and a 1st / 2nd choice. Colors and links are already checked by obStyleLooks.
+            const [first, second] = Array.isArray(v) ? v : [];
+            const pick = (look, which, checked) => `<label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer">
+                <input type="radio" name="${fieldId(q)}-${which}" value="${escapeAttr(look.name)}" class="row-checkbox" ${checked ? 'checked' : ''}> ${which === 'first' ? '1st choice' : '2nd choice'}</label>`;
+            return `<fieldset data-qid="${escapeAttr(q.id)}" data-qtype="style">
+                <legend class="block text-sm font-bold text-white mb-1">${escapeAttr(q.label)}${req}</legend>
+                <p class="text-xs text-gray-400 mb-3">Open each example, then pick your favorite and a second choice.</p>
+                <div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(210px,1fr))">
+                    ${obStyleLooks(q).map(look => `<div class="ob-style-card rounded-lg border border-white/10 bg-black/20 overflow-hidden flex flex-col">
+                        ${look.image ? `<img src="${escapeAttr(look.image)}" alt="${escapeAttr(look.name)} example" loading="lazy" class="w-full object-cover object-top" style="aspect-ratio:16/10">` : ''}
+                        <div class="p-3 flex flex-col gap-2 flex-1">
+                            <p class="text-sm font-bold text-white">${escapeAttr(look.name)}</p>
+                            ${look.note ? `<p class="text-xs text-gray-400">${escapeAttr(look.note)}</p>` : ''}
+                            ${look.colors.length ? `<div class="flex" aria-label="Colors">${look.colors.map(c => `<span class="border border-white/10" style="width:18px;height:18px;background:${c}"></span>`).join('')}</div>` : ''}
+                            ${look.link ? `<a href="${escapeAttr(look.link)}" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-400 hover:text-blue-300 font-bold"><i class="fa-solid fa-up-right-from-square mr-1"></i>See the example site</a>` : ''}
+                            <div class="flex flex-wrap gap-x-4 gap-y-1 mt-auto pt-1">${pick(look, 'first', first === look.name)}${pick(look, 'second', second === look.name)}</div>
+                        </div>
+                    </div>`).join('')}
+                </div>
+                <p class="obq-err hidden text-xs text-amber-400 mt-1" role="alert"></p>
+            </fieldset>`;
+        }
         if (q.type === 'long') {
-            return `${label}<textarea id="${fieldId(q)}" rows="3" class="glass-input w-full" data-qid="${escapeAttr(q.id)}">${escapeAttr(typeof v === 'string' ? v : '')}</textarea>`;
+            return `${label}<textarea id="${fieldId(q)}" rows="3" class="glass-input w-full" data-qid="${escapeAttr(q.id)}"${savedPriv ? ' placeholder="Saved"' : ''}>${escapeAttr(typeof v === 'string' ? v : '')}</textarea>${lock}`;
         }
         if (q.type === 'choice' || q.type === 'multi') {
             const chosen = new Set(Array.isArray(v) ? v : (v ? [v] : []));
@@ -2111,17 +2420,22 @@ function obQuestionsFormHtml(s, complete) {
                     ${opts.map(o => `<label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                         <input type="${input}" name="${fieldId(q)}" value="${escapeAttr(o)}" class="row-checkbox" ${chosen.has(o) ? 'checked' : ''}> ${escapeAttr(o)}
                     </label>`).join('')}
-                </div>
+                </div>${lock}
             </fieldset>`;
         }
-        return `${label}<input type="text" id="${fieldId(q)}" class="glass-input w-full" data-qid="${escapeAttr(q.id)}" value="${escapeAttr(typeof v === 'string' ? v : '')}">`;
+        const type = q.secret ? 'password' : (INPUT_TYPES[q.type] || 'text');
+        const ph = savedPriv ? ' placeholder="Saved"' : (PLACEHOLDERS[q.type] ? ` placeholder="${PLACEHOLDERS[q.type]}"` : '');
+        const extra = q.secret ? ' autocomplete="new-password"' : (q.type === 'ein' ? ' inputmode="numeric" autocomplete="off"' : '');
+        return `${label}<input type="${type}" id="${fieldId(q)}" class="glass-input w-full" data-qid="${escapeAttr(q.id)}"${ph}${extra} value="${escapeAttr(typeof v === 'string' ? v : '')}">
+            <p class="obq-err hidden text-xs text-amber-400 mt-1" role="alert"></p>${lock}`;
     };
 
     if (!questions.length) {
         return `<p class="text-sm text-gray-500 mb-4">Nothing to answer here yet.</p>`;
     }
-    return `<form id="obq-form-${s.id}" class="space-y-4 mb-4" onsubmit="event.preventDefault(); obSubmitAnswers('${s.id}')">
-        ${questions.map(q => `<div>${field(q)}</div>`).join('')}
+    return `<form id="obq-form-${s.id}" class="space-y-4 mb-4" novalidate onsubmit="event.preventDefault(); obSubmitAnswers('${s.id}')"
+                  oninput="obqChanged('${s.id}')" onchange="obqChanged('${s.id}')">
+        ${questions.map(q => `<div data-qwrap="${escapeAttr(q.id)}" class="${showing.has(q.id) ? '' : 'hidden'}">${field(q)}</div>`).join('')}
         <div class="flex flex-wrap items-center gap-3">
             <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
                 <i class="fa-solid fa-check mr-2"></i>${complete ? 'Save changes' : 'Submit answers'}
@@ -2131,53 +2445,165 @@ function obQuestionsFormHtml(s, complete) {
     </form>`;
 }
 
+// What is typed into the form right now, by question id (raw, not tidied)
+function obReadFormValues(form, questions) {
+    const values = {};
+    questions.forEach(q => {
+        if (q.type === 'choice') {
+            values[q.id] = form.querySelector(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)?.value || '';
+        } else if (q.type === 'multi') {
+            values[q.id] = [...form.querySelectorAll(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)].map(i => i.value);
+        } else if (q.type === 'style') {
+            const fs = form.querySelector(`fieldset[data-qid="${CSS.escape(q.id)}"]`);
+            values[q.id] = [fs?.querySelector('input[name$="-first"]:checked')?.value || '', fs?.querySelector('input[name$="-second"]:checked')?.value || ''];
+        } else {
+            values[q.id] = form.querySelector(`[data-qid="${CSS.escape(q.id)}"]`)?.value || '';
+        }
+    });
+    return values;
+}
+
+// Read the form: which questions are showing, tidied answers for those, problems, and the client facts they set
+function obCollectAnswers(step, form) {
+    const all = obQuestionsFor(step, currentActiveClient);
+    const raw = obReadFormValues(form, all);
+    const visible = obVisibleQuestions(all, raw);
+    const answers = {};
+    const privateAnswers = {};
+    const values = {};
+    const missing = [];
+    const errors = [];
+    visible.forEach(q => {
+        const cleaned = obCleanAnswer(q, raw[q.id]);
+        if (cleaned.error) { errors.push({ q, message: cleaned.error }); return; }
+        const empty = Array.isArray(cleaned.value) ? !cleaned.value.length : !cleaned.value;
+        // A private answer saved earlier counts: the field is empty only because it's never shown back
+        const savedPriv = obIsPrivate(q) && obPrivateSaved(currentActiveClient, step.id, q.id);
+        if (q.required && empty && !savedPriv) missing.push(q.label);
+        if (!empty) (obIsPrivate(q) ? privateAnswers : answers)[q.id] = { label: q.label, value: cleaned.value };
+        values[q.id] = cleaned.value;
+    });
+    return { all, visible, answers, privateAnswers, values, missing, errors, facts: obFactsFromAnswers(visible.filter(q => !obIsPrivate(q)), values) };
+}
+
+// Show and hide dependent questions as answers change, and save a draft a moment after typing stops
+const obqDraftTimers = {};
+window.obqChanged = function(stepId) {
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    const form = document.getElementById(`obq-form-${stepId}`);
+    if (!step || !form) return;
+    const all = obQuestionsFor(step, currentActiveClient);
+    const showing = new Set(obVisibleQuestions(all, obReadFormValues(form, all)).map(q => q.id));
+    all.forEach(q => form.querySelector(`[data-qwrap="${CSS.escape(q.id)}"]`)?.classList.toggle('hidden', !showing.has(q.id)));
+    form.querySelectorAll('.obq-err').forEach(e => e.classList.add('hidden'));
+    clearTimeout(obqDraftTimers[stepId]);
+    obqDraftTimers[stepId] = setTimeout(() => obSaveAnswers(stepId, { draft: true }), 1500);
+};
+
+// Writes the answers and the client facts. A draft saves whatever is filled in without asking for the
+// rest; the real submit has checked everything by the time it gets here.
+async function obSaveAnswers(stepId, { draft }) {
+    if (previewBlocksWrite('saving answers')) return { ok: false };
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    const form = document.getElementById(`obq-form-${stepId}`);
+    const status = document.getElementById(`obq-status-${stepId}`);
+    if (!step || !form) return { ok: false };
+    const c = obCollectAnswers(step, form);
+    // A half-typed email or link is not worth saving as a draft; leave the last good draft alone
+    if (draft && c.errors.length) return { ok: false };
+
+    const now = new Date().toISOString();
+    const row = { client_name: currentActiveClient, step_id: stepId, answers: c.answers, submitted_by: clientEmail || null, updated_at: now };
+    const { error } = await supabaseClient.from('onboarding_answers').upsert(row, { onConflict: 'client_name,step_id' });
+    if (error) {
+        console.error('Could not save answers:', error);
+        if (status) {
+            status.className = 'text-xs text-red-400';
+            status.innerText = draft ? "Couldn't save yet. We'll try again." : "Couldn't save your answers. Please try again, or email us if it keeps happening.";
+        }
+        return { ok: false };
+    }
+    const existing = obAnswersFor(currentActiveClient, stepId);
+    if (existing) Object.assign(existing, row); else globalOnboardingAnswers.push({ ...row, submitted_at: now });
+
+    // Private and secret answers go to their own store, which the client can't read back
+    if (Object.keys(c.privateAnswers).length) {
+        const { data: savedIds, error: privErr } = await supabaseClient.rpc('save_private_onboarding_answers', {
+            p_client: currentActiveClient, p_step_id: stepId, p_answers: c.privateAnswers
+        });
+        if (privErr) {
+            console.error('Could not save private answers:', privErr);
+            if (status) {
+                status.className = 'text-xs text-red-400';
+                status.innerText = draft ? "Couldn't save yet. We'll try again." : "Couldn't save some of your answers. Please try again, or email us if it keeps happening.";
+            }
+            return { ok: false };
+        }
+        (Array.isArray(savedIds) ? savedIds : []).forEach(qid => globalPrivateAnswerKeys.add(obPrivateKey(currentActiveClient, stepId, qid)));
+    }
+
+    let factsChanged = false;
+    if (Object.keys(c.facts).length) {
+        const { data, error: factErr } = await supabaseClient.rpc('set_client_onboarding_facts', { p_client: currentActiveClient, p_facts: c.facts });
+        if (factErr) {
+            // The SQL not being installed yet must not stop the answers being saved
+            console.warn('Could not save the client facts:', factErr);
+        } else if (data) {
+            const key = normalize(currentActiveClient);
+            [...portalClientRows, ...globalClientsData].filter(r => normalize(r.name) === key).forEach(r => {
+                ['facebook_page', 'crm_choice', 'crm_name', 'crm_method'].forEach(k => {
+                    if ((r[k] ?? null) !== (data[k] ?? null)) factsChanged = true;
+                    r[k] = data[k] ?? null;
+                });
+            });
+        }
+    }
+    if (status) {
+        status.className = 'text-xs text-gray-400';
+        status.innerText = draft ? 'Draft saved' : 'Saved.';
+    }
+    return { ok: true, factsChanged };
+}
+
 window.obSubmitAnswers = async function(stepId) {
     if (previewBlocksWrite('submitting answers')) return;
     const step = globalOnboardingSteps.find(s => s.id === stepId);
     const form = document.getElementById(`obq-form-${stepId}`);
     const status = document.getElementById(`obq-status-${stepId}`);
     if (!step || !form) return;
+    clearTimeout(obqDraftTimers[stepId]);
 
-    const answers = {};
-    const missing = [];
-    obQuestionsFor(step, currentActiveClient).forEach(q => {
-        let value;
-        if (q.type === 'choice') {
-            value = form.querySelector(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)?.value || '';
-        } else if (q.type === 'multi') {
-            value = [...form.querySelectorAll(`fieldset[data-qid="${CSS.escape(q.id)}"] input:checked`)].map(i => i.value);
-        } else {
-            value = (form.querySelector(`[data-qid="${CSS.escape(q.id)}"]`)?.value || '').trim();
-        }
-        const empty = Array.isArray(value) ? !value.length : !value;
-        if (q.required && empty) missing.push(q.label);
-        if (!empty) answers[q.id] = { label: q.label, value };
-    });
-
-    if (missing.length) {
+    const c = obCollectAnswers(step, form);
+    form.querySelectorAll('.obq-err').forEach(e => { e.classList.add('hidden'); e.innerText = ''; });
+    if (c.errors.length) {
+        c.errors.forEach(({ q, message }) => {
+            const err = form.querySelector(`[data-qwrap="${CSS.escape(q.id)}"] .obq-err`);
+            if (err) { err.innerText = message; err.classList.remove('hidden'); }
+        });
         status.className = 'text-xs text-amber-400';
-        status.innerText = `Please answer: ${missing.join('; ')}`;
+        status.innerText = 'Please fix the highlighted answers.';
+        return;
+    }
+    if (c.missing.length) {
+        status.className = 'text-xs text-amber-400';
+        status.innerText = `Please answer: ${c.missing.join('; ')}`;
         return;
     }
 
     status.className = 'text-xs text-gray-400';
     status.innerText = 'Saving…';
-    const now = new Date().toISOString();
-    const row = { client_name: currentActiveClient, step_id: stepId, answers, submitted_by: clientEmail || null, updated_at: now };
-    const { error } = await supabaseClient.from('onboarding_answers').upsert(row, { onConflict: 'client_name,step_id' });
-    if (error) {
-        console.error('Could not save answers:', error);
-        status.className = 'text-xs text-red-400';
-        status.innerText = "Couldn't save your answers. Please try again, or email us if it keeps happening.";
-        return;
+    const saved = await obSaveAnswers(stepId, { draft: false });
+    if (!saved.ok) return;
+
+    // A changed answer can change which steps this client gets, so refresh the list before showing it
+    if (saved.factsChanged) {
+        await loadOnboardingApplicability([currentActiveClient]);
+        renderGetStarted();
+        updateGetStartedTabVisibility();
     }
-
-    const existing = obAnswersFor(currentActiveClient, stepId);
-    if (existing) Object.assign(existing, row); else globalOnboardingAnswers.push({ ...row, submitted_at: now });
-
     if (onboardingProgressFor(currentActiveClient, stepId)?.completed_at) {
-        status.className = 'text-xs text-emerald-400';
-        status.innerText = 'Saved.';
+        const again = document.getElementById(`obq-status-${stepId}`);
+        if (again) { again.className = 'text-xs text-emerald-400'; again.innerText = 'Saved.'; }
         return;
     }
     // Completing re-renders the list and moves them on to the next step
@@ -2368,10 +2794,14 @@ async function raiseOnboardingAgencyTasks(clientName, stage) {
     }
 }
 
+// Archived tasks count as "already raised": archiving a finished handoff task must never read as
+// "never raised", or the next admin load files a new one and texts everyone again.
+const tasksIncludingArchived = () => globalTasksData.concat(globalArchivedTasks);
+
 function onboardingHandoffRaised(clientName) {
     const key = normalize(clientName || '');
     const title = OB_COMPLETE_TASK_TITLE.trim().toLowerCase();
-    return globalTasksData.some(t =>
+    return tasksIncludingArchived().some(t =>
         normalize(t.client || '') === key &&
         String(t.title || '').trim().toLowerCase() === title);
 }
@@ -3482,7 +3912,7 @@ window.submitClientRequest = async function() {
         async function fetchAllGlobalData(allowedClients, { deferCatchUp = false } = {}) {
     let clientsQ = supabaseClient.from('clients').select('*');
     let healthQ = supabaseClient.from('client_health').select('*');
-    let tasksQ = supabaseClient.from('tasks').select('*');
+    let tasksQ = supabaseClient.from('tasks').select('*').neq('type', 'Setup step');
     // Paged: PostgREST returns at most 1000 rows per request, and daily_reports passed that
     // long ago, so a single select('*') silently handed back an arbitrary 1000 of them.
     let adsQ = fetchAllRows('daily_reports');
@@ -3541,8 +3971,12 @@ window.submitClientRequest = async function() {
         // If they are marked paid, but the deadline has passed...
         if (c.payment_status === 'paid' && c.payment_deadline && c.payment_deadline < todayStr) {
             c.payment_status = 'overdue'; // Instantly change it locally
-            // Silently update Supabase in the background so it stays accurate
-            supabaseClient.from('clients').update({ payment_status: 'overdue' }).eq('id', c.id).then();
+            // Write it back only for admins: since clients_rls.sql only admins can update
+            // clients, and anyone else's update would silently match 0 rows. This load runs
+            // for every signed-in user, portal clients included.
+            if (currentUserRole === 'admin') {
+                supabaseClient.from('clients').update({ payment_status: 'overdue' }).eq('id', c.id).then();
+            }
         }
         return c;
     });
@@ -3561,6 +3995,8 @@ window.submitClientRequest = async function() {
     globalServices = results[12].status === 'fulfilled' ? (results[12].value.data || []) : [];
     globalClientServices = results[13].status === 'fulfilled' ? (results[13].value.data || []) : [];
     globalOnboardingAnswers = results[14].status === 'fulfilled' ? (results[14].value.data || []) : [];
+    await loadPrivateAnswersForStaff();
+    await loadGhlContactChecks();
     // A missing table (client_directory.sql not run yet) comes back as an error with no
     // data, so this is simply empty and the roster says the details can't be saved yet.
     globalClientProfiles = results[15].status === 'fulfilled' ? (results[15].value.data || []) : [];
@@ -3622,6 +4058,7 @@ window.submitClientRequest = async function() {
             // Which onboarding steps apply to each client, before anything below reads it
             await loadOnboardingApplicability(globalClientsData.map(c => c.name));
             geStartupMark('onboarding rules loaded');
+            await loadSetupSteps();
 
             // Only the first load defers this (see initApp): every other caller refetches
             // after a change and renders straight after, so it still waits for the result.
@@ -3651,6 +4088,7 @@ window.submitClientRequest = async function() {
                 await reconcileOnboardingHandoffTasks();
                 // Before the stage advance, so a task Golden Eye just ticked off can move its client on
                 await runAutoChecks();
+                await syncSetupSummaries();
                 await autoAdvanceCompletedOnboarding();
                 return lifecycleSnapshot() !== before;
             });
@@ -3774,6 +4212,12 @@ window.submitClientRequest = async function() {
 
             // Save the page choice to the browser's local memory
             localStorage.setItem('midas_current_page', page);
+            if (typeof presenceSetPage === 'function') {
+                presenceSetPage(page);
+                // The office polls only while the Users tab is actually showing
+                if (page !== 'settings') officeClose();
+                else setTimeout(() => { const u = document.getElementById('s-view-users'); if (u && !u.classList.contains('hidden')) officeOpen(); }, 80);
+            }
 
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             const navEl = document.getElementById(`nav-${page}`); if(navEl) navEl.classList.add('active');
@@ -3922,11 +4366,147 @@ window.submitClientRequest = async function() {
         }
 
         // --- GOLDEN EYE (DASHBOARD) RENDERING ---
+
+// ============================================================================
+// Ask Golden Eye: the chat on the Overview page (supabase/functions/overview-chat)
+// ============================================================================
+// The browser sends only the conversation's text. The function runs read-only lookups as the signed-in
+// admin and returns the answer plus the names of what it looked at. Nothing here writes anything.
+const OV_CHAT_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/overview-chat";
+const OV_CHAT_MAX_TURNS = 20;   // the function's limit; a longer chat asks for a fresh start
+const OV_CHAT_SUGGESTIONS = [
+    'Who needs attention this week?',
+    'Which ads are over their target CPL?',
+    'What tasks are overdue, and who owns them?',
+    "Compare this week's leads with last week for every client"
+];
+const OV_CHAT_SOURCES = {
+    list_clients: 'clients', ad_performance: 'ad performance', ad_breakdown: 'individual ads', ad_changes: 'ad changes',
+    tasks: 'tasks', checkins: 'check-ins', leads: 'website leads', seo_overview: 'SEO', onboarding: 'onboarding', latest_audit: 'the morning audit'
+};
+let ovChatTurns = [];
+let ovChatBusy = false;
+
+async function callOverviewChat(messages) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired. Sign in again.');
+    const res = await fetch(OV_CHAT_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ messages })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+        const e = data.error;
+        throw new Error((e && (e.message || (typeof e === 'string' ? e : ''))) || `the chat service returned ${res.status}`);
+    }
+    return data;
+}
+
+function ovChatBubble(role, html, extra = '') {
+    const box = document.getElementById('ov-chat-msgs');
+    if (!box) return null;
+    const me = role === 'user';
+    const el = document.createElement('div');
+    el.style.cssText = `align-self:${me ? 'flex-end' : 'flex-start'}; max-width:${me ? '80%' : '92%'}; padding:10px 14px; border-radius:3px; font-size:13.5px; line-height:1.55; ${me ? 'background:var(--goldWash); border:1px solid var(--goldLine); color:var(--t1);' : 'background:var(--inset); border:1px solid var(--line); color:var(--t1);'}${extra}`;
+    el.innerHTML = html;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return el;
+}
+
+function ovChatRenderSuggestions() {
+    const el = document.getElementById('ov-chat-suggest');
+    if (!el) return;
+    el.innerHTML = ovChatTurns.length ? '' : OV_CHAT_SUGGESTIONS.map((q, i) =>
+        `<button type="button" onclick="ovChatSend(OV_CHAT_SUGGESTIONS[${i}])" class="text-xs" style="padding:5px 11px; border-radius:2px; background:var(--inset); border:1px solid var(--line); color:var(--t2); cursor:pointer;">${escapeAttr(q)}</button>`).join('');
+    const reset = document.getElementById('ov-chat-reset');
+    if (reset) reset.classList.toggle('hidden', !ovChatTurns.length);
+}
+
+window.ovChatReset = function () {
+    if (ovChatBusy) return;
+    ovChatTurns = [];
+    const box = document.getElementById('ov-chat-msgs'); if (box) box.innerHTML = '';
+    ovChatRenderSuggestions();
+};
+
+window.ovChatSubmit = function (e) {
+    e.preventDefault();
+    const input = document.getElementById('ov-chat-input');
+    const text = (input.value || '').trim();
+    if (text) { input.value = ""; window.ovChatSend(text); }
+};
+
+window.ovChatSend = async function (text) {
+    text = String(text || '').trim();
+    if (!text || ovChatBusy || currentUserRole !== 'admin') return;
+    if (ovChatTurns.length + 1 > OV_CHAT_MAX_TURNS) return alert('This chat has got long. Press New chat to start a fresh one.');
+    ovChatBusy = true;
+    const send = document.getElementById('ov-chat-send'); if (send) send.disabled = true;
+    ovChatTurns.push({ role: 'user', content: text });
+    ovChatRenderSuggestions();
+    ovChatBubble('user', escapeAttr(text));
+    const thinking = ovChatBubble('assistant', 'Looking that up&hellip;', 'color:var(--t3);');
+    try {
+        const data = await callOverviewChat(ovChatTurns);
+        const reply = String(data.reply || '').trim();
+        ovChatTurns.push({ role: 'assistant', content: reply });
+        const looked = (data.looked_at || []).map(n => OV_CHAT_SOURCES[n] || null).filter(Boolean);
+        thinking.style.color = 'var(--t1)';
+        thinking.innerHTML = formatChatReply(reply) + (looked.length
+            ? `<div class="text-xs" style="margin-top:8px; color:var(--t3);">Looked at: ${escapeAttr(looked.join(', '))}</div>` : '');
+    } catch (err) {
+        // A failed question is dropped from the history, so a retry does not send it twice
+        ovChatTurns.pop();
+        thinking.style.color = 'var(--neg)';
+        thinking.innerHTML = escapeAttr('Could not answer: ' + (err.message || err));
+    } finally {
+        ovChatBusy = false;
+        if (send) send.disabled = false;
+        const box = document.getElementById('ov-chat-msgs'); if (box) box.scrollTop = box.scrollHeight;
+        ovChatRenderSuggestions();
+    }
+};
+
+function showOverviewChat() {
+    const el = document.getElementById('ov-chat');
+    if (!el) return;
+    const isAdmin = currentUserRole === 'admin';
+    el.classList.toggle('hidden', !isAdmin);
+    if (isAdmin) ovChatRenderSuggestions();
+}
+
+        // Make's daily ads pull fetches active clients with a Search Rows step limited to 100 (read from the
+        // scenario's blueprint on 2026-10-14; this said 10 until then). Past that, a client would silently get no
+        // ad data, so admins are told when they reach the limit, and again, louder, if they go past it.
+        const MAKE_PULL_LIMIT = 100;
+        function makeLimitNotice(clients) {
+            const n = (clients || []).filter(c => isActiveClient(c) && normalizeAccountId(c.ad_account_id)).length;
+            if (n < MAKE_PULL_LIMIT) return null;
+            return n === MAKE_PULL_LIMIT
+                ? { level: 'warn', n, text: `You have ${n} active clients with an ad account, which is the limit on Make's daily ads pull. Raise the Search Rows limit in that scenario before you add another, or the next client will get no ad data.` }
+                : { level: 'bad', n, text: `You have ${n} active clients with an ad account, but Make's daily ads pull only reads ${MAKE_PULL_LIMIT}. ${n - MAKE_PULL_LIMIT} of them are getting no new ad data. Raise the Search Rows limit in that scenario.` };
+        }
+        function showMakeLimitNotice() {
+            const el = document.getElementById('ov-make-limit');
+            if (!el) return;
+            const note = currentUserRole === 'admin' ? makeLimitNotice(globalClientsData) : null;
+            el.classList.toggle('hidden', !note);
+            if (!note) { el.innerText = ''; return; }
+            el.innerText = note.text;
+            el.style.cssText += note.level === 'bad'
+                ? 'background:var(--inset); border:1px solid var(--neg); color:var(--neg);'
+                : 'background:var(--goldWash); border:1px solid var(--goldLine); color:var(--t1);';
+        }
+
         function renderGoldenEye() {
             // Check for a cached audit first thing!
             checkSavedAudit();
             // Puts the count of unread changes on Settings → Updates
             if (typeof checkUpdatesBadge === 'function') checkUpdatesBadge();
+            showOverviewChat();
+            showMakeLimitNotice();
 
             const isLight = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isLight ? '#64748b' : 'rgba(255,255,255,0.6)';
 
@@ -4018,7 +4598,7 @@ window.submitClientRequest = async function() {
                         <span style="font-size:13.5px; font-weight:450; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--t1);">${escapeAttr(stripSlashEscapes(c.name))}</span>
                         <span class="ge-label" style="padding:2px 6px; border-radius:2px; white-space:nowrap; color:${payColor}; background:var(--inset);">${payLabel}</span>
                     </div>
-                    <span class="text-sm" style="color:var(--t2);">${escapeAttr(c.current_stage || '—')}</span>
+                    <span class="text-sm" style="color:var(--t2);">${escapeAttr(c.current_stage ? clientPhase(c) : '—')}</span>
                     <div style="display:flex; align-items:center; justify-content:flex-end; gap:9px;">
                         <div class="score-bar-bg" style="width:34px; height:3px;" title="Health Score: ${score}"><div class="score-bar-fill" style="width: ${score}%; background: ${sc};"></div></div>
                         <span class="ge-num text-xs" style="color:var(--t2); width:18px; text-align:right;">${score || '—'}</span>
@@ -4327,6 +4907,8 @@ window.submitClientRequest = async function() {
                 const scoreColor = t.score > 75 ? 'var(--neg)' : (t.score > 50 ? 'var(--warn)' : 'var(--t3)');
                 const init = t.assignee ? t.assignee.substring(0,2).toUpperCase() : '?';
                 const hiddenIcon = t.client_visible === false ? '<i class="fa-solid fa-eye-slash" style="color:var(--t3); margin-right:4px;" title="Hidden from the client"></i>' : '';
+                const grp = setupGroupForTask(t);
+                const stepsHtml = grp ? `<div>${taskStepsToggleHtml(t, grp)}</div>${expandedTaskSteps.has(String(t.id)) ? taskStepsPanelHtml(grp) : ''}` : '';
 
                 cols[s].innerHTML += `<div class="kanban-card transition" data-id="${t.id}" style="border:1px solid var(--line); border-radius:3px; background:var(--panel); padding:16px; display:flex; flex-direction:column; gap:11px;${t.__onboardingStep ? ' border-style:dashed; opacity:0.9;' : ''}"
                              onclick="${t.__onboardingStep ? "goToClient('" + escapeHTML(t.client) + "')" : "openTaskDrawer(" + t.id + ")"}">
@@ -4335,6 +4917,7 @@ window.submitClientRequest = async function() {
                                 <span class="text-xs shrink-0 ge-num" style="color:var(${dueColor});">${hiddenIcon}${due}</span>
                             </div>
                             <div style="font-size:13.5px; font-weight:450; line-height:1.4; color:var(--t1);">${escapeAttr(stripSlashEscapes(t.title || 'Untitled Task'))}</div>
+                            ${stepsHtml}
                             <div class="flex items-center justify-between gap-2" style="padding-top:3px;">
                                 <div style="width:20px; height:20px; border-radius:2px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:9px; color:var(--t2);">${init}</div>
                                 <div class="flex items-center gap-2">
@@ -4358,7 +4941,7 @@ window.submitClientRequest = async function() {
             
             sortableInstances.forEach(s=>s.destroy()); sortableInstances=[];
             document.querySelectorAll('#page-tasks .kanban-col').forEach(c => {
-                sortableInstances.push(new Sortable(c, { group:'kanban', draggable:'.kanban-card', animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
+                sortableInstances.push(new Sortable(c, { group:'kanban', draggable:'.kanban-card', filter:'.task-steps, .task-steps-toggle', preventOnFilter:false, animation:150, ghostClass:'sortable-ghost', delay:50, delayOnTouchOnly:true, onEnd: async(e)=>{
                     const id = e.item.getAttribute('data-id'); const nS = e.to.getAttribute('data-status'); const t = globalTasksData.find(x=>x.id==id);
                     if(t && t.status!==nS){ t.status=nS; renderTaskSummary(); const {error} = await supabaseClient.from('tasks').update({status:nS}).eq('id',id); if(error) await fetchAllGlobalData(globalAllowedClients); renderKanban(); if(await queueLifecycle(autoAdvanceCompletedOnboarding)) renderKanban(); }
                 }}));
@@ -4379,15 +4962,17 @@ window.submitClientRequest = async function() {
                 let sColor = 'var(--t2)'; if(t.status==='In Progress') sColor='var(--warn)'; if(t.status==='Complete') sColor='var(--pos)'; if(t.status==='Blocked') sColor='var(--neg)';
                 let dI='', dColor='var(--t2)'; if(t.status!=='Complete'&&t.due){ if(t.due<td){dI='<i class="fa-solid fa-circle-exclamation mr-1" style="color:var(--neg);"></i>'; dColor='var(--neg)';} else if(t.due===td){dI='<i class="fa-solid fa-bell mr-1" style="color:var(--warn);"></i>'; dColor='var(--warn)';} }
                 const openAttr = taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`; let pC = t.score>75?'var(--neg)':(t.score>50?'var(--warn)':'var(--t3)'); const chk = selectedTaskIds.has(t.id)?'checked':'';
+                const grp = taskArchiveView ? null : setupGroupForTask(t);
 
                 bH += `<tr class="ge-table-row transition" style="border-bottom:1px solid var(--line);${chk?' background:var(--goldWash);':''}">
                     <td class="p-4"><input type="checkbox" class="row-checkbox" value="${t.id}" ${chk} onchange="toggleTaskRow(this, ${t.id})"></td>
-                    <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'} transition" style="color:var(--t1);"${taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`}><span class="flex items-center gap-2 flex-wrap">${escapeAttr(stripSlashEscapes(t.title || 'Untitled'))}${taskArchiveView ? `<span class="ge-label" style="padding:2px 6px; border-radius:2px; background:var(--inset);">Archived ${escapeAttr(new Date(t.archived_at).toLocaleDateString())}</span>` : clientTaskBadge(t)}</span></td>
+                    <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'} transition" style="color:var(--t1);"${taskArchiveView ? '' : ` onclick="openTaskDrawer(${t.id})"`}><span class="flex items-center gap-2 flex-wrap">${escapeAttr(stripSlashEscapes(t.title || 'Untitled'))}${taskArchiveView ? `<span class="ge-label" style="padding:2px 6px; border-radius:2px; background:var(--inset);">Archived ${escapeAttr(new Date(t.archived_at).toLocaleDateString())}</span>` : clientTaskBadge(t)}${grp ? taskStepsToggleHtml(t, grp) : ''}</span></td>
                     <td class="p-4 cursor-pointer" style="color:var(--gold);" onclick="goToClient('${escapeHTML(t.client)}')">${escapeAttr(stripSlashEscapes(t.client || 'Unknown'))}</td>
                     <td class="p-4${taskArchiveView ? '' : ' cursor-pointer'}"${openAttr}><div class="score-bar-bg"><div class="score-bar-fill" style="width:${t.score}%; background:${pC};"></div></div><span class="font-bold text-xs" style="color:var(--t1);">${t.score}</span></td>
                     <td class="p-4 font-bold${taskArchiveView ? '' : ' cursor-pointer'}" style="color:${dColor};"${openAttr}>${dI}${t.due||'-'}</td>
                     <td class="p-4${taskArchiveView ? '' : ' cursor-pointer'}"${openAttr}><span class="ge-label" style="padding:3px 8px; border-radius:2px; border:1px solid var(--line); color:${sColor};">${t.status}</span></td>`;
                 activeCols.forEach(c => { let v=t[c]||'-'; if(c==='assignee'&&t.assignee) v=`<div style="width:24px; height:24px; border-radius:2px; background:var(--inset); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; color:var(--t2);">${t.assignee.substring(0,2).toUpperCase()}</div>`; if(c==='updated_at') v=new Date(v).toLocaleDateString(); if(c==='notes') v=`<span class="truncate block max-w-[150px] opacity-70 text-xs">${v}</span>`; bH+=`<td class="p-4" style="color:var(--t2);">${v}</td>`; }); bH += `</tr>`;
+                if (grp && expandedTaskSteps.has(String(t.id))) bH += `<tr style="border-bottom:1px solid var(--line);"><td></td><td colspan="${5 + activeCols.length}" style="padding:0 16px 14px;">${taskStepsPanelHtml(grp)}</td></tr>`;
             });
             document.getElementById('t-table-body').innerHTML = bH; updateTaskBulkBar();
         }
@@ -4431,8 +5016,10 @@ window.submitClientRequest = async function() {
             const payload = archived
                 ? { archived_at: new Date().toISOString(), archived_by: clientEmail || null }
                 : { archived_at: null, archived_by: null };
-            const { error } = await supabaseClient.from('tasks').update(payload).in('id', ids);
+            const { data, error } = await supabaseClient.from('tasks').update(payload).in('id', ids).select('id');
             if (error) { alert("Couldn't " + (archived ? 'archive' : 'restore') + ': ' + archiveSaveError(error)); return false; }
+            // RLS refuses an update by matching nothing rather than with an error
+            if (!data?.length) { alert("Couldn't " + (archived ? 'archive' : 'restore') + ": your login isn't allowed to change tasks. Run supabase/sql/tasks_admin_access.sql in the SQL Editor."); return false; }
             return true;
         }
 
@@ -4547,20 +5134,40 @@ window.submitClientRequest = async function() {
 
     if(id==='new'){ 
         activeEditId=null;
-        document.getElementById('t-drawer-headline').innerText="New task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
+        document.getElementById('t-drawer-headline').innerText="New task"; document.getElementById('t-p').value=3; document.getElementById('t-u').value=3; document.getElementById('t-e').value=3; document.getElementById('t-delete-btn').classList.add('hidden'); document.getElementById('t-notify-btn').classList.add('hidden'); document.getElementById('t-assignee').value=currentUserName.split(' ')[0]; 
         if (clientToSet) checkTaskClientBox(clientToSet);
     } else { 
-        const t=globalTasksData.find(x=>x.id===id);
+        const t=globalTasksData.find(x=>x.id===id) || globalSetupSteps.find(x=>x.id===id);
         if(!t) return; activeEditId=t.id; document.getElementById('t-drawer-headline').innerText="Edit task"; document.getElementById('t-title').value=t.title; 
         if(t.client) checkTaskClientBox(t.client);
         document.getElementById('t-stage').value=t.stage||'Onboarding'; document.getElementById('t-assignee').value=t.assignee||''; document.getElementById('t-type').value=t.type||'One-off'; document.getElementById('t-due').value=t.due||'';
-        document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden');
+        document.getElementById('t-status').value=t.status||'Not Started'; document.getElementById('t-p').value=t.p; document.getElementById('t-u').value=t.u; document.getElementById('t-e').value=t.e; document.getElementById('t-notes').value=t.notes||''; document.getElementById('t-delete-btn').classList.remove('hidden'); document.getElementById('t-notify-btn').classList.remove('hidden');
         document.getElementById('t-hidden').checked = t.client_visible === false;
     }
     updateTaskClientDisplay();
     updateTaskScore(); document.getElementById('drawer-overlay').classList.add('show'); f.classList.add('open');
 }
         
+        // Texts whoever the task is assigned to (task_notify.sql). The database reads the assignee, so
+        // an unsaved change in the drawer would text the OLD person: stop and say to save first.
+        async function notifyTaskAssignee() {
+            const t = globalTasksData.find(x => x.id === activeEditId);
+            if (!t) return;
+            const shown = (document.getElementById('t-assignee').value || '').trim();
+            if (shown !== (t.assignee || '').trim()) return alert('The assignee was changed but not saved. Save the task first, then text them.');
+            if (!shown) return alert('This task has no assignee to text.');
+            if (!confirm(`Text ${shown} about "${t.title}"?`)) return;
+            const b = document.getElementById('t-notify-btn'); const label = b.innerHTML;
+            b.disabled = true; b.innerText = 'Sending...';
+            try {
+                const { data, error } = await supabaseClient.rpc('notify_task_assignee', { p_task_id: t.id });
+                if (error) alert(/notify_task_assignee/.test(error.message || '') && /not find|does not exist/i.test(error.message || '')
+                    ? 'Texting needs supabase/sql/task_notify.sql to be run first.' : 'Could not send: ' + error.message);
+                else if (!data || !data.ok) alert('Not sent: ' + ((data && data.reason) || 'unknown reason'));
+                else alert('Texted ' + data.texted.join(' and ') + '.' + (data.missing && data.missing.length ? ' No number on file for ' + data.missing.join(', ') + '.' : ''));
+            } finally { b.disabled = false; b.innerHTML = label; }
+        }
+
         function updateTaskScore(){ const p=parseInt(document.getElementById('t-p').value); const u=parseInt(document.getElementById('t-u').value); const e=parseInt(document.getElementById('t-e').value); document.getElementById('val-p').innerText=p; document.getElementById('val-u').innerText=u; document.getElementById('val-e').innerText=e; const s=Math.round(((p*0.4)+(u*0.4)+((6-e)*0.2))*20); const el=document.getElementById('t-calc-score'); el.innerText=s; el.style.color = `var(${s>75?'--neg':(s>50?'--warn':'--t1')})`; }
         
         async function saveTask(e){ 
@@ -4819,8 +5426,14 @@ function filterAdsData() {
                     const stageClient = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
                     const currentStage = stageClient ? (stageClient.current_stage || 'Onboarding') : null;
 
+                    const pkgBtn = document.getElementById('c-packages-btn');
+                    if (pkgBtn) {
+                        const showPkg = currentUserRole === 'admin' && stageClient && cSelectedAccount !== 'ALL';
+                        pkgBtn.classList.toggle('hidden', !showPkg);
+                        if (showPkg) pkgBtn.innerHTML = `<i class="fa-solid fa-box-open mr-1.5"></i>${escapeAttr(packagesSummary(stageClient.name))}`;
+                    }
                     if (stageChip) {
-                        stageChip.innerText = currentStage || '';
+                        stageChip.innerText = currentStage ? clientPhase(stageClient) : '';
                         stageChip.classList.toggle('hidden', !currentStage || cSelectedAccount === 'ALL');
                     }
 
@@ -4914,6 +5527,7 @@ function filterAdsData() {
                 if(document.getElementById('h-kpi-leads')) document.getElementById('h-kpi-leads').innerText = currentAdsStats.l.toLocaleString();
 
                 updateClientKpiDeltas(s, e);
+                renderAdActivityPanel(s, e);
 
                 const isL = document.getElementById('theme-wrapper').classList.contains('light-mode'); Chart.defaults.color = isL?'#64748b':'rgba(255,255,255,0.6)';
                 const wrapCsAds = getComputedStyle(document.getElementById('theme-wrapper'));
@@ -5410,12 +6024,94 @@ window.markOnboardingComplete = async function() {
     }
 };
 
+        // The Journey bar on a client's Health tab: how close they are to the next lifecycle stage.
+        // Onboarding counts the same items the Onboarding box lists (client steps + our tasks), which is
+        // what moves them on. Every later stage counts that stage's checklist tasks, and moving on is
+        // still the admin's call (Move Stage), so a full bar says "ready", never advances anyone.
+        function stageProgressFor(client) {
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(client));
+            if (!row) return null;
+            const stage = clientPhase(row);
+            const idx = displayStages.indexOf(stage);
+            const next = idx >= 0 ? displayStages[idx + 1] || null : null;
+            let done = 0, total = 0;
+            if (stage === 'Onboarding' || stage === SETUP_PHASE) {
+                // Onboarding: the client's own steps. Set up: our onboarding work (the items the box lists under Set up).
+                const ours = stage === SETUP_PHASE;
+                const items = allOnboardingItems(client).filter(i => (i.owner === 'agency') === ours);
+                const tasks = new Map(globalTasksData.filter(t => normalize(t.client || '') === normalize(client) && t.stage === 'Onboarding')
+                    .map(t => [String(t.title || '').trim().toLowerCase(), t]));
+                total = items.length;
+                done = items.filter(i => i.owner === 'agency'
+                    ? tasks.get(String(i.title || '').trim().toLowerCase())?.status === 'Complete'
+                    : !!onboardingProgressFor(client, i.id)?.completed_at).length;
+            } else {
+                const tasks = globalTasksData.filter(t => normalize(t.client || '') === normalize(client) && t.stage === stage);
+                total = tasks.length;
+                done = tasks.filter(t => t.status === 'Complete').length;
+            }
+            return { stage, idx, next, done, total, pct: total ? Math.round(done / total * 100) : 0 };
+        }
+
+        function renderStageProgress() {
+            const box = document.getElementById('c-stage-box');
+            if (!box) return;
+            const p = cSelectedAccount === "ALL" ? null : stageProgressFor(cSelectedAccount);
+            if (!p) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            document.getElementById('c-stage-steps').innerHTML = displayStages.map((s, i) => {
+                const state = i < p.idx ? 'done' : i === p.idx ? 'now' : 'todo';
+                const color = state === 'todo' ? 'var(--t3)' : state === 'now' ? 'var(--gold)' : 'var(--t2)';
+                return `<span style="flex:1; text-align:center; padding-bottom:4px; border-bottom:2px solid ${state === 'todo' ? 'var(--line)' : 'var(--goldSolid)'}; opacity:${state === 'done' ? 0.55 : 1}; color:${color}; font-weight:${state === 'now' ? 700 : 500};">${state === 'done' ? '✓ ' : ''}${escapeAttr(s)}</span>`;
+            }).join('');
+            const checklistBtn = document.getElementById('c-stage-checklist');
+            if (checklistBtn) {
+                const groups = currentUserRole === 'admin' ? setupGroupsFor(cSelectedAccount) : [];
+                const total = groups.reduce((n, g) => n + g.total, 0), done = groups.reduce((n, g) => n + g.done, 0);
+                checklistBtn.classList.toggle('hidden', !groups.length);
+                document.getElementById('c-stage-checklist-label').innerText = groups.length ? `Our checklist · ${done} of ${total}` : 'Our checklist';
+            }
+            const bar = document.getElementById('c-stage-bar');
+            bar.style.width = p.pct + '%';
+            const track = document.getElementById('c-stage-bar-track');
+            track.setAttribute('aria-valuenow', String(p.pct));
+            const unit = p.stage === 'Onboarding' ? 'steps' : 'tasks';
+            document.getElementById('c-stage-summary').innerText = p.next
+                ? `${p.stage} → ${p.next}` : `${p.stage} (last stage)`;
+            document.getElementById('c-stage-detail').innerText = !p.total
+                ? `No ${p.stage} ${unit} yet, so there's nothing to measure.`
+                : p.next
+                    ? (p.done === p.total ? `All ${p.total} ${unit} done. Ready to move to ${p.next}.` : `${p.done} of ${p.total} ${unit} done (${p.pct}%). ${p.total - p.done} to go before ${p.next}.`)
+                    : `${p.done} of ${p.total} ${unit} done.`;
+        }
+
+        function agencyStepImplicitlyDone(clientName, item) {
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+            if (!row || (row.current_stage || 'Onboarding') === 'Onboarding') return false;
+            const a = obFor(clientName);
+            const live = new Set(a ? a.steps.filter(r => r.service_status === 'onboarding').map(r => r.step_id) : []);
+            return !live.has(item.id);
+        }
+
+        function onboardingItemsToShow(clientName) {
+            const items = allOnboardingItems(clientName);
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+            if (!row || (row.current_stage || 'Onboarding') === 'Onboarding') return items;
+            const a = obFor(clientName);
+            if (!a) return [];
+            const live = new Set(a.steps.filter(r => r.service_status === 'onboarding').map(r => r.step_id));
+            return items.filter(i => live.has(i.id));
+        }
+
         function renderClientOnboarding() {
             const box = document.getElementById('c-onboarding-box');
             const list = document.getElementById('c-onboarding-list');
             if (!box || !list) return;
+            renderStageProgress();
 
-            const items = cSelectedAccount === "ALL" ? [] : allOnboardingItems(cSelectedAccount);
+            // Past Onboarding, only the steps of an add-on they're onboarding now (the portal's rule, getStartedSteps).
+            // Steps added after a long-running client onboarded (the questionnaire, for one) aren't owed and don't show.
+            const items = cSelectedAccount === "ALL" ? [] : onboardingItemsToShow(cSelectedAccount);
             if (cSelectedAccount === "ALL" || !items.length) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
 
@@ -5423,13 +6119,19 @@ window.markOnboardingComplete = async function() {
                 normalize(t.client || '') === normalize(cSelectedAccount) && t.stage === 'Onboarding');
             const taskByTitle = new Map(clientTasks.map(t => [String(t.title || '').trim().toLowerCase(), t]));
 
+            // A client who has moved past Onboarding got there because our own onboarding work was finished (or they
+            // predate these steps, so no task was ever raised), so those steps count as done. Not the steps of an add-on
+            // they are still onboarding: those need their task.
             const isDone = item => item.owner === 'agency'
-                ? taskByTitle.get(String(item.title || '').trim().toLowerCase())?.status === 'Complete'
+                ? taskByTitle.get(String(item.title || '').trim().toLowerCase())?.status === 'Complete' || agencyStepImplicitlyDone(cSelectedAccount, item)
                 : !!onboardingProgressFor(cSelectedAccount, item.id)?.completed_at;
 
             const done = items.filter(isDone).length;
             const summary = document.getElementById('c-onboarding-summary');
             if (summary) summary.innerText = `${done} of ${items.length} complete`;
+            // Whether the onboarding-complete tag and text can reach them (ghl-contact-check)
+            const ghlBox = document.getElementById('c-onboarding-ghl');
+            if (ghlBox) ghlBox.innerHTML = ghlContactNoticeHtml(cSelectedAccount);
 
             // Offered only where it's the right tool: a client who joined before the
             // portal existed has no progress rows at all, so every step reads outstanding
@@ -5441,10 +6143,15 @@ window.markOnboardingComplete = async function() {
                 backfill.classList.toggle('hidden', !(currentUserRole === 'admin' && outstanding > 0));
             }
 
-            // The first outstanding item — whoever it's waiting on
-            const blocker = items.find(i => !isDone(i));
+            // Two sections: the client's onboarding, then our set up. Each keeps its own order.
+            const theirs = items.filter(i => i.owner !== 'agency'), ours = items.filter(i => i.owner === 'agency');
+            const sectionHead = (label, group) => group.length
+                ? `<div class="ob-section-head text-[10px] uppercase tracking-widest text-gray-500 pt-2 px-1">${label} <span class="text-gray-600">· ${group.filter(isDone).length} of ${group.length}</span></div>` : '';
 
-            list.innerHTML = items.map(item => {
+            // The first outstanding item — whoever it's waiting on (their steps come first)
+            const blocker = [...theirs, ...ours].find(i => !isDone(i));
+
+            const itemRow = item => {
                 const complete = isDone(item);
                 const isBlocker = !complete && item.id === blocker?.id;
                 const mine = item.owner === 'agency';
@@ -5479,9 +6186,13 @@ window.markOnboardingComplete = async function() {
                         <span class="text-sm truncate ${complete ? 'text-gray-500 line-through' : 'text-white'}">${escapeHTML(item.title)}</span>
                         ${mine && item.auto_check ? '<i class="fa-solid fa-bolt text-emerald-400/70 text-[10px] shrink-0" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}
                     </div>
-                    <div class="text-[11px] whitespace-nowrap">${state}</div>
+                    <div class="flex items-center gap-3 text-[11px] whitespace-nowrap">${mine && currentUserRole === 'admin' && setupGroupsFor(cSelectedAccount).some(g => g.stage === 'Onboarding' && String(g.group).trim().toLowerCase() === String(item.title || '').trim().toLowerCase())
+                        ? `<button type="button" onclick="openSetupChecklist()" class="${isBlocker ? 'btn-primary' : ''} btn text-xs" style="padding:3px 10px;${isBlocker ? '' : ' background:transparent; border:1px solid var(--line); color:var(--t2);'}"><i class="fa-solid fa-list-check mr-1.5"></i>Our checklist</button>` : ''}<span>${state}</span></div>
                 </div>`;
-            }).join('') + clientAnswersHtml(cSelectedAccount);
+            };
+            list.innerHTML = sectionHead('Onboarding · what they do', theirs) + theirs.map(itemRow).join('')
+                + sectionHead('Set up · what we do', ours) + ours.map(itemRow).join('')
+                + clientAnswersHtml(cSelectedAccount);
         }
 
         // What the client answered on built-in Questions steps, under their onboarding list.
@@ -5489,18 +6200,50 @@ window.markOnboardingComplete = async function() {
         // question is reworded or removed. Copy puts plain text on the clipboard (for Cuppa).
         const obAnswerText = {};
         function clientAnswersHtml(clientName) {
-            const mine = globalOnboardingAnswers.filter(a => normalize(a.client_name) === normalize(clientName));
-            if (!mine.length) return '';
-            return mine.map(a => {
+            const want = normalize(clientName);
+            const mine = globalOnboardingAnswers.filter(a => normalize(a.client_name) === want);
+            // Admins also see private answers and stored logins (onboarding_questionnaire.sql); a step with only
+            // private answers still gets its box. Copy leaves both out: it's for content tools like Cuppa.
+            const privRows = globalPrivateAnswers.filter(p => normalize(p.client_name) === want);
+            const secretRows = globalSecretsMeta.filter(p => normalize(p.client_name) === want);
+            const stepIds = [...new Set([...mine.map(a => a.step_id), ...privRows.map(p => p.step_id), ...secretRows.map(p => p.step_id)])];
+            if (!stepIds.length) return '';
+            return stepIds.map(stepId => {
+                const a = mine.find(x => x.step_id === stepId) || { step_id: stepId, answers: {} };
+                const privAnswers = privRows.find(p => p.step_id === stepId)?.answers || {};
+                const secrets = secretRows.filter(p => p.step_id === stepId);
                 const step = globalOnboardingSteps.find(s => s.id === a.step_id);
                 const title = step?.title || 'Onboarding questions';
                 // In the step's question order where the question still exists, then any others
                 const order = (Array.isArray(step?.questions) ? step.questions : []).map(q => q.id);
-                const entries = Object.entries(a.answers || {})
-                    .sort(([x], [y]) => (order.indexOf(x) + 1 || 999) - (order.indexOf(y) + 1 || 999));
+                const byOrder = ([x], [y]) => (order.indexOf(x) + 1 || 999) - (order.indexOf(y) + 1 || 999);
+                const entries = Object.entries(a.answers || {}).sort(byOrder);
                 const show = v => Array.isArray(v) ? v.join(', ') : String(v ?? '');
-                obAnswerText[a.step_id] = `${title} (${clientName})\n\n` + entries.map(([, e]) => `${e.label}\n${show(e.value)}`).join('\n\n');
-                const when = new Date(a.updated_at || a.submitted_at).toLocaleDateString();
+                // An SEO step's copy (for Cuppa) also carries the services answer, which the questionnaire asks once in
+                // another step (any question saving to custom_value:services_list) and the SEO step no longer asks.
+                let copyEntries = entries;
+                if ((step?.service_keys || []).includes('seo') && !entries.some(([qid]) => /services/i.test(qid))) {
+                    const servicesQ = new Set(globalOnboardingSteps.flatMap(st => (Array.isArray(st.questions) ? st.questions : [])
+                        .filter(q => /custom_value:services_list/.test(q.dest || '')).map(q => `${st.id}|${q.id}`)));
+                    const extra = mine.filter(x => x.step_id !== a.step_id).flatMap(x => Object.entries(x.answers || {})
+                        .filter(([qid, e]) => servicesQ.has(`${x.step_id}|${qid}`) && e && String(show(e.value)).trim()));
+                    copyEntries = [...extra.slice(0, 1), ...entries];
+                }
+                obAnswerText[a.step_id] = `${title} (${clientName})\n\n` + copyEntries.map(([, e]) => `${e.label}\n${show(e.value)}`).join('\n\n');
+                const privHtml = Object.entries(privAnswers).sort(byOrder).map(([, e]) => `<div>
+                            <p class="text-[11px] text-gray-500"><i class="fa-solid fa-lock mr-1" title="Only our team can see this"></i>${escapeAttr(e.label)}</p>
+                            <p class="text-sm text-gray-200 whitespace-pre-wrap">${escapeAttr(show(e.value))}</p>
+                        </div>`).join('');
+                const secretHtml = secrets.map(sc => `<div>
+                            <p class="text-[11px] text-gray-500"><i class="fa-solid fa-key mr-1" title="Stored encrypted"></i>${escapeAttr(sc.label || sc.question_id)}</p>
+                            <p class="text-sm text-gray-200 flex items-center gap-3"><span class="ob-secret-val font-mono">••••••••</span>
+                                <button type="button" class="text-xs text-blue-400 hover:text-blue-300 font-bold" onclick="revealOnboardingSecret(this)"
+                                    data-client="${escapeAttr(sc.client_name)}" data-step="${escapeAttr(sc.step_id)}" data-q="${escapeAttr(sc.question_id)}">Reveal</button>
+                                <button type="button" class="text-xs text-red-400 hover:text-red-300 font-bold" onclick="deleteOnboardingSecret(this)"
+                                    data-client="${escapeAttr(sc.client_name)}" data-step="${escapeAttr(sc.step_id)}" data-q="${escapeAttr(sc.question_id)}">Delete</button></p>
+                        </div>`).join('');
+                const stamps = [a.updated_at || a.submitted_at, ...secrets.map(x => x.updated_at), privRows.find(p => p.step_id === stepId)?.updated_at].filter(Boolean).sort();
+                const when = stamps.length ? new Date(stamps[stamps.length - 1]).toLocaleDateString() : '';
                 return `<details class="mt-3 rounded-lg border border-white/5 bg-black/20">
                     <summary class="cursor-pointer px-3 py-2 text-sm text-white flex items-center justify-between gap-3">
                         <span><i class="fa-solid fa-clipboard-list text-blue-400 mr-2"></i>${escapeAttr(title)} &mdash; answers</span>
@@ -5510,14 +6253,47 @@ window.markOnboardingComplete = async function() {
                         ${entries.map(([, e]) => `<div>
                             <p class="text-[11px] text-gray-500">${escapeAttr(e.label)}</p>
                             <p class="text-sm text-gray-200 whitespace-pre-wrap">${escapeAttr(show(e.value))}</p>
-                        </div>`).join('') || '<p class="text-sm text-gray-500">Submitted with nothing filled in.</p>'}
-                        <button type="button" onclick="copyClientAnswers('${a.step_id}', this)" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
-                            <i class="fa-solid fa-copy mr-1"></i> Copy answers
-                        </button>
+                        </div>`).join('')}${privHtml}${secretHtml}${entries.length || privHtml || secretHtml ? '' : '<p class="text-sm text-gray-500">Submitted with nothing filled in.</p>'}
+                        ${entries.length ? `<button type="button" onclick="copyClientAnswers('${a.step_id}', this)" class="text-xs text-blue-400 hover:text-blue-300 font-bold">
+                            <i class="fa-solid fa-copy mr-1"></i> Copy answers${privHtml || secretHtml ? ' (leaves out the private ones)' : ''}
+                        </button>` : ''}
                     </div>
                 </details>`;
             }).join('');
         }
+
+        // Show one stored login to an admin for a minute. Every reveal is logged in the database.
+        window.revealOnboardingSecret = async function(btn) {
+            if (currentUserRole !== 'admin') return;
+            const span = btn.parentElement.querySelector('.ob-secret-val');
+            btn.disabled = true;
+            const { data, error } = await supabaseClient.rpc('reveal_onboarding_secret', {
+                p_client: btn.dataset.client, p_step_id: btn.dataset.step, p_question_id: btn.dataset.q
+            });
+            btn.disabled = false;
+            // textContent: the value is always shown as text, never read as markup
+            if (error) { span.textContent = "Couldn't reveal it"; console.error('Reveal failed:', error); return; }
+            span.textContent = data ?? '(nothing saved)';
+            btn.classList.add('hidden');
+            setTimeout(() => { span.textContent = '••••••••'; btn.classList.remove('hidden'); }, 60000);
+        };
+
+        // Delete a stored login once we have our own access to the site (the SEO step "Delete their stored website password").
+        // Admin only, by RLS too. The select() makes a delete RLS refused (0 rows) read as a failure, not a success.
+        window.deleteOnboardingSecret = async function(btn) {
+            if (currentUserRole !== 'admin') return;
+            if (!confirm('Delete this stored password for good? Only do this once we have our own login.')) return;
+            const { client, step, q } = btn.dataset;
+            btn.disabled = true;
+            const { data, error } = await supabaseClient.from('onboarding_secrets').delete()
+                .eq('client_name', client).eq('step_id', step).eq('question_id', q).select('question_id');
+            btn.disabled = false;
+            const span = btn.parentElement.querySelector('.ob-secret-val');
+            if (error || !data?.length) { span.textContent = "Couldn't delete it"; console.error('Delete failed:', error || 'no row deleted'); return; }
+            globalSecretsMeta = globalSecretsMeta.filter(x => !(x.client_name === client && x.step_id === step && x.question_id === q));
+            span.textContent = 'Deleted';
+            btn.parentElement.querySelectorAll('button').forEach(x => x.remove());
+        };
 
         window.copyClientAnswers = async function(stepId, btn) {
             try {
@@ -5686,6 +6462,44 @@ window.renderClientReports = async function() {
     
     // Show the modal
     modal.style.display = 'flex';
+}
+
+// Stock sentences the report model kept ending on ("Let's keep an eye on those changes moving forward"), however the
+// prompt asked. They say nothing about this client's week, so any sentence matching one is deleted from the email note
+// and the report's paragraphs. A sentence is the unit: the rest of the paragraph stays.
+const REPORT_FILLER = [
+    /\bkeep(ing)? ((an?|a close|close) )?(eye|eyes|watch|tabs) on\b/i,
+    /\bkeep(ing)? (a close )?watch\b/i,
+    /\b(continue|continuing) to (closely )?(monitor|track|watch|analy[sz]e|optimi[sz]e|evaluate|assess|review)\b/i,
+    /\bmonitor(ing)? (performance|results|things|this|these|it|the (results|numbers|performance|changes))( closely)?\b/i,
+    /\b(adjust|refine|tweak)(ing)? (our|the) (strategy|approach|plan)( as needed| accordingly)?\b(?! to\b)/i,
+    /\bsee how (it|this|that|these|those|things|everything)( all)? (plays?|pans?|shakes?|goes|go|works?) out\b/i,
+    /\bsee how (it|this|that|these|those|things) (goes|go|perform|performs|develops?)\b/i,
+    /\bstay tuned\b/i,
+    /\bkeep you (posted|updated|in the loop)\b/i,
+    /\bmore to come\b/i,
+    /\b(exciting|great) things ahead\b/i,
+];
+function stripFillerSentences(text) {
+    return String(text ?? '').split('\n').map(line => {
+        const parts = line.split(/(?<=[.!?])\s+/);
+        const kept = parts.filter(s => !REPORT_FILLER.some(re => re.test(s)));
+        return kept.length === parts.length ? line : kept.join(' ');
+    }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+// The email note, plus every paragraph of the report's sections (the 15px explanation divs). Tiles and headings untouched.
+function stripReportFiller(parsed) {
+    if (!parsed || typeof parsed !== 'object') return parsed;
+    const out = { ...parsed };
+    if (typeof out.email_summary === 'string') out.email_summary = stripFillerSentences(out.email_summary);
+    if (typeof out.html_report === 'string') {
+        out.html_report = out.html_report.replace(/(<div style="font-size: 15px; color: #515154; line-height: 1\.6;">)([\s\S]*?)(<\/div>)/g,
+            (m, open, body, close) => /<[a-z]/i.test(body) ? m : open + stripFillerSentences(body) + close);
+    }
+    if (Array.isArray(out.working_on)) {
+        out.working_on = out.working_on.map(i => i && typeof i === 'object' ? { ...i, details: stripFillerSentences(i.details) } : i);
+    }
+    return out;
 }
 
         async function generateReport() {
@@ -6010,8 +6824,13 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             NO GENERIC FILLER — this is what makes reports blur together week to week:
             Phrases like "we'll continue to analyze trends," "adjust our strategy accordingly,"
-            "monitor performance closely," or any other sentence that could be pasted into any
-            report regardless of what happened are banned outright. A closing priority or action
+            "monitor performance closely," "let's keep an eye on those changes moving forward,"
+            "we'll see how it plays out," "stay tuned," or any other sentence that could be pasted
+            into any report regardless of what happened are banned outright. Any sentence like that
+            is deleted automatically after you write it, so it is wasted. Remember who is writing:
+            this is our agency reporting to the client, so never "let's" about work that is ours to do.
+            If something genuinely needs watching, say exactly what we will check and when ("we'll
+            check the new carousel's cost per lead on Thursday"). A closing priority or action
             step must name something SPECIFIC: an actual open task from the list above (explained
             for the client), an actual metric that moved and what will
             be done about it, or a specific manual note. If none of those give you something
@@ -6097,7 +6916,8 @@ Treat this period as a fresh starting point. State every number plainly as where
                 // it's model output going into an email.
                 const workingOnBlock = (headline, details, last) =>
                     `<div style="padding: 20px 0;${last ? '' : ' border-bottom: 1px solid #e8e8ed;'}"><div style="font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #1d1d1f;">${escapeAttr(headline)}</div>${details ? `<div style="font-size: 15px; color: #515154; line-height: 1.6;">${escapeAttr(details)}</div>` : ''}</div>`;
-                const finalizeReport = (parsed) => {
+                const finalizeReport = (rawParsed) => {
+                    const parsed = stripReportFiller(rawParsed);
                     const items = (Array.isArray(parsed?.working_on) ? parsed.working_on : [])
                         .filter(i => i && String(i.headline || '').trim());
                     const blocks = items.length
@@ -6298,10 +7118,11 @@ function adFactsBudgetValue(v, extra) {
     return null;
 }
 
-function describeAdChange(a) {
+function describeAdChange(a, actorLabel) {
     const level = AD_FACTS_LEVEL[String(a.object_type || '').toUpperCase()] || 'item';
     const what = `the ${level} ${adFactsQuote(a.object_name)}`;
-    const who = a.actor_is_meta ? "Meta's system" : 'we';
+    // The report says "we" (it goes to the client); the admin panel passes the person's name
+    const who = actorLabel || (a.actor_is_meta ? "Meta's system" : 'we');
     const x = a.extra || {};
     const ov = typeof x.old_value === 'string' ? x.old_value : null;
     const nv = typeof x.new_value === 'string' ? x.new_value : null;
@@ -6458,6 +7279,166 @@ async function buildReportAdActivityBlock(clientName, s, e) {
     } catch (err) {
         console.warn('Ad activity block skipped:', err?.message || err);
         return '';
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Activity panel on a client's Ads tab (admin only): what changed in the account, who did it and
+// what the ads did either side, plus every ad's share of spend. Reads the same tables and the same
+// describeAdChange / adChangeEffect the weekly report uses, so the two always tell the same story.
+// Unlike the report it names the person, since only admins see it.
+// ---------------------------------------------------------------------------------------------
+const AD_PANEL_MAX_DAYS = 120;      // "all time" is clamped: the ad tables are paged and a year is a lot of rows
+const AD_PANEL_SHOW_CHANGES = 12;
+const AD_PANEL_SHOW_ADS = 10;
+let adPanelToken = 0;
+let adPanelExpanded = { changes: false, ads: false };
+let adPanelLast = null;
+
+const AD_PANEL_CATEGORY = {
+    status: ['Status', '--warn'], budget: ['Budget', '--gold'], bid: ['Bidding', '--gold'], targeting: ['Targeting', '--t2'],
+    creative: ['Creative', '--t2'], schedule: ['Schedule', '--t2'], created: ['New', '--pos'], review_declined: ['Rejected', '--neg']
+};
+
+// One entry per object per kind per day, latest wins, newest first: an ad set toggled three times in
+// an afternoon is one change, described by where it ended up. Same rule as the report.
+function adPanelChanges(acts, startYmd, endYmd) {
+    const latest = new Map();
+    acts.filter(a => a.significant)
+        .filter(a => { const d = adFactsDenverDay(a.event_time); return d >= startYmd && d <= endYmd; })
+        .sort((x, y) => String(x.event_time).localeCompare(String(y.event_time)))
+        .forEach(a => latest.set(`${a.object_id}|${a.category}|${adFactsDenverDay(a.event_time)}`, a));
+    return [...latest.values()].reverse();
+}
+
+// Per ad across the window: spend, leads, share of the account's spend. Ads with no spend are left out.
+function adPanelAds(adRows, startYmd, endYmd) {
+    const by = new Map();
+    adRows.filter(r => r.date >= startYmd && r.date <= endYmd).forEach(r => {
+        const t = by.get(r.ad_id) || { id: r.ad_id, name: r.ad_name, adset: r.adset_name, spend: 0, leads: 0 };
+        t.spend += Number(r.spend) || 0; t.leads += Number(r.leads) || 0;
+        t.name = r.ad_name || t.name; t.adset = r.adset_name || t.adset;
+        by.set(r.ad_id, t);
+    });
+    const ads = [...by.values()].filter(t => t.spend > 0).sort((a, b) => b.spend - a.spend);
+    const total = ads.reduce((n, t) => n + t.spend, 0);
+    ads.forEach(t => { t.share = total > 0 ? t.spend / total : 0; t.cpl = t.leads > 0 ? t.spend / t.leads : null; });
+    return { ads, total };
+}
+
+async function loadAdPanelData(client, from, e) {
+    const until = new Date(e); until.setDate(until.getDate() + 1);
+    const [actRes, adRes] = await Promise.all([
+        supabaseClient.from('meta_activity')
+            .select('event_time, event_type, event_label, object_id, object_name, object_type, actor_name, actor_is_meta, extra, category, significant')
+            .eq('client_name', client.name).eq('significant', true)
+            .gte('event_time', from.toISOString()).lt('event_time', until.toISOString())
+            .order('event_time').limit(1000),
+        (async () => {
+            const rows = [];
+            for (let at = 0; at < 30000; at += 1000) {
+                const { data, error } = await supabaseClient.from('meta_ad_daily')
+                    .select('date, ad_id, ad_name, adset_id, adset_name, campaign_id, spend, leads')
+                    .eq('client_name', client.name).gte('date', adFactsYmd(from)).lte('date', adFactsYmd(e))
+                    .order('date').order('ad_id').range(at, at + 999);
+                if (error) return { data: null, error };
+                rows.push(...(data || []));
+                if (!data || data.length < 1000) break;
+            }
+            return { data: rows, error: null };
+        })(),
+    ]);
+    if (actRes.error || adRes.error) throw (actRes.error || adRes.error);
+    return { acts: actRes.data || [], adRows: adRes.data || [] };
+}
+
+function adPanelHtml(model) {
+    const { changes, ads, total, adRows, target, clamped, startYmd, endYmd } = model;
+    const lastDataDay = adRows.reduce((m, r) => (r.date > m ? r.date : m), '');
+    const money = n => adFactsMoney(n);
+    const shownC = adPanelExpanded.changes ? changes : changes.slice(0, AD_PANEL_SHOW_CHANGES);
+    const shownA = adPanelExpanded.ads ? ads : ads.slice(0, AD_PANEL_SHOW_ADS);
+    const note = clamped ? `<p class="text-xs" style="color:var(--t3); margin-top:8px;">Showing the last ${AD_PANEL_MAX_DAYS} days.</p>` : '';
+    const moreBtn = (which, count, limit) => count > limit
+        ? `<button type="button" onclick="adPanelToggle('${which}')" class="text-xs" style="margin-top:8px; background:none; border:none; color:var(--gold); cursor:pointer; padding:0; text-align:left;">${adPanelExpanded[which] ? 'Show fewer' : 'Show all ' + count}</button>` : '';
+
+    const changeRows = shownC.map(a => {
+        const who = a.actor_is_meta ? "Meta's system" : (a.actor_name || 'Someone');
+        const [label, color] = AD_PANEL_CATEGORY[a.category] || ['Change', '--t2'];
+        let effect = adChangeEffect(a, adRows, lastDataDay);
+        if (effect === 'no ad results to compare yet') effect = '';
+        const text = describeAdChange(a, who);
+        return `<div style="display:grid; grid-template-columns:54px minmax(0,1fr); gap:12px; padding:12px 0; border-top:1px solid var(--line);">
+            <div class="text-xs ge-num" style="color:var(--t3); padding-top:2px;">${escapeAttr(adFactsShortDate(adFactsDenverDay(a.event_time)))}</div>
+            <div style="min-width:0;">
+                <div style="font-size:13px; color:var(--t1); line-height:1.45;"><span class="ge-label" style="color:var(${color}); margin-right:8px;">${label}</span>${escapeAttr(text)}</div>
+                ${effect ? `<div class="text-xs" style="margin-top:3px; color:var(--t3); line-height:1.45;">${escapeAttr(effect)}</div>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+
+    const adRowsHtml = shownA.map(t => {
+        const over = !!target && (t.cpl !== null ? t.cpl >= target : t.spend >= target);
+        return `<tr style="border-top:1px solid var(--line);">
+            <td class="py-2.5 pr-3" style="min-width:0; max-width:210px;"><div class="truncate" style="font-size:13px; color:var(--t1);" title="${escapeAttr(stripSlashEscapes(t.name || ''))}">${escapeAttr(stripSlashEscapes(t.name || 'unnamed'))}</div>
+                <div class="truncate text-xs" style="color:var(--t3);">${escapeAttr(stripSlashEscapes(t.adset || ''))}</div></td>
+            <td class="py-2.5 pr-3" style="width:120px;"><div class="text-xs ge-num" style="color:var(--t2);">${money(t.spend)} · ${Math.round(t.share * 100)}%</div>
+                <div style="height:4px; border-radius:2px; background:var(--inset); margin-top:4px;"><div style="height:100%; width:${Math.max(2, Math.round(t.share * 100))}%; background:var(--goldSolid); border-radius:2px;"></div></div></td>
+            <td class="py-2.5 pr-3 text-right ge-num" style="color:var(--pos);">${t.leads}</td>
+            <td class="py-2.5 text-right ge-num" style="color:var(${over ? '--neg' : '--t2'});">${t.cpl !== null ? money(t.cpl) : '—'}</td>
+        </tr>`;
+    }).join('');
+
+    return `<div class="glass p-6 flex flex-col">
+            <div class="flex items-baseline justify-between"><h3 class="ge-title" style="font-size:18px;">activity.</h3>
+                <span class="text-xs" style="color:var(--t3);">${changes.length} change${changes.length === 1 ? '' : 's'} · ${escapeAttr(adFactsShortDate(startYmd))} – ${escapeAttr(adFactsShortDate(endYmd))}</span></div>
+            <p class="text-xs" style="margin-top:5px; color:var(--t2);">From Meta's change history. Before and after compares the ads each change reaches, 7 days either side.</p>
+            <div style="margin-top:10px;">${changeRows || '<p class="text-xs italic py-4" style="color:var(--t3);">No changes in Meta\'s history for this period.</p>'}</div>${moreBtn('changes', changes.length, AD_PANEL_SHOW_CHANGES)}${note}
+        </div>
+        <div class="glass p-6 flex flex-col">
+            <div class="flex items-baseline justify-between"><h3 class="ge-title" style="font-size:18px;">ads.</h3>
+                <span class="text-xs ge-num" style="color:var(--t3);">${money(total)} across ${ads.length} ad${ads.length === 1 ? '' : 's'}</span></div>
+            <p class="text-xs" style="margin-top:5px; color:var(--t2);">Share of spend and Meta's own lead count${target ? `. CPL in red is at or over the ${money(target)} target.` : '. Set a target CPL in Edit Client to flag ads.'}</p>
+            <div class="overflow-x-auto" style="margin-top:10px;"><table class="w-full text-left text-sm">
+                <thead><tr><th class="ge-label pb-2 font-normal">Ad</th><th class="ge-label pb-2 font-normal">Spend · share</th><th class="ge-label pb-2 font-normal text-right">Leads</th><th class="ge-label pb-2 font-normal text-right">CPL</th></tr></thead>
+                <tbody>${adRowsHtml || '<tr><td colspan="4" class="py-4 text-xs italic" style="color:var(--t3);">No ad spend in this period.</td></tr>'}</tbody></table></div>${moreBtn('ads', ads.length, AD_PANEL_SHOW_ADS)}
+        </div>`;
+}
+
+window.adPanelToggle = function (which) {
+    adPanelExpanded[which] = !adPanelExpanded[which];
+    const el = document.getElementById('ad-activity-panel');
+    if (el && adPanelLast) el.innerHTML = adPanelHtml(adPanelLast);
+};
+
+async function renderAdActivityPanel(s, e) {
+    const el = document.getElementById('ad-activity-panel');
+    if (!el) return;
+    const token = ++adPanelToken;
+    const hide = () => { el.classList.add('hidden'); el.innerHTML = ''; adPanelLast = null; };
+    if (currentUserRole !== 'admin' || cSelectedAccount === 'ALL') return hide();
+    const client = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+    if (!client || !normalizeAccountId(client.ad_account_id)) return hide();
+    try {
+        let start = new Date(s), clamped = false;
+        const floor = new Date(e); floor.setDate(floor.getDate() - AD_PANEL_MAX_DAYS);
+        if (start < floor) { start = floor; clamped = true; }
+        start.setHours(0, 0, 0, 0);
+        const from = new Date(start); from.setDate(from.getDate() - AD_FACTS_WINDOW_DAYS);
+        const { acts, adRows } = await loadAdPanelData(client, from, e);
+        if (token !== adPanelToken) return;   // a newer render superseded this one
+        const startYmd = adFactsYmd(start), endYmd = adFactsYmd(e);
+        const { ads, total } = adPanelAds(adRows, startYmd, endYmd);
+        const changes = adPanelChanges(acts, startYmd, endYmd);
+        // Nothing synced for this client (not connected yet): no panel rather than an empty one
+        if (!acts.length && !adRows.length) return hide();
+        const target = client.target_cpl ? parseFloat(client.target_cpl) : null;
+        adPanelExpanded = { changes: false, ads: false };
+        adPanelLast = { changes, ads, total, adRows, target, clamped, startYmd, endYmd };
+        el.innerHTML = adPanelHtml(adPanelLast);
+        el.classList.remove('hidden');
+    } catch (err) {
+        if (token === adPanelToken) { console.warn('Activity panel skipped:', err?.message || err); hide(); }
     }
 }
 
@@ -9786,10 +10767,17 @@ window.renderClientPayments = function() {
             document.getElementById('edit-pay-since').value = clientData.client_since || '';
             document.getElementById('edit-pay-last').value = clientData.last_payment_date || '';
             document.getElementById('edit-pay-deadline').value = clientData.payment_deadline || '';
+
+            // Only admins can write clients (clients_rls.sql), so members don't get buttons
+            // that would report "Saved!" while changing nothing.
+            ['btn-save-payments', 'btn-quick-pay'].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) b.classList.toggle('hidden', currentUserRole !== 'admin');
+            });
         };
 
         window.saveClientPayments = async function() {
-            if (cSelectedAccount === "ALL") return;
+            if (cSelectedAccount === "ALL" || currentUserRole !== 'admin') return;
 
             const btn = document.getElementById('btn-save-payments');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
@@ -9927,6 +10915,263 @@ window.renderClientPayments = function() {
             renderAlertRecipients();
         };
 
+        // ---- The office (Settings → Users & Roles) ----
+        // Who is online and what they are doing, drawn as little characters at their desks. Each admin's browser
+        // writes one row to team_presence every 30 seconds while Golden Eye is open (page, the client they are
+        // looking at, whether they have stepped away) and the Users tab reads everyone's row. The character and the
+        // typed status are saved on the same row, so they survive being offline. Admins only, by RLS: a client's
+        // browser never learns who is on the team. supabase/sql/team_presence.sql.
+        // Everything drawn comes from whitelisted indexes into the palettes below, never from stored text, so a
+        // hand-edited row cannot put markup into the page. Names and statuses go through escapeAttr.
+        const OFFICE = { beatMs: 30000, pollMs: 20000, onlineMs: 90000, idleMs: 300000, statusMs: 4 * 3600000 };
+        const OFFICE_SKIN = ['#f6d5b8', '#e8b98f', '#c98e5f', '#a2693f', '#7a4a2b', '#4f3020'];
+        const OFFICE_HAIR = ['#2a1d14', '#5b3a1e', '#9a6a2f', '#d8b25a', '#b5442a', '#8c8c94', '#23324f'];
+        const OFFICE_SHIRT = ['#d9b463', '#4c7bd1', '#c8553d', '#4a9a6a', '#8a5cc7', '#e08a3c', '#3fa7b5', '#d86a9a'];
+        const OFFICE_STYLES = ['Short', 'Long', 'Bun', 'Curly', 'Bald'];
+        const OFFICE_ACCS = ['None', 'Glasses', 'Headphones', 'Cap'];
+        const OFFICE_FIELDS = { skin: OFFICE_SKIN.length, hair: OFFICE_HAIR.length, style: OFFICE_STYLES.length, shirt: OFFICE_SHIRT.length, acc: OFFICE_ACCS.length };
+        // page -> [animation, what they are doing]
+        const OFFICE_PAGES = {
+            goldeneye: ['look', 'checking the overview'], tasks: ['type', 'working through tasks'], clients: ['chart', 'in accounts'],
+            sales: ['phone', 'working the sales board'], templates: ['build', 'editing templates'], settings: ['cog', 'in settings'],
+            creatives: ['paint', 'reviewing creatives'], audits: ['chart', 'reading audits'], roster: ['phone', 'on the roster']
+        };
+        const OFFICE_ICONS = { look: 'fa-eye', type: 'fa-keyboard', chart: 'fa-chart-line', phone: 'fa-phone', build: 'fa-pen-ruler', cog: 'fa-gear', paint: 'fa-palette', coffee: 'fa-mug-hot', sleep: 'fa-moon', idle: 'fa-couch' };
+
+        function officeHash(s) { let h = 2166136261; for (const ch of String(s || '')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h; }
+        function officeDefaultCharacter(email) {
+            const h = officeHash(String(email || '').toLowerCase());
+            return { skin: h % OFFICE_SKIN.length, hair: (h >>> 3) % OFFICE_HAIR.length, style: (h >>> 6) % OFFICE_STYLES.length, shirt: (h >>> 9) % OFFICE_SHIRT.length, acc: (h >>> 12) % OFFICE_ACCS.length };
+        }
+        // Whatever is in the database, hand back five in-range integers
+        function officeCleanCharacter(c, email) {
+            const base = officeDefaultCharacter(email);
+            const out = {};
+            for (const k of Object.keys(OFFICE_FIELDS)) {
+                const v = c && typeof c === 'object' ? c[k] : undefined;
+                out[k] = Number.isInteger(v) && v >= 0 && v < OFFICE_FIELDS[k] ? v : base[k];
+            }
+            return out;
+        }
+        function officeCharacterSvg(raw, email) {
+            const c = officeCleanCharacter(raw, email);
+            const skin = OFFICE_SKIN[c.skin], hair = OFFICE_HAIR[c.hair], shirt = OFFICE_SHIRT[c.shirt], ink = '#2a1d14';
+            const cap = 'M10 17 Q10 6 20 6 Q30 6 30 17 Q26 11 20 11 Q14 11 10 17Z';
+            let back = '', front = '';
+            if (c.style === 1) back = `<rect x="8.5" y="13" width="4" height="19" rx="2" fill="${hair}"/><rect x="27.5" y="13" width="4" height="19" rx="2" fill="${hair}"/>`;
+            if (c.style === 2) back = `<circle cx="20" cy="4.5" r="4.2" fill="${hair}"/>`;
+            if (c.style !== 4) front += `<path d="${cap}" fill="${hair}"/>`;
+            if (c.style === 3) front += [[12, 10], [17, 7], [23, 7], [28, 10]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="5" fill="${hair}"/>`).join('');
+            let acc = '';
+            if (c.acc === 1) acc = `<g fill="none" stroke="${ink}" stroke-width="1.2"><circle cx="16.5" cy="18" r="3.4"/><circle cx="23.5" cy="18" r="3.4"/><path d="M19.9 18h.2"/></g>`;
+            if (c.acc === 2) acc = `<path d="M10 17 Q10 3.5 20 3.5 Q30 3.5 30 17" fill="none" stroke="#3a3a44" stroke-width="2"/><rect x="7.5" y="14.5" width="4.5" height="9" rx="2" fill="#3a3a44"/><rect x="28" y="14.5" width="4.5" height="9" rx="2" fill="#3a3a44"/>`;
+            if (c.acc === 3) acc = `<path d="M9.5 14 Q20 1.5 30.5 14Z" fill="${shirt}"/><rect x="19" y="12" width="15" height="3" rx="1.5" fill="${shirt}"/>`;
+            return `<svg class="oc-svg" viewBox="0 0 40 52" aria-hidden="true">`
+                + back
+                + `<g class="oc-arm oc-arm-l"><rect x="5" y="30" width="6.5" height="16" rx="3.2" fill="${shirt}"/><circle cx="8.2" cy="46" r="3" fill="${skin}"/></g>`
+                + `<g class="oc-arm oc-arm-r"><rect x="28.5" y="30" width="6.5" height="16" rx="3.2" fill="${shirt}"/><circle cx="31.8" cy="46" r="3" fill="${skin}"/></g>`
+                + `<rect x="9.5" y="27" width="21" height="22" rx="7" fill="${shirt}"/>`
+                + `<rect x="17" y="24" width="6" height="6" fill="${skin}"/>`
+                + `<g class="oc-head"><circle cx="20" cy="17" r="10" fill="${skin}"/>${front}`
+                + `<circle class="oc-eye" cx="16.5" cy="18" r="1.4" fill="${ink}"/><circle class="oc-eye" cx="23.5" cy="18" r="1.4" fill="${ink}"/>`
+                + `<path d="M17 22.2 Q20 24.6 23 22.2" fill="none" stroke="${ink}" stroke-width="1.1" stroke-linecap="round"/>${acc}</g></svg>`;
+        }
+
+        // online = the heartbeat is fresh; away = it is fresh but the tab is hidden or untouched for 5 minutes
+        function officeState(row, now) {
+            const seen = row && row.last_seen ? new Date(row.last_seen).getTime() : 0;
+            if (!seen || now - seen > OFFICE.onlineMs) return 'offline';
+            return row.away ? 'away' : 'online';
+        }
+        function officeActivity(row, now) {
+            const st = officeState(row, now);
+            if (st === 'offline') return { st, anim: 'sleep', text: row && row.last_seen ? 'last seen ' + officeAgo(now - new Date(row.last_seen).getTime()) : 'not seen yet' };
+            if (st === 'away') return { st, anim: 'coffee', text: 'stepped away' };
+            const known = OFFICE_PAGES[row.page];
+            if (!known) return { st, anim: 'idle', text: 'around' };
+            const detail = row.page === 'clients' && row.detail ? 'looking at ' + row.detail : known[1];
+            return { st, anim: known[0], text: detail };
+        }
+        function officeStatusText(row, now) {
+            if (!row || !row.status || !row.status_at) return '';
+            return now - new Date(row.status_at).getTime() <= OFFICE.statusMs ? String(row.status) : '';
+        }
+        function officeAgo(ms) {
+            const m = Math.floor(Math.max(0, ms) / 60000);
+            if (m < 1) return 'just now';
+            if (m < 60) return m + ' min ago';
+            const h = Math.floor(m / 60);
+            if (h < 24) return h + ' hr ago';
+            const d = Math.floor(h / 24);
+            return d === 1 ? 'yesterday' : d + ' days ago';
+        }
+        // One tile per team member: everyone with a profile, plus anyone with a presence row
+        function officeMerge(profiles, rows) {
+            const by = new Map();
+            for (const p of profiles || []) {
+                const e = String(p.email || '').toLowerCase();
+                if (!e) continue;
+                by.set(e, { email: e, name: (p.full_name || '').split(' ')[0] || e.split('@')[0] });
+            }
+            for (const r of rows || []) {
+                const e = String(r.email || '').toLowerCase();
+                if (!e) continue;
+                by.set(e, { ...(by.get(e) || { email: e }), ...r, email: e, name: r.name || (by.get(e) || {}).name || e.split('@')[0] });
+            }
+            return [...by.values()];
+        }
+        function officeOrder(people, now) {
+            const rank = { online: 0, away: 1, offline: 2 };
+            return people.slice().sort((a, b) => {
+                const sa = officeState(a, now), sb = officeState(b, now);
+                if (sa !== sb) return rank[sa] - rank[sb];
+                return String(a.name).localeCompare(String(b.name));
+            });
+        }
+        function officeTileHtml(p, now, meEmail) {
+            const act = officeActivity(p, now);
+            const status = officeStatusText(p, now);
+            const isMe = p.email === meEmail;
+            const bubble = status && act.st !== 'offline' ? `<div class="oc-bubble">${escapeAttr(status)}</div>` : '';
+            const sleepFx = act.st === 'offline' ? '<span class="oc-zzz">z<i>z</i><b>z</b></span>' : '';
+            const coffee = act.anim === 'coffee' ? '<span class="oc-cup"><i class="fa-solid fa-mug-hot"></i><em></em></span>' : '';
+            const phone = act.anim === 'phone' ? '<span class="oc-phone"><i class="fa-solid fa-mobile-screen"></i></span>' : '';
+            return `<div class="oc-person oc-${act.st} oc-act-${act.anim}" data-email="${escapeAttr(p.email)}">`
+                + bubble
+                + `<div class="oc-stage">${officeCharacterSvg(p.character, p.email)}${sleepFx}${coffee}${phone}<div class="oc-desk"><span class="oc-screen"></span></div></div>`
+                + `<div class="oc-name">${escapeAttr(p.name)}${isMe ? ' <span class="oc-you">you</span>' : ''}</div>`
+                + `<div class="oc-what"><i class="fa-solid ${OFFICE_ICONS[act.anim] || 'fa-circle'}"></i> ${escapeAttr(act.text)}</div></div>`;
+        }
+        function officeSceneHtml(people, now, meEmail) {
+            const ordered = officeOrder(people, now);
+            const on = ordered.filter(p => officeState(p, now) !== 'offline');
+            const off = ordered.filter(p => officeState(p, now) === 'offline');
+            const count = on.length;
+            return `<div class="oc-room"><div class="oc-roomhead"><span class="oc-live"></span> ${count ? count + ' in the office' : 'The office is empty'}</div>`
+                + (on.length ? `<div class="oc-row">${on.map(p => officeTileHtml(p, now, meEmail)).join('')}</div>` : '')
+                + `</div>`
+                + (off.length ? `<div class="oc-lounge"><div class="oc-roomhead">Off duty</div><div class="oc-row">${off.map(p => officeTileHtml(p, now, meEmail)).join('')}</div></div>` : '');
+        }
+
+        // The row this browser writes. Only the columns named here move, so a heartbeat never touches the
+        // character or the status.
+        function presenceRowFor(email, name, page, detail, away, now) {
+            return { email: String(email || '').toLowerCase(), name: String(name || '').slice(0, 40), page: String(page || '').slice(0, 40), detail: String(detail || '').slice(0, 80), away: !!away, last_seen: new Date(now).toISOString() };
+        }
+
+        const officeBeat = { timer: null, started: false, page: 'goldeneye', lastInput: Date.now(), broken: false, poll: null, people: [], editing: null };
+        function officeMyName() { return ((typeof currentUserFullName === 'string' && currentUserFullName) || (typeof currentUserName === 'string' && currentUserName) || String(clientEmail || '').split('@')[0] || '').split(' ')[0]; }
+        async function presenceSend() {
+            if (officeBeat.broken || currentUserRole !== 'admin' || !clientEmail) return;
+            const detail = officeBeat.page === 'clients' && typeof cSelectedAccount === 'string' && cSelectedAccount !== 'ALL' ? cSelectedAccount : '';
+            const away = document.hidden || Date.now() - officeBeat.lastInput > OFFICE.idleMs;
+            try {
+                const { error } = await supabaseClient.from('team_presence').upsert(presenceRowFor(clientEmail, officeMyName(), officeBeat.page, detail, away, Date.now()), { onConflict: 'email' });
+                if (error) { officeBeat.broken = true; clearInterval(officeBeat.timer); console.warn('[office] presence is off:', error.message); }
+            } catch (e) { officeBeat.broken = true; clearInterval(officeBeat.timer); }
+        }
+        function presenceStart() {
+            if (officeBeat.started || currentUserRole !== 'admin' || !clientEmail) return;
+            officeBeat.started = true;
+            const touch = () => { officeBeat.lastInput = Date.now(); };
+            ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev => document.addEventListener(ev, touch, { passive: true }));
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) touch(); presenceSend(); });
+            officeBeat.timer = setInterval(presenceSend, OFFICE.beatMs);
+        }
+        function presenceSetPage(page) { officeBeat.page = page; presenceStart(); presenceSend(); }
+
+        async function officeLoad() {
+            const [rows, profiles] = await Promise.all([
+                supabaseClient.from('team_presence').select('email, name, character, status, status_at, page, detail, away, last_seen'),
+                supabaseClient.from('user_profiles').select('email, full_name, role')
+            ]);
+            if (rows.error) return { error: rows.error.message };
+            const team = (profiles.data || []).filter(p => p.role === 'admin');
+            officeBeat.people = officeMerge(team, rows.data);
+            return {};
+        }
+        async function officeRender() {
+            const host = document.getElementById('office-panel');
+            if (!host) return;
+            const res = await officeLoad();
+            const scene = document.getElementById('office-scene');
+            if (!scene) return;
+            if (res.error) { scene.innerHTML = '<div class="text-sm text-gray-400 p-4">The office needs <code>supabase/sql/team_presence.sql</code> run first.</div>'; return; }
+            const meEmail = String(clientEmail || '').toLowerCase();
+            scene.innerHTML = officeSceneHtml(officeBeat.people, Date.now(), meEmail);
+            const me = officeBeat.people.find(p => p.email === meEmail);
+            const inp = document.getElementById('office-status-input');
+            if (inp && me && document.activeElement !== inp && !inp.dataset.touched) inp.value = officeStatusText(me, Date.now());
+        }
+        // The office is off until someone turns it on, and remembered per browser. Turning it off only hides it: your own
+        // presence keeps being sent, so teammates who have it on still see you.
+        function officeIsOn() { try { return localStorage.getItem('ge-office-on') === '1'; } catch (e) { return !!officeBeat.on; } }
+        function officeShowState() {
+            const on = officeIsOn();
+            const body = document.getElementById('office-body'), btn = document.getElementById('office-toggle'), lab = document.getElementById('office-toggle-label');
+            if (body) body.classList.toggle('hidden', !on);
+            if (btn) btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+            if (lab) lab.textContent = on ? 'Hide characters' : 'Show characters';
+        }
+        window.officeOpen = function () {
+            officeShowState();
+            clearInterval(officeBeat.poll); officeBeat.poll = null;
+            if (!officeIsOn()) return;
+            officeRender();
+            officeBeat.poll = setInterval(officeRender, OFFICE.pollMs);
+        };
+        window.officeToggle = function () {
+            const next = !officeIsOn(); officeBeat.on = next;
+            try { localStorage.setItem('ge-office-on', next ? '1' : '0'); } catch (e) {}
+            window.officeOpen();
+        };
+        window.officeClose = function () { clearInterval(officeBeat.poll); officeBeat.poll = null; };
+
+        async function officeSave(patch) {
+            const row = { email: String(clientEmail || '').toLowerCase(), name: officeMyName().slice(0, 40), ...patch };
+            const { error } = await supabaseClient.from('team_presence').upsert(row, { onConflict: 'email' });
+            if (error) { alert('Could not save: ' + error.message); return false; }
+            return true;
+        }
+        window.officeSetStatus = async function () {
+            const inp = document.getElementById('office-status-input');
+            const text = (inp.value || '').trim().slice(0, 80);
+            if (await officeSave({ status: text || null, status_at: text ? new Date().toISOString() : null })) { delete inp.dataset.touched; presenceSend(); officeRender(); }
+        };
+        window.officeClearStatus = async function () {
+            const inp = document.getElementById('office-status-input');
+            inp.value = '';
+            if (await officeSave({ status: null, status_at: null })) { delete inp.dataset.touched; officeRender(); }
+        };
+        window.officeToggleEditor = function () {
+            const box = document.getElementById('office-editor');
+            if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+            const me = officeBeat.people.find(p => p.email === String(clientEmail || '').toLowerCase());
+            officeBeat.editing = officeCleanCharacter(me && me.character, clientEmail);
+            box.classList.remove('hidden');
+            officeEditorRender();
+        };
+        function officeEditorRender() {
+            const c = officeBeat.editing;
+            const box = document.getElementById('office-editor');
+            const sw = (field, colors) => `<div class="oc-swatches">${colors.map((col, i) => `<button type="button" class="oc-sw${c[field] === i ? ' on' : ''}" style="background:${col}" onclick="officePick('${field}',${i})" aria-label="${field} ${i + 1}"></button>`).join('')}</div>`;
+            const pills = (field, names) => `<div class="oc-pills">${names.map((n, i) => `<button type="button" class="oc-pill${c[field] === i ? ' on' : ''}" onclick="officePick('${field}',${i})">${n}</button>`).join('')}</div>`;
+            box.innerHTML = `<div class="oc-editor-grid"><div class="oc-preview">${officeCharacterSvg(c, clientEmail)}</div><div class="oc-controls">`
+                + `<div><label class="modal-label">Skin</label>${sw('skin', OFFICE_SKIN)}</div>`
+                + `<div><label class="modal-label">Hair color</label>${sw('hair', OFFICE_HAIR)}</div>`
+                + `<div><label class="modal-label">Hair style</label>${pills('style', OFFICE_STYLES)}</div>`
+                + `<div><label class="modal-label">Shirt</label>${sw('shirt', OFFICE_SHIRT)}</div>`
+                + `<div><label class="modal-label">Extra</label>${pills('acc', OFFICE_ACCS)}</div>`
+                + `<div class="flex gap-2 pt-1"><button type="button" class="btn-primary px-4 py-2 text-sm" onclick="officeSaveCharacter()">Save character</button><button type="button" class="px-4 py-2 text-sm text-gray-400 hover:text-white" onclick="officeRandom()">Surprise me</button></div>`
+                + `</div></div>`;
+        }
+        window.officePick = function (field, i) { officeBeat.editing[field] = i; officeEditorRender(); };
+        window.officeRandom = function () { const c = {}; for (const k of Object.keys(OFFICE_FIELDS)) c[k] = Math.floor(Math.random() * OFFICE_FIELDS[k]); officeBeat.editing = c; officeEditorRender(); };
+        window.officeSaveCharacter = async function () {
+            if (await officeSave({ character: officeBeat.editing })) { document.getElementById('office-editor').classList.add('hidden'); presenceSend(); officeRender(); }
+        };
+        // ---- end office ----
+
         window.switchSettingsView = window.switchSettingsView || function(view) {
             const views = ['users', 'scoring', 'milestones', 'health', 'notifications', 'updates', 'data'];
             views.forEach(v => {
@@ -9943,6 +11188,7 @@ window.renderClientPayments = function() {
             
             if (view === 'milestones') renderMilestonesSettings();
             if (view === 'users') { renderUsersTable(); populateInviteClientList(); }
+            if (view === 'users') officeOpen(); else officeClose();
             // Fetched on demand — nobody needs this on every dashboard load
             if (view === 'notifications') loadAlertRecipients();
             if (view === 'updates') renderUpdates();
@@ -10595,7 +11841,7 @@ window.setLeaderboardMetric = function(metric) {
 };
 
 window.logQuickPayment = async function() {
-            if (cSelectedAccount === "ALL") return;
+            if (cSelectedAccount === "ALL" || currentUserRole !== 'admin') return;
             const btn = document.getElementById('btn-quick-pay');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
             btn.disabled = true;
@@ -10933,6 +12179,34 @@ window.deleteMorningAudit = async function(id) {
 // ============================================================================
 const lifecycleStages = ['Onboarding', 'Campaign Building', 'Campaign Learning', 'Optimizing', 'Offboarding'];
 
+// ---- "Set up": a label, not a stage (2026-10-19) ----
+// The Onboarding stage is shown as two phases: Onboarding (the client's own steps) and Set up (our work once they've
+// finished). Only what's on screen changes. current_stage and tasks.stage still say 'Onboarding', and everything that
+// decides anything (the handoff trigger, ghl-account, the contact check, auto-ticks, the stage advance, filters) still
+// compares against 'Onboarding'. These helpers are for display only: never compare their result or save it.
+const SETUP_PHASE = 'Set up';
+const displayStages = ['Onboarding', SETUP_PHASE, ...lifecycleStages.slice(1)];
+
+// The client has finished their own steps: the handoff task exists (the moment they got their "onboarding complete"
+// text), or every client step that applies to them is done. No steps known yet counts as not finished.
+function clientFinishedOwnSteps(clientName) {
+    const key = normalize(clientName || '');
+    if ((globalTasksData || []).some(t => normalize(t.client || '') === key
+        && String(t.title || '').trim().toLowerCase() === OB_COMPLETE_TASK_TITLE.toLowerCase())) return true;
+    const steps = activeOnboardingSteps(clientName);
+    return steps.length > 0 && steps.every(s => onboardingProgressFor(clientName, s.id)?.completed_at);
+}
+
+// What to show for a client's stage: their stage, except Onboarding reads Set up once their own steps are done
+function clientPhase(row) {
+    if (!row) return null;
+    const stage = row.current_stage || 'Onboarding';
+    return stage === 'Onboarding' && clientFinishedOwnSteps(row.name) ? SETUP_PHASE : stage;
+}
+
+// What to show for a stage name on our own work (checklist groups): Onboarding reads Set up
+function stageLabelForOurWork(stage) { return stage === 'Onboarding' ? SETUP_PHASE : stage; }
+
 // Checklist templates per stage, loaded from stage_templates. Previously a hardcoded
 // map of invented counts that promised tasks no code ever created.
 let globalStageTemplates = [];
@@ -10974,6 +12248,17 @@ const WEBSITE_STATUS_LABELS = {
     existing: 'They have one',
     none: 'No website'
 };
+
+// The answers a step can depend on (onboarding_facts.sql). Unanswered counts as the first value shown here
+// for the page and "No CRM" for the CRM, so a tag on the other value never reaches someone who wasn't asked.
+const FACT_LABELS = {
+    facebook_page: { label: 'Facebook page', values: { yes: 'Has one', no: 'Needs one', unsure: 'Not sure' } },
+    crm_choice: { label: 'CRM', values: { no: 'No CRM', yes: 'Wants leads sent to one' } }
+};
+// False until onboarding_facts.sql has run, so the editor does not offer tags it could not save
+function factsSupported() {
+    return globalOnboardingSteps.some(s => 'fact_conditions' in s) || globalStageTemplates.some(t => 'fact_conditions' in t);
+}
 
 function serviceName(key) {
     return globalServices.find(s => s.key === key)?.name || key;
@@ -11024,6 +12309,15 @@ function conditionEditorHtml(item) {
             title="${s.active === false ? 'Not offered any more' : 'Applies to clients with ' + escapeAttr(s.name)}">${escapeAttr(s.name)}</button>`).join('');
     const webChips = Object.entries(WEBSITE_STATUS_LABELS).map(([k, label]) => `
         <button type="button" class="ob-chip ob-chip-web" data-key="${k}" aria-pressed="${websites.includes(k)}" onclick="toggleConditionChip(this)">${label}</button>`).join('');
+    const facts = item?.fact_conditions || {};
+    const factGroup = factsSupported() ? `
+            <div class="ob-facts flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">Answered</span>
+                ${Object.entries(FACT_LABELS).map(([fk, f]) => `
+                    <span class="flex flex-wrap items-center gap-1.5"><span class="text-[10px] text-gray-500">${f.label}</span>
+                    ${Object.entries(f.values).map(([vk, vl]) => `<button type="button" class="ob-chip ob-chip-fact" data-fact="${fk}" data-key="${vk}"
+                        aria-pressed="${(facts[fk] || []).includes(vk)}" onclick="toggleConditionChip(this)">${vl}</button>`).join('')}</span>`).join('')}
+            </div>` : '';
 
     return `
         <div class="ob-conditions flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
@@ -11037,6 +12331,7 @@ function conditionEditorHtml(item) {
                 ${webChips}
                 <span class="ob-web-summary text-[10px] text-gray-500"></span>
             </div>
+            ${factGroup}
             <select class="glass-input !py-1 !text-xs !w-auto max-w-xs ob-autocheck" data-saved="${escapeAttr(item?.auto_check || '')}">${autoCheckOptions(item?.auto_check || '')}</select>
         </div>`;
 }
@@ -11058,11 +12353,19 @@ function readConditions(row) {
     // Only the step's own tag line: a Questions step's per-question website pills share the look
     const scope = row.querySelector('.ob-conditions') || row;
     const pressed = sel => [...scope.querySelectorAll(`${sel}[aria-pressed="true"]`)].map(b => b.dataset.key);
-    return {
+    const out = {
         service_keys: pressed('.ob-chip-svc'),
         website_statuses: pressed('.ob-chip-web'),
         auto_check: row.querySelector('.ob-autocheck')?.value || null
     };
+    // Only when the editor offered the tags: otherwise saving would try to write a column that is not there
+    if (scope.querySelector('.ob-facts')) {
+        out.fact_conditions = {};
+        scope.querySelectorAll('.ob-chip-fact[aria-pressed="true"]').forEach(b => {
+            (out.fact_conditions[b.dataset.fact] = out.fact_conditions[b.dataset.fact] || []).push(b.dataset.key);
+        });
+    }
+    return out;
 }
 
 // ---- Services editor (Templates → Services) ----
@@ -11161,11 +12464,16 @@ window.runOnboardingPreview = async function() {
     if (!out) return;
     const services = [...document.querySelectorAll('#ob-preview-services .ob-chip[aria-pressed="true"]')].map(b => b.dataset.key);
     const website = document.getElementById('ob-preview-website').value || null;
+    // Only sent when one is picked, so the preview still works before onboarding_facts.sql has run
+    const pickedFacts = {};
+    const pg = document.getElementById('ob-preview-page')?.value, crm = document.getElementById('ob-preview-crm')?.value;
+    if (pg) pickedFacts.facebook_page = pg;
+    if (crm) pickedFacts.crm_choice = crm;
     const seq = ++obPreviewSeq;
     out.innerHTML = '<span class="text-gray-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading…</span>';
 
     const [{ data, error }] = await Promise.all([
-        supabaseClient.rpc('onboarding_preview', { p_services: services, p_website: website }),
+        supabaseClient.rpc('onboarding_preview', { p_services: services, p_website: website, ...(Object.keys(pickedFacts).length ? { p_facts: pickedFacts } : {}) }),
         loadAutoCheckCatalog()
     ]);
     if (seq !== obPreviewSeq) return;   // a newer click already asked
@@ -11278,18 +12586,212 @@ async function applyClientServiceChanges(clientName, plan) {
     }
 }
 
+// ---- Packages editor (Edit Client, the Roster profile and the Accounts page, 2026-10-19) ----
+// The client_services rows, with two things the old checkboxes couldn't do:
+//   * an add-on newly ticked can be marked "already running" (status active), so a long-running client's packages can be
+//     corrected without starting that add-on's onboarding steps in their portal;
+//   * an add-on they have can be set to onboarding, active or paused.
+// Writes client_services only. No trigger is on that table, so nothing is sent; an add-on set to "onboarding" shows its
+// steps in the client's portal, exactly as ticking it in Edit Client does.
+let packagesModalClient = null;
+const PACKAGE_LIVE = ['onboarding', 'active', 'paused'];
+
+// "Base + Ads management, SEO Growth (onboarding)": the Accounts page's packages button
+function packagesSummary(clientName) {
+    const names = globalClientServices.filter(cs => cs.client_name === clientName && PACKAGE_LIVE.includes(cs.status))
+        .map(cs => serviceName(cs.service_key) + (cs.status === 'active' ? '' : ` (${cs.status})`));
+    return names.length ? 'Base + ' + names.join(', ') : 'Base only';
+}
+
+// One row per offered add-on (plus a retired one the client still has). prefix keeps the radio groups of the two places
+// these rows appear (Edit Client and the Roster's pop-up) apart.
+function packageRowsHtml(clientName, prefix) {
+    const mine = clientName ? globalClientServices.filter(cs => cs.client_name === clientName) : [];
+    const statusOf = key => mine.find(cs => cs.service_key === key)?.status;
+    const shown = globalServices.filter(s => s.active !== false || PACKAGE_LIVE.includes(statusOf(s.key)))
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    if (!shown.length) return '<p class="text-xs text-gray-500">No add-ons set up yet. Add them in Templates → Services.</p>';
+    const sel = (key, val, label) => `<option value="${val}"${statusOf(key) === val ? ' selected' : ''}>${label}</option>`;
+    return shown.map(s => {
+        const st = statusOf(s.key), has = PACKAGE_LIVE.includes(st);
+        const group = `pkg-new-${escapeAttr(prefix)}-${escapeAttr(s.key)}`;
+        return `<div class="pkg-row bg-black/20 border border-white/5 rounded-xl px-3 py-2" data-key="${escapeAttr(s.key)}" data-was="${escapeAttr(st || '')}">
+            <label class="flex items-center gap-2 text-sm text-white cursor-pointer">
+                <input type="checkbox" class="row-checkbox pkg-box" ${has ? 'checked' : ''} onchange="packagesRowChanged(this)">
+                ${escapeAttr(s.name)}
+                ${s.active === false ? '<span class="text-[10px] text-gray-500">(not offered any more)</span>' : ''}
+            </label>
+            <div class="pkg-status mt-2 ${has ? '' : 'hidden'}">
+                <select class="glass-input !py-1 !text-xs !w-auto pkg-status-select">
+                    ${sel(s.key, 'active', 'Active')}${sel(s.key, 'onboarding', 'Onboarding')}${sel(s.key, 'paused', 'Paused')}
+                </select>
+            </div>
+            <div class="pkg-new mt-2 hidden text-xs text-gray-300 space-y-1">
+                <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="${group}" value="active" checked> Already running: just record it, no onboarding</label>
+                <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="${group}" value="onboarding"> New: start its onboarding steps in their portal</label>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+window.packagesRowChanged = function(box) {
+    const row = box.closest('.pkg-row');
+    const had = PACKAGE_LIVE.includes(row.dataset.was);
+    row.querySelector('.pkg-status').classList.toggle('hidden', !(box.checked && had));
+    row.querySelector('.pkg-new').classList.toggle('hidden', !(box.checked && !had));
+};
+
+// What saving the rows in this container would do: { insert: [{key,status}], set: [{key,status}], end: [key] }
+function planPackageRows(container) {
+    const plan = { insert: [], set: [], end: [] };
+    (container ? container.querySelectorAll('.pkg-row') : []).forEach(row => {
+        const key = row.dataset.key, was = row.dataset.was, had = PACKAGE_LIVE.includes(was);
+        const ticked = row.querySelector('.pkg-box').checked;
+        if (ticked && had) {
+            const status = row.querySelector('.pkg-status-select').value;
+            if (status !== was) plan.set.push({ key, status });
+        } else if (ticked && !had) {
+            const status = row.querySelector('.pkg-new input[type="radio"]:checked')?.value === 'onboarding' ? 'onboarding' : 'active';
+            if (was) plan.set.push({ key, status }); else plan.insert.push({ key, status });
+        } else if (!ticked && had) {
+            plan.end.push(key);
+        }
+    });
+    return plan;
+}
+const packagePlanIsEmpty = (plan) => !plan.insert.length && !plan.set.length && !plan.end.length;
+
+// Writes client_services only. No trigger is on that table, so nothing is sent; an add-on set to "onboarding" shows its
+// steps in the client's portal.
+async function applyPackagePlan(client, plan) {
+    const now = new Date().toISOString();
+    const stamp = status => status === 'active' ? { onboarded_at: now } : status === 'onboarding' ? { started_at: now, onboarded_at: null } : {};
+    if (plan.insert.length) {
+        const { error } = await supabaseClient.from('client_services')
+            .insert(plan.insert.map(p => ({ client_name: client, service_key: p.key, status: p.status, ...stamp(p.status) })));
+        if (error) throw error;
+    }
+    for (const p of plan.set) {
+        const { error } = await supabaseClient.from('client_services')
+            .update({ status: p.status, ...stamp(p.status) }).eq('client_name', client).eq('service_key', p.key);
+        if (error) throw error;
+    }
+    if (plan.end.length) {
+        const { error } = await supabaseClient.from('client_services')
+            .update({ status: 'ended' }).eq('client_name', client).in('service_key', plan.end);
+        if (error) throw error;
+    }
+}
+
+// The pop-up: Edit on a Roster profile's services section, and the packages button on the Accounts page. Admins only.
+window.openPackagesModal = function(clientName) {
+    if (currentUserRole !== 'admin' || !clientName || clientName === 'ALL') return;
+    const modal = document.getElementById('packages-modal');
+    if (!modal) return;
+    packagesModalClient = clientName;
+    document.getElementById('packages-modal-client').textContent = clientName;
+    document.getElementById('packages-modal-msg').classList.add('hidden');
+    document.getElementById('packages-modal-rows').innerHTML = packageRowsHtml(clientName, 'roster');
+    modal.style.display = 'flex';
+};
+
+window.closePackagesModal = function() {
+    const modal = document.getElementById('packages-modal');
+    if (modal) modal.style.display = 'none';
+    packagesModalClient = null;
+};
+
+window.savePackagesModal = async function() {
+    if (currentUserRole !== 'admin' || !packagesModalClient) return;
+    const client = packagesModalClient;
+    const plan = planPackageRows(document.getElementById('packages-modal-rows'));
+    const msg = document.getElementById('packages-modal-msg');
+    const btn = document.getElementById('packages-modal-save');
+    if (packagePlanIsEmpty(plan)) { closePackagesModal(); return; }
+    if (plan.end.length && !confirm(`End ${plan.end.map(serviceName).join(', ')} for ${client}? Their history is kept.`)) return;
+    btn.disabled = true; btn.innerText = 'Saving...';
+    try {
+        await applyPackagePlan(client, plan);
+        const { data, error: rErr } = await supabaseClient.from('client_services').select('*');
+        if (!rErr && data) globalClientServices = data;
+        try { await loadOnboardingApplicability([client]); } catch (e) { console.warn('Could not reload onboarding steps:', e); }
+        closePackagesModal();
+        if (typeof renderRosterDetail === 'function' && document.getElementById('roster-detail')) renderRosterDetail();
+        // The Accounts page, when it's showing this client: the packages button and the onboarding box (which depends on
+        // which add-ons are onboarding). Redrawn directly; re-selecting the account would reset the chat.
+        if (cSelectedAccount === client) {
+            const pkgBtn = document.getElementById('c-packages-btn');
+            if (pkgBtn) pkgBtn.innerHTML = `<i class="fa-solid fa-box-open mr-1.5"></i>${escapeAttr(packagesSummary(client))}`;
+            if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+        }
+    } catch (e) {
+        msg.textContent = 'Could not save: ' + (e.message || e);
+        msg.className = 'text-xs mt-3 text-red-400';
+    } finally {
+        btn.disabled = false; btn.innerText = 'Save packages';
+    }
+};
+
 // ---- Stage checklist editor (Templates → Stage Checklists) ----
 window.initStageTemplateEditor = function() {
     const picker = document.getElementById('tpl-stage-picker');
     if (!picker) return;
     if (!picker.options.length) {
-        // Onboarding lives in its own editor — it's the only stage the client takes part
-        // in, so its list mixes their steps with ours and can't be edited here.
-        picker.innerHTML = lifecycleStages
-            .filter(s => s !== 'Onboarding')
-            .map(s => `<option value="${s}">${s}</option>`).join('');
+        // The client's own onboarding steps live in their own editor. "Onboarding" here is OUR setup
+        // steps (type Setup step), raised once the client has finished theirs.
+        // First the client's own onboarding steps (shown here to read, edited in Client Onboarding), then our Set up
+        // tasks, then the later stages
+        picker.innerHTML = `<option value="${CLIENT_ONBOARDING_VIEW}">Onboarding (client steps)</option>`
+            + lifecycleStages.map(s => `<option value="${s}">${stageTemplateLabel(s)}</option>`).join('');
     }
+    renderStagePackageOptions();
     renderStageTemplates();
+};
+
+// Our tasks in the Onboarding stage show as "Set up": the client's own steps are their onboarding, the rest is our set up.
+// Only the label changes. The stored stage stays 'Onboarding', which the triggers, GHL account creation and the stage
+// advance all key on.
+const CLIENT_ONBOARDING_VIEW = '__client_onboarding';
+function stageTemplateLabel(stage) { return stage === 'Onboarding' ? 'Set up (our tasks)' : stage; }
+
+// The package filter: All, Base (untagged rows) or one service. It only hides rows. They stay in the editor, so Save
+// still keeps every row of the stage, filtered out or not.
+function renderStagePackageOptions() {
+    const sel = document.getElementById('tpl-stage-package');
+    if (!sel) return;
+    const was = sel.value;
+    const shown = globalServices.filter(s => s.active !== false).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    sel.innerHTML = '<option value="">All packages</option><option value="base">Base (everyone)</option>'
+        + shown.map(s => `<option value="${escapeAttr(s.key)}">${escapeAttr(s.name)}</option>`).join('');
+    sel.value = [...sel.options].some(o => o.value === was) ? was : '';
+}
+
+function stageRowMatchesPackage(row, pkg) {
+    if (!pkg) return true;
+    const keys = row.dataset.services !== undefined
+        ? row.dataset.services.split(',').filter(Boolean)
+        : [...row.querySelectorAll('.ob-conditions .ob-chip-svc[aria-pressed="true"]')].map(b => b.dataset.key);
+    return pkg === 'base' ? keys.length === 0 : keys.includes(pkg);
+}
+
+window.applyStagePackageFilter = function() {
+    const pkg = document.getElementById('tpl-stage-package')?.value || '';
+    const rows = [...document.querySelectorAll('#tpl-stage-tasks-container .tpl-stage-row, #tpl-stage-tasks-container .tpl-client-step')];
+    let visible = 0;
+    rows.forEach(r => { const on = stageRowMatchesPackage(r, pkg); r.classList.toggle('hidden', !on); if (on) visible++; });
+    const status = document.getElementById('tpl-stage-status');
+    const picker = document.getElementById('tpl-stage-picker');
+    if (!status || !picker) return;
+    const pkgName = pkg === 'base' ? 'Base' : (globalServices.find(s => s.key === pkg)?.name || pkg);
+    if (picker.value === CLIENT_ONBOARDING_VIEW) {
+        const all = `${rows.length} step${rows.length === 1 ? '' : 's'} the client does in their portal. Edit them in Client Onboarding.`;
+        status.innerText = pkg ? `Showing ${visible} ${pkgName} step${visible === 1 ? '' : 's'} of ${all}` : all;
+        return;
+    }
+    const where = picker.value === 'Onboarding' ? 'once a client finishes their onboarding' : `when a client enters ${picker.value}`;
+    if (!rows.length) { status.innerText = `No checklist yet: ${where}, no tasks are created.`; return; }
+    const total = `${rows.length} task${rows.length === 1 ? '' : 's'} created ${where}.`;
+    status.innerText = pkg ? `Showing ${visible} ${pkgName} task${visible === 1 ? '' : 's'} of ${total}` : total;
 };
 
 window.renderStageTemplates = function() {
@@ -11297,23 +12799,42 @@ window.renderStageTemplates = function() {
     const picker = document.getElementById('tpl-stage-picker');
     if (!container || !picker) return;
 
-    const rows = templatesForStage(picker.value);
+    renderStagePackageOptions();
+    const clientView = picker.value === CLIENT_ONBOARDING_VIEW;
+    ['btn-add-stage-tpl', 'btn-save-stage-tpl', 'tpl-stage-headers'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', clientView));
     container.innerHTML = '';
-    rows.forEach(r => addStageTemplateRow(r));
-
-    const status = document.getElementById('tpl-stage-status');
-    if (status) {
-        status.innerText = rows.length
-            ? `${rows.length} task${rows.length === 1 ? '' : 's'} created when a client enters ${picker.value}.`
-            : `No checklist yet — moving a client into ${picker.value} won't create any tasks.`;
-    }
+    if (clientView) renderClientOnboardingSteps(container);
+    else templatesForStage(picker.value).forEach(r => addStageTemplateRow(r));
+    applyStagePackageFilter();
 };
+
+// The client's own onboarding steps, read only: they are edited in Client Onboarding (videos, forms and questions need
+// that editor). Hidden steps are left out, as clients never see them.
+function renderClientOnboardingSteps(container) {
+    const typeLabel = { video: 'Video', form: 'Form', action: 'Action', team: 'Team', questions: 'Questions' };
+    const steps = globalOnboardingSteps.filter(s => s.owner !== 'agency' && s.active !== false)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    container.innerHTML = steps.map(s => {
+        const keys = Array.isArray(s.service_keys) ? s.service_keys : [];
+        const who = keys.length ? keys.map(serviceName).join(', ') : 'Everyone (Base)';
+        const web = (s.website_statuses || []).map(k => WEBSITE_STATUS_LABELS[k] || k).join(', ');
+        return `<div class="tpl-client-step bg-black/20 border border-white/5 rounded-xl px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1" data-services="${escapeAttr(keys.join(','))}">
+            <span class="text-sm text-white flex-1 min-w-[12rem]">${escapeAttr(stripSlashEscapes(s.title))}</span>
+            <span class="text-[11px] text-gray-400">${typeLabel[s.type] || escapeAttr(s.type || '')}</span>
+            <span class="text-[11px] text-gray-500">${escapeAttr(who)}${web ? ' · Website: ' + escapeAttr(web) : ''}</span>
+        </div>`;
+    }).join('') + `<button type="button" onclick="switchTemplateView('onboarding')" class="text-xs text-blue-400 hover:text-blue-300 mt-1">Edit in Client Onboarding <i class="fa-solid fa-arrow-right ml-1"></i></button>`;
+}
 
 window.addStageTemplateRow = function(tpl) {
     const container = document.getElementById('tpl-stage-tasks-container');
     if (!container) return;
+    // Add Task while one package is showing: the new task starts tagged with it, so it doesn't vanish behind the filter
+    const isNew = !tpl;
+    const pkg = document.getElementById('tpl-stage-package')?.value || '';
+    if (isNew && pkg && pkg !== 'base') tpl = { service_keys: [pkg] };
 
-    const types = ['Checklist', 'Milestone', 'One-off', 'Recurring'];
+    const types = ['Checklist', 'Setup step', 'Milestone', 'One-off', 'Recurring'];
     const row = document.createElement('div');
     row.className = 'tpl-stage-row bg-black/20 border border-white/5 rounded-xl p-2 space-y-1';
     row.dataset.tplId = tpl?.id || '';
@@ -11333,6 +12854,7 @@ window.addStageTemplateRow = function(tpl) {
         ${conditionEditorHtml(tpl)}`;
     container.appendChild(row);
     updateConditionSummary(row.querySelector('.ob-conditions'));
+    if (isNew) applyStagePackageFilter();
     if (!autoCheckCatalog) loadAutoCheckCatalog().then(refreshAutoCheckSelects);
 };
 
@@ -11359,6 +12881,7 @@ window.saveStageTemplates = async function() {
     const picker = document.getElementById('tpl-stage-picker');
     const btn = document.getElementById('btn-save-stage-tpl');
     const stage = picker.value;
+    if (stage === CLIENT_ONBOARDING_VIEW) return; // read only here
 
     const rows = [...document.querySelectorAll('#tpl-stage-tasks-container .tpl-stage-row')];
     const entered = rows.map((r, i) => ({
@@ -11401,6 +12924,7 @@ window.saveStageTemplates = async function() {
                     website_statuses: t.website_statuses,
                     auto_check: t.auto_check
                 };
+                if (t.fact_conditions) row.fact_conditions = t.fact_conditions;
                 if (t.id) row.id = t.id;
                 return row;
             });
@@ -11537,21 +13061,61 @@ window.addOnboardingStepRow = function(step) {
 // One question in a Questions step. Its id is kept across edits, so rewording a question keeps the
 // answers already given to it. Website pills use their own class so readConditions() (the step's
 // own tags) never picks them up.
-const OB_QUESTION_TYPES = [['short', 'Short answer'], ['long', 'Long answer'], ['choice', 'Pick one'], ['multi', 'Pick any']];
+const OB_QUESTION_TYPES = [['short', 'Short answer'], ['long', 'Long answer'], ['choice', 'Pick one'], ['multi', 'Pick any'], ['phone', 'Phone'], ['email', 'Email'], ['link', 'Link'], ['ein', 'EIN (9 digits)'], ['style', 'Style picker (looks)']];
+
+// One look in a style picker question: name, a line, colors, a picture and the example site
+function obStyleRowHtml(s) {
+    s = s || {};
+    return `<div class="ob-style-row grid gap-1.5 border border-white/5 rounded-md p-2" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-name" placeholder="Name, e.g. Bold and local" value="${escapeAttr(s.name || '')}">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-note" placeholder="One line about it" value="${escapeAttr(s.note || '')}">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-colors" placeholder="Colors: #A63D22, #F1EBDF" value="${escapeAttr((s.colors || []).join(', '))}">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-image" placeholder="Picture link (https://…)" value="${escapeAttr(s.image || '')}">
+        <input type="text" class="glass-input !py-1 !text-xs ob-style-link" placeholder="Example site link (https://…)" value="${escapeAttr(s.link || '')}">
+        <button type="button" onclick="this.closest('.ob-style-row').remove()" class="text-red-500/60 hover:text-red-400 text-xs text-left" title="Remove this look"><i class="fa-solid fa-xmark mr-1"></i>Remove</button>
+    </div>`;
+}
+
+window.addObStyle = function(btn) {
+    btn.closest('.ob-q-styles').querySelector('.ob-q-style-list').insertAdjacentHTML('beforeend', obStyleRowHtml());
+};
+
+// Show the choices box for pick-one/pick-any and the looks editor for a style picker
+window.obQuestionTypeChanged = function(sel) {
+    const row = sel.closest('.ob-q-row');
+    row.querySelector('.ob-q-options').style.display = ['choice', 'multi'].includes(sel.value) ? '' : 'none';
+    row.querySelector('.ob-q-styles').style.display = sel.value === 'style' ? '' : 'none';
+};
+// Where an answer is saved on the client. These four are what the Quick start questions use; the
+// videos and tasks that depend on them are tagged in SQL (onboarding_facts.sql).
+const OB_FACT_OPTIONS = [
+    ['', 'Not saved on the client'],
+    ['facebook_page', 'Client fact: Facebook page'],
+    ['crm_choice', 'Client fact: wants a CRM (yes/no)'],
+    ['crm_name', 'Client fact: which CRM'],
+    ['crm_method', 'Client fact: how the CRM takes leads']
+];
 
 function obQuestionRowHtml(q) {
     q = q || {};
     const id = q.id || `q_${Math.random().toString(36).slice(2, 8)}`;
     const webs = q.website_statuses || [];
+    const showIf = q.show_if || {};
     return `
         <div class="ob-q-row bg-black/20 border border-white/5 rounded-lg p-2 space-y-2" data-qid="${escapeAttr(id)}">
             <div class="flex gap-2 items-center">
                 <input type="text" class="glass-input !py-1.5 flex-1 ob-q-label" placeholder="Question" value="${escapeAttr(q.label || '')}">
-                <select class="glass-input !py-1.5 !w-36 ob-q-type" onchange="this.closest('.ob-q-row').querySelector('.ob-q-options').style.display = ['choice','multi'].includes(this.value) ? '' : 'none'">
+                <select class="glass-input !py-1.5 !w-36 ob-q-type" onchange="obQuestionTypeChanged(this)">
                     ${OB_QUESTION_TYPES.map(([v, l]) => `<option value="${v}" ${(q.type || 'short') === v ? 'selected' : ''}>${l}</option>`).join('')}
                 </select>
                 <label class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer whitespace-nowrap">
                     <input type="checkbox" class="row-checkbox ob-q-required" ${q.required ? 'checked' : ''}> Required
+                </label>
+                <label class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer whitespace-nowrap" title="The client can answer but never sees it again; only admins can read it">
+                    <input type="checkbox" class="row-checkbox ob-q-private" ${q.private || q.secret ? 'checked' : ''}> Only our team sees it
+                </label>
+                <label class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer whitespace-nowrap" title="Stored encrypted; admins see it only by clicking Reveal, and every reveal is logged. For passwords.">
+                    <input type="checkbox" class="row-checkbox ob-q-secret" ${q.secret ? 'checked' : ''}> Encrypt
                 </label>
                 <button type="button" onclick="moveObQuestion(this, -1)" class="text-gray-500 hover:text-white px-1" title="Move up"><i class="fa-solid fa-arrow-up"></i></button>
                 <button type="button" onclick="moveObQuestion(this, 1)" class="text-gray-500 hover:text-white px-1" title="Move down"><i class="fa-solid fa-arrow-down"></i></button>
@@ -11559,6 +13123,11 @@ function obQuestionRowHtml(q) {
             </div>
             <input type="text" class="glass-input !py-1.5 w-full ob-q-options" placeholder="Choices, separated by commas"
                    value="${escapeAttr((q.options || []).join(', '))}" style="display:${['choice', 'multi'].includes(q.type) ? '' : 'none'}">
+            <div class="ob-q-styles space-y-1.5" style="display:${q.type === 'style' ? '' : 'none'}">
+                <p class="text-[10px] uppercase tracking-widest text-gray-500">Looks the client picks from (a 1st and a 2nd choice)</p>
+                <div class="ob-q-style-list space-y-1.5">${(Array.isArray(q.styles) ? q.styles : []).map(obStyleRowHtml).join('')}</div>
+                <button type="button" onclick="addObStyle(this)" class="text-xs text-blue-400 hover:text-blue-300 font-bold"><i class="fa-solid fa-plus mr-1"></i>Add a look</button>
+            </div>
             <div class="flex flex-wrap items-center gap-1.5">
                 <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">Only ask if website</span>
                 ${Object.entries(WEBSITE_STATUS_LABELS).map(([k, label]) => `
@@ -11566,8 +13135,44 @@ function obQuestionRowHtml(q) {
                         onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true')">${label}</button>`).join('')}
                 <span class="text-[10px] text-gray-500">(none picked = always ask)</span>
             </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500">Only ask if</span>
+                <select class="glass-input !py-1 !text-xs !w-auto max-w-[14rem] ob-q-showq" data-saved="${escapeAttr(showIf.q || '')}" onfocus="obRefreshShowIf(this)">
+                    <option value="">always</option>${showIf.q ? `<option value="${escapeAttr(showIf.q)}" selected>${escapeAttr(showIf.q)}</option>` : ''}
+                </select>
+                <span class="text-[10px] text-gray-500">is</span>
+                <input type="text" class="glass-input !py-1 !text-xs !w-56 ob-q-showany" placeholder="exact choices, e.g. Yes, Not sure" value="${escapeAttr((showIf.any || []).join(', '))}">
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500">Saves to</span>
+                <select class="glass-input !py-1 !text-xs !w-auto max-w-[16rem] ob-q-fact" onchange="obFactChanged(this)">
+                    ${OB_FACT_OPTIONS.map(([v, l]) => `<option value="${v}" ${(q.fact || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+                </select>
+                <input type="text" class="glass-input !py-1 !text-xs !w-64 ob-q-factvals" placeholder="values, in choice order: yes, no, unsure" value="${escapeAttr((q.fact_values || []).join(', '))}" style="display:${q.fact ? '' : 'none'}">
+                <input type="text" class="glass-input !py-1 !text-xs !w-64 ob-q-dest" placeholder="Later: where it goes in GHL, e.g. custom_value:owner_name" value="${escapeAttr(q.dest || '')}">
+            </div>
         </div>`;
 }
+
+// Offer the questions above this one as the thing it depends on
+window.obRefreshShowIf = function(sel) {
+    const row = sel.closest('.ob-q-row');
+    const keep = sel.value || sel.dataset.saved || '';
+    const earlier = [];
+    for (let r = row.previousElementSibling; r; r = r.previousElementSibling) {
+        if (!r.classList.contains('ob-q-row')) continue;
+        earlier.unshift({ id: r.dataset.qid, label: r.querySelector('.ob-q-label').value.trim() || '(untitled)' });
+    }
+    sel.innerHTML = `<option value="">always</option>` + earlier.map(e => `<option value="${escapeAttr(e.id)}" ${e.id === keep ? 'selected' : ''}>${escapeAttr(e.label.slice(0, 60))}</option>`).join('')
+        + (keep && !earlier.some(e => e.id === keep) ? `<option value="${escapeAttr(keep)}" selected>(a question that is no longer above this one)</option>` : '');
+};
+
+window.obFactChanged = function(sel) {
+    const row = sel.closest('.ob-q-row');
+    const vals = row.querySelector('.ob-q-factvals');
+    vals.style.display = sel.value ? '' : 'none';
+    if (sel.value && !vals.value.trim() && OB_FACT_DEFAULT_VALUES[sel.value]) vals.value = OB_FACT_DEFAULT_VALUES[sel.value].join(', ');
+};
 
 window.addObQuestion = function(btn) {
     const list = btn.closest('.ob-questions').querySelector('.ob-q-list');
@@ -11583,16 +13188,92 @@ window.moveObQuestion = function(btn, dir) {
 };
 
 function readObQuestions(stepRow) {
-    return [...stepRow.querySelectorAll('.ob-q-row')].map(r => ({
-        id: r.dataset.qid,
-        label: r.querySelector('.ob-q-label').value.trim(),
-        type: r.querySelector('.ob-q-type').value,
-        required: r.querySelector('.ob-q-required').checked,
-        options: ['choice', 'multi'].includes(r.querySelector('.ob-q-type').value)
-            ? r.querySelector('.ob-q-options').value.split(',').map(o => o.trim()).filter(Boolean)
-            : [],
-        website_statuses: [...r.querySelectorAll('.ob-q-web[aria-pressed="true"]')].map(b => b.dataset.key)
-    })).filter(q => q.label);
+    const split = s => s.split(',').map(o => o.trim()).filter(Boolean);
+    return [...stepRow.querySelectorAll('.ob-q-row')].map(r => {
+        const type = r.querySelector('.ob-q-type').value;
+        const showQ = r.querySelector('.ob-q-showq').value || r.querySelector('.ob-q-showq').dataset.saved || '';
+        const showAny = split(r.querySelector('.ob-q-showany').value);
+        const fact = r.querySelector('.ob-q-fact').value;
+        const factValues = fact ? split(r.querySelector('.ob-q-factvals').value) : [];
+        const dest = r.querySelector('.ob-q-dest').value.trim();
+        const q = {
+            id: r.dataset.qid,
+            label: r.querySelector('.ob-q-label').value.trim(),
+            type,
+            required: r.querySelector('.ob-q-required').checked,
+            options: ['choice', 'multi'].includes(type) ? split(r.querySelector('.ob-q-options').value) : [],
+            website_statuses: [...r.querySelectorAll('.ob-q-web[aria-pressed="true"]')].map(b => b.dataset.key)
+        };
+        if (showQ) q.show_if = { q: showQ, any: showAny };
+        if (type === 'style') {
+            q.styles = [...r.querySelectorAll('.ob-style-row')].map(sr => ({
+                name: sr.querySelector('.ob-style-name').value.trim(),
+                note: sr.querySelector('.ob-style-note').value.trim(),
+                colors: split(sr.querySelector('.ob-style-colors').value),
+                image: sr.querySelector('.ob-style-image').value.trim(),
+                link: sr.querySelector('.ob-style-link').value.trim()
+            })).filter(s => s.name);
+        }
+        // Encrypted answers are always private too
+        if (r.querySelector('.ob-q-secret')?.checked) q.secret = true;
+        else if (r.querySelector('.ob-q-private')?.checked) q.private = true;
+        if (fact) q.fact = fact;
+        if (fact && factValues.length) q.fact_values = factValues;
+        if (dest) q.dest = dest;
+        return q;
+    }).filter(q => q.label);
+}
+
+// Problems with the dependency and fact settings of one step's questions, as plain sentences
+function obQuestionProblems(stepTitle, questions) {
+    const problems = [];
+    questions.forEach((q, i) => {
+        if (q.show_if) {
+            const parent = questions.slice(0, i).find(p => p.id === q.show_if.q);
+            if (!parent) problems.push(`In "${stepTitle}", "${q.label}" depends on a question that is not above it.`);
+            else if (!q.show_if.any.length) problems.push(`In "${stepTitle}", "${q.label}" needs the answer(s) that make it appear.`);
+            else if (parent.private || parent.secret) {
+                // The portal never reads a private answer back, so a question can't depend on one
+                problems.push(`In "${stepTitle}", "${q.label}" depends on "${parent.label}", which only our team sees. A question can't depend on a private answer.`);
+            }
+            else if (['choice', 'multi'].includes(parent.type)) {
+                const stray = q.show_if.any.find(a => !parent.options.includes(a));
+                if (stray) problems.push(`In "${stepTitle}", "${q.label}" waits for "${stray}", which is not one of the choices of "${parent.label}".`);
+            }
+        }
+        if ((q.private || q.secret) && q.fact) {
+            problems.push(`In "${stepTitle}", "${q.label}" is private, so it can't also save to the client record.`);
+        }
+        if (q.type === 'style') {
+            const looks = Array.isArray(q.styles) ? q.styles : [];
+            if (looks.length < 2) problems.push(`In "${stepTitle}", "${q.label}" needs at least two looks to pick from.`);
+            const names = looks.map(l => String(l.name || '').trim().toLowerCase());
+            if (new Set(names).size !== names.length) problems.push(`In "${stepTitle}", two looks in "${q.label}" have the same name.`);
+            looks.forEach(l => {
+                ['image', 'link'].forEach(k => {
+                    if (l[k] && !/^https:\/\/\S+$/i.test(String(l[k]).trim())) problems.push(`In "${stepTitle}", the ${k === 'image' ? 'picture' : 'example site'} link for "${l.name}" must start with https://.`);
+                });
+                (l.colors || []).forEach(c => {
+                    if (!/^#[0-9a-f]{3,8}$/i.test(String(c).trim())) problems.push(`In "${stepTitle}", "${c}" in "${l.name}" isn't a color code like #A63D22.`);
+                });
+            });
+            if (q.private || q.secret) problems.push(`In "${stepTitle}", "${q.label}" is a style picker, which can't be private or encrypted.`);
+        }
+        if (q.secret && ['choice', 'multi'].includes(q.type)) {
+            problems.push(`In "${stepTitle}", "${q.label}" is a choice, which can't be encrypted. Encrypt is for typed answers like passwords.`);
+        }
+        if (q.fact && q.type === 'choice' && q.fact_values && q.fact_values.length !== q.options.length) {
+            problems.push(`In "${stepTitle}", "${q.label}" has ${q.options.length} choices but ${q.fact_values.length} saved values. They must line up one to one.`);
+        }
+        if (q.fact && OB_FACT_DEFAULT_VALUES[q.fact] && q.type === 'choice' && !(q.fact_values || []).length) {
+            problems.push(`In "${stepTitle}", "${q.label}" saves to the client but has no values listed.`);
+        }
+        if (q.fact && OB_FACT_DEFAULT_VALUES[q.fact] && q.fact_values) {
+            const stray = q.fact_values.find(v => !OB_FACT_DEFAULT_VALUES[q.fact].includes(v));
+            if (stray) problems.push(`In "${stepTitle}", "${q.label}" saves "${stray}", which the client record does not accept. Use: ${OB_FACT_DEFAULT_VALUES[q.fact].join(', ')}.`);
+        }
+    });
+    return problems;
 }
 
 // Hide a step without deleting it (its progress and tags stay), or switch a hidden one on.
@@ -11689,6 +13370,8 @@ window.saveOnboardingSteps = async function() {
             alert(`In "${s.title}", the question "${noChoices.label}" needs its choices, separated by commas.`);
             return;
         }
+        const problems = obQuestionProblems(s.title, s.questions);
+        if (problems.length) { alert(problems[0]); return; }
     }
 
     const original = btn.innerHTML;
@@ -11715,6 +13398,7 @@ window.saveOnboardingSteps = async function() {
                     service_keys: s.service_keys, website_statuses: s.website_statuses, auto_check: s.auto_check,
                     questions: s.questions
                 };
+                if (s.fact_conditions) row.fact_conditions = s.fact_conditions;
                 if (s.id) row.id = s.id;
                 return row;
             });
@@ -11802,6 +13486,18 @@ async function generateStageTasks(clientName, stage, opts = {}) {
             }))
         : stageItems;
 
+    // Our setup steps for Onboarding live in stage_templates (stage 'Onboarding') and are raised with the
+    // agency tasks, for the services being onboarded.
+    if (stage === 'Onboarding') {
+        const { data: stepRows, error: stepErr } = await supabaseClient.rpc('stage_templates_for_client', { p_client: clientName, p_stage: 'Onboarding' });
+        let steps = stepErr ? [] : (stepRows || []).filter(t => t.task_type === SETUP_STEP_TYPE);
+        if (opts.onlyServices) {
+            const want = new Set(opts.onlyServices);
+            steps = steps.filter(t => (t.service_keys || []).some(k => want.has(k)));
+        }
+        templates.push(...steps);
+    }
+
     if (!templates.length) return 0;
 
     // Matched on the normalized name rather than an exact one: everything else in the
@@ -11816,6 +13512,7 @@ async function generateStageTasks(clientName, stage, opts = {}) {
         .map(t => String(t.title || '').trim().toLowerCase()));
     const toCreate = templates.filter(t => !existing.has(String(t.task_title || '').trim().toLowerCase()));
     if (!toCreate.length) return 0;
+
 
     const now = new Date().toISOString();
     const dueFrom = days => {
@@ -11836,6 +13533,9 @@ async function generateStageTasks(clientName, stage, opts = {}) {
             status: 'Not Started',
             assignee: t.assignee || null,
             checklist_group: t.checklist_group || null,
+            // Our steps are internal and never shown to the client. The tasks they roll up into ("Register your texting
+            // number") are, so the client sees what we're working on (show_setup_tasks_to_clients.sql)
+            client_visible: t.task_type !== SETUP_STEP_TYPE,
             p, u, e,
             score: Math.round(((p * 0.4) + (u * 0.4) + ((6 - e) * 0.2)) * 20),
             due: dueFrom(t.due_days),
@@ -11895,6 +13595,280 @@ async function reconcileOnboardingHandoffTasks() {
 // Ticks off our own tasks whose "done when" check now passes (supabase/sql/auto_check_reconcile.sql).
 // The decision is made in that SQL function, which the daily schedule also runs; this just asks
 // it on load and mirrors what it closed into the board.
+// ============================================================================
+// The setup checklist: "Our checklist" on a client's Health tab (supabase/sql/setup_checklist.sql)
+// ============================================================================
+// What we do after a client finishes onboarding is a list of steps. Each step is a task of type
+// 'Setup step', hidden from the board, the feeds and the portal, and shown only here. They roll up
+// into one ordinary task per group ("Set up GHL"), which is what the board shows, and which ticks
+// itself when its last step is done.
+const SETUP_STEP_TYPE = 'Setup step';
+
+async function loadSetupSteps() {
+    if (currentUserRole !== 'admin') { globalSetupSteps = []; return; }
+    try {
+        const rows = [];
+        for (let at = 0; at < 20000; at += 1000) {
+            const { data, error } = await supabaseClient.from('tasks').select('*')
+                .eq('type', SETUP_STEP_TYPE).is('archived_at', null).order('id').range(at, at + 999);
+            if (error) throw error;
+            rows.push(...(data || []));
+            if (!data || data.length < 1000) break;
+        }
+        globalSetupSteps = rows;
+    } catch (err) {
+        console.warn('Setup steps not loaded:', err?.message || err);
+        globalSetupSteps = [];
+    }
+}
+
+// "A2P — Buy a local number" is the section "A2P" and the step "Buy a local number"
+function setupStepParts(title) {
+    const t = String(title || '');
+    const i = t.indexOf(' — ');
+    return i > 0 ? { label: t.slice(0, i), name: t.slice(i + 3) } : { label: '', name: t };
+}
+
+// A client's groups in the order the work happens: by stage, then by the first step created
+function setupGroupsFor(clientName) {
+    const key = normalize(clientName || '');
+    const mine = (globalSetupSteps || []).filter(t => normalize(t.client || '') === key && t.checklist_group);
+    const by = new Map();
+    for (const t of mine) {
+        const k = `${t.stage}|${String(t.checklist_group).toLowerCase()}`;
+        if (!by.has(k)) by.set(k, { group: t.checklist_group, stage: t.stage, steps: [] });
+        by.get(k).steps.push(t);
+    }
+    const stageIdx = s => { const i = lifecycleStages.indexOf(s); return i < 0 ? 99 : i; };
+    const groups = [...by.values()];
+    groups.forEach(g => {
+        g.steps.sort((a, b) => Number(a.id) - Number(b.id));
+        g.total = g.steps.length;
+        g.done = g.steps.filter(s => s.status === 'Complete').length;
+        g.summary = (globalTasksData || []).find(t => normalize(t.client || '') === key && t.stage === g.stage
+            && String(t.title || '').trim().toLowerCase() === String(g.group).trim().toLowerCase()) || null;
+    });
+    groups.sort((a, b) => stageIdx(a.stage) - stageIdx(b.stage) || Number(a.steps[0].id) - Number(b.steps[0].id));
+    return groups;
+}
+
+// A group's own task follows its steps: Complete when the last one is done, In Progress once one is.
+// Only ever forward, like the automatic checks, so a mis-click on a step never reopens a finished group.
+async function syncSetupSummaries() {
+    if (currentUserRole !== 'admin') return 0;
+    let changed = 0;
+    for (const c of globalClientsData) {
+        for (const g of setupGroupsFor(c.name)) {
+            const s = g.summary;
+            if (!s) continue;
+            let next = null;
+            if (g.done === g.total && s.status !== 'Complete') next = 'Complete';
+            else if (g.done > 0 && s.status === 'Not Started') next = 'In Progress';
+            if (!next) continue;
+            const { data, error } = await supabaseClient.from('tasks')
+                .update({ status: next, updated_at: new Date().toISOString() }).eq('id', s.id).select('id');
+            if (error || !data?.length) { console.warn(`[LIFECYCLE ENGINE] Could not update "${g.group}" for ${c.name}:`, error?.message || 'refused'); continue; }
+            s.status = next;
+            changed++;
+        }
+    }
+    return changed;
+}
+
+let setupChecklistClient = null;
+
+window.openSetupChecklist = function () {
+    const name = cSelectedAccount;
+    if (!name || name === 'ALL' || currentUserRole !== 'admin') return;
+    setupChecklistClient = name;
+    const modal = document.getElementById('setup-checklist-modal');
+    if (!modal) return;
+    // Modals can sit inside the hidden portal container, so they are lifted out, like the others
+    if (modal.parentElement.id !== 'theme-wrapper') document.getElementById('theme-wrapper').appendChild(modal);
+    renderSetupChecklist();
+    modal.style.display = 'flex';
+};
+
+window.closeSetupChecklist = function () {
+    const modal = document.getElementById('setup-checklist-modal');
+    if (modal) modal.style.display = 'none';
+    setupChecklistClient = null;
+};
+
+function setupStepAutoCheck(step) {
+    const tpl = (globalStageTemplates || []).find(t => t.stage === step.stage
+        && String(t.task_title || '').trim().toLowerCase() === String(step.title || '').trim().toLowerCase());
+    return tpl?.auto_check || null;
+}
+
+function setupChecklistHtml(clientName) {
+    const groups = setupGroupsFor(clientName);
+    const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName));
+    const current = row?.current_stage || 'Onboarding';
+    if (!groups.length) {
+        return '<p class="text-sm" style="color:var(--t2); line-height:1.6;">No checklist for this client yet. It is created when their onboarding is finished, and when they enter Campaign Building. Clients who finished earlier do not have one.</p>';
+    }
+    return groups.map(g => {
+        const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+        const steps = setupStepRowsHtml(g);
+        const here = g.stage === current ? '<span class="ge-label" style="margin-left:10px; color:var(--gold);">current stage</span>' : `<span class="ge-label" style="margin-left:10px; color:var(--t3);">${escapeAttr(stageLabelForOurWork(g.stage))}</span>`;
+        return `<section style="margin-bottom:22px;">
+            <div class="flex items-baseline justify-between gap-3"><h3 class="ge-title" style="font-size:16px;">${escapeAttr(g.group)}${here}</h3><span class="text-xs ge-num" style="color:var(--t2);">${g.done} of ${g.total}</span></div>
+            <div style="height:5px; border-radius:3px; background:var(--inset); margin:8px 0 4px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--goldSolid);"></div></div>
+            ${steps}
+        </section>`;
+    }).join('');
+}
+
+// One group's steps as rows with a tick box: Our checklist, and the arrow on the group's own task card
+function setupStepRowsHtml(g) {
+    const today = new Date().toISOString().split('T')[0];
+    let lastLabel = null;
+    return g.steps.map(s => {
+            const { label, name } = setupStepParts(s.title);
+            const head = label && label !== lastLabel ? `<div class="ge-label" style="margin:14px 0 4px; color:var(--gold);">${escapeAttr(label)}</div>` : '';
+            lastLabel = label || lastLabel;
+            const done = s.status === 'Complete';
+            const late = !done && s.due && s.due < today;
+            const auto = setupStepAutoCheck(s);
+            const meta = [s.assignee ? escapeAttr(s.assignee) : '', s.due ? (late ? `<span style="color:var(--neg);">late, due ${escapeAttr(s.due)}</span>` : `due ${escapeAttr(s.due)}`) : ''].filter(Boolean).join(' &middot; ');
+            return `${head}<div class="setup-step" style="display:flex; gap:12px; align-items:flex-start; padding:7px 0; border-top:1px solid var(--line);">
+                <button type="button" role="checkbox" aria-checked="${done}" aria-label="${escapeAttr(name)}" onclick="toggleSetupStep('${s.id}')"
+                    style="flex:none; width:18px; height:18px; margin-top:2px; border-radius:2px; border:1.5px solid ${done ? 'var(--pos)' : 'var(--line)'}; background:${done ? 'var(--pos)' : 'transparent'}; color:var(--bg, #0b0907); cursor:pointer; font-size:11px; line-height:1;">${done ? '&#10003;' : ''}</button>
+                <div style="min-width:0; flex:1;">
+                    <div style="font-size:13.5px; color:${done ? 'var(--t3)' : 'var(--t1)'}; ${done ? 'text-decoration:line-through;' : ''}">${escapeAttr(stripSlashEscapes(name))}${auto ? ' <i class="fa-solid fa-bolt" style="color:var(--pos); font-size:10px;" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}</div>
+                    ${meta ? `<div class="text-xs" style="margin-top:2px; color:var(--t3);">${meta}</div>` : ''}
+                    ${s.notes ? `<details style="margin-top:3px;"><summary class="text-xs" style="color:var(--t3); cursor:pointer;">Details</summary><p class="text-xs" style="margin-top:4px; color:var(--t2); line-height:1.55; white-space:pre-wrap;">${escapeAttr(stripSlashEscapes(s.notes))}</p></details>` : ''}
+                    ${s.title === A2P_PROFILE_STEP ? `<button type="button" class="text-xs font-bold a2p-copy" data-client="${escapeAttr(s.client)}" onclick="copyA2pDetails(this)"
+                        style="margin-top:4px; background:none; border:none; padding:0; color:var(--gold); cursor:pointer;"><i class="fa-regular fa-copy mr-1"></i>Copy A2P details</button>` : ''}
+                </div>
+                <button type="button" onclick="openSetupStepTask('${s.id}')" class="text-xs" style="flex:none; background:none; border:none; color:var(--t3); cursor:pointer;" title="Open as a task: assign someone, change the due date or add notes">Edit</button>
+            </div>`;
+        }).join('');
+}
+
+// "Copy A2P details" on the Business Profile step (setup_checklist_a2p_profile.sql). GHL's API can't fill the legal name,
+// business type, EIN or authorized representative, so the client's answers are copied in the order GHL's Business Profile
+// asks for them. Found by each question's dest (a2p:legal_name, ghl:address…), so rewording a question doesn't break it.
+// Admins only: several are private answers (globalPrivateAnswers is loaded for admins only).
+const A2P_PROFILE_STEP = 'Review — Paste the A2P details into their Business Profile';
+
+function answersByDest(clientName) {
+    const key = normalize(clientName || '');
+    const questions = new Map();
+    (globalOnboardingSteps || []).forEach(st => (Array.isArray(st.questions) ? st.questions : []).forEach(q => questions.set(`${st.id}|${q.id}`, q)));
+    const rows = [...(globalOnboardingAnswers || []), ...(globalPrivateAnswers || [])].filter(r => normalize(r.client_name || '') === key);
+    const out = {};
+    rows.forEach(r => Object.entries(r.answers || {}).forEach(([qid, e]) => {
+        const q = questions.get(`${r.step_id}|${qid}`);
+        const v = Array.isArray(e?.value) ? e.value.join(', ') : String(e?.value ?? '').trim();
+        if (!q?.dest || !v) return;
+        String(q.dest).split(';').map(x => x.trim()).filter(Boolean).forEach(d => { if (!(d in out)) out[d] = v; });
+    }));
+    return out;
+}
+
+function a2pDetailsText(clientName) {
+    const d = answersByDest(clientName);
+    const get = k => d[k] || '(not answered)';
+    const address = [d['ghl:address'], d['ghl:city'], [d['ghl:state'], d['ghl:postalCode']].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    return [
+        `Legal business name: ${get('a2p:legal_name')}`,
+        `Business type: ${get('a2p:business_type')}`,
+        `EIN: ${get('a2p:ein')}`,
+        `Address: ${address || '(not answered)'}`,
+        `Website: ${get('ghl:website')}`,
+        `Authorized representative: ${get('a2p:representative_name')}`,
+        `Title: ${get('a2p:representative_title')}`,
+        `Email: ${get('ghl:email')}`,
+        `Phone: ${get('a2p:representative_phone')}`,
+    ].join('\n');
+}
+
+window.copyA2pDetails = async function (btn) {
+    if (currentUserRole !== 'admin') return;
+    try {
+        await navigator.clipboard.writeText(a2pDetailsText(btn.dataset.client));
+        btn.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Copied';
+    } catch {
+        btn.innerText = "Couldn't copy";
+    }
+};
+
+// The arrow on a task card: a task that is a checklist group ("Register their texting number") opens its steps
+// underneath, like a Roster row, and they can be ticked right there. Admins only, like the steps themselves.
+const expandedTaskSteps = new Set();
+
+function setupGroupForTask(t) {
+    if (currentUserRole !== 'admin' || !t || t.__onboardingStep || t.type === SETUP_STEP_TYPE || !t.client) return null;
+    const title = String(t.title || '').trim().toLowerCase();
+    return setupGroupsFor(t.client).find(g => g.stage === t.stage && String(g.group).trim().toLowerCase() === title) || null;
+}
+
+function taskStepsToggleHtml(t, g) {
+    const open = expandedTaskSteps.has(String(t.id));
+    return `<button type="button" class="task-steps-toggle ge-label" onclick="event.stopPropagation(); toggleTaskSteps('${t.id}')" aria-expanded="${open}"
+        style="display:inline-flex; align-items:center; gap:6px; background:none; border:none; padding:0; cursor:pointer; color:var(${g.done === g.total ? '--pos' : '--gold'});">
+        <i class="fa-solid fa-chevron-${open ? 'down' : 'right'}" style="font-size:9px;"></i>${g.done} of ${g.total} steps</button>`;
+}
+
+function taskStepsPanelHtml(g) {
+    // Clicks inside stay inside: ticking a step must not open the task drawer underneath
+    return `<div class="task-steps" onclick="event.stopPropagation()" style="cursor:default; margin-top:-4px;">${setupStepRowsHtml(g)}</div>`;
+}
+
+window.toggleTaskSteps = function (id) {
+    const k = String(id);
+    if (expandedTaskSteps.has(k)) expandedTaskSteps.delete(k); else expandedTaskSteps.add(k);
+    renderActiveTaskView();
+};
+
+function renderSetupChecklist() {
+    const body = document.getElementById('setup-checklist-body');
+    const title = document.getElementById('setup-checklist-client');
+    if (!body || !setupChecklistClient) return;
+    if (title) title.innerText = setupChecklistClient;
+    const scroll = body.scrollTop;
+    body.innerHTML = setupChecklistHtml(setupChecklistClient);
+    body.scrollTop = scroll;
+}
+
+function refreshSetupViews() {
+    if (setupChecklistClient) renderSetupChecklist();
+    if (typeof renderClientOnboarding === 'function') renderClientOnboarding();
+    // A step ticked from a task card: redraw the board so the card's count (and column) follow
+    if (expandedTaskSteps.size && typeof renderActiveTaskView === 'function') renderActiveTaskView();
+}
+
+window.toggleSetupStep = async function (id) {
+    if (currentUserRole !== 'admin') return;
+    const step = (globalSetupSteps || []).find(t => String(t.id) === String(id));
+    if (!step) return;
+    const next = step.status === 'Complete' ? 'Not Started' : 'Complete';
+    // Ticked on screen first; put back if the database refuses (row-level security refuses with no error)
+    const was = step.status;
+    step.status = next;
+    refreshSetupViews();
+    const { data, error } = await supabaseClient.from('tasks')
+        .update({ status: next, updated_at: new Date().toISOString() }).eq('id', step.id).select('id');
+    if (error || !data?.length) {
+        step.status = was;
+        refreshSetupViews();
+        return alert('Could not save that step: ' + (error?.message || 'the database refused the change'));
+    }
+    await syncSetupSummaries();
+    // The last step of a group can be what lets a client move on
+    const moved = await runLifecycleCatchUp();
+    refreshSetupViews();
+    if (moved && typeof renderStageProgress === 'function') renderStageProgress();
+};
+
+// A step is a task underneath, so the ordinary task drawer edits it (owner, due date, notes)
+window.openSetupStepTask = function (id) {
+    window.closeSetupChecklist();
+    openTaskDrawer(isNaN(Number(id)) ? id : Number(id));
+};
+
 async function runAutoChecks() {
     if (currentUserRole !== 'admin') return 0;
     const { data, error } = await supabaseClient.rpc('reconcile_auto_checks');
@@ -11904,7 +13878,8 @@ async function runAutoChecks() {
         return 0;
     }
     (data || []).forEach(r => {
-        const task = globalTasksData.find(t => String(t.id) === String(r.task_id));
+        const task = globalTasksData.find(t => String(t.id) === String(r.task_id))
+            || globalSetupSteps.find(t => String(t.id) === String(r.task_id));
         if (task) task.status = 'Complete';
         console.log(`[LIFECYCLE ENGINE] ${r.client}: "${r.title}" ticked off automatically (${r.check_key}).`);
     });
@@ -11920,7 +13895,7 @@ async function reconcileAddonOnboarding(c) {
     const finished = a.services.filter(s => s.service_key !== 'base' && s.status === 'onboarding' && s.complete);
     for (const s of finished) {
         const title = addonHandoffTitle(s.service_key);
-        const exists = globalTasksData.some(t => normalize(t.client || '') === normalize(c.name)
+        const exists = tasksIncludingArchived().some(t => normalize(t.client || '') === normalize(c.name)
             && String(t.title || '').trim().toLowerCase() === title.toLowerCase());
         if (!exists) {
             const row = { ...buildOnboardingHandoffTask(c.name), title,
@@ -11937,7 +13912,7 @@ async function reconcileAddonOnboarding(c) {
         console.log(`[LIFECYCLE ENGINE] ${c.name} finished ${s.service_key} onboarding — caught up on load.`);
     }
     // Only clients with an add-on handoff task get anything; dedupes, so safe every load
-    if (globalTasksData.some(t => normalize(t.client || '') === normalize(c.name) && / onboarding complete — ready to start$/i.test(String(t.title || '').trim()))) {
+    if (tasksIncludingArchived().some(t => normalize(t.client || '') === normalize(c.name) && / onboarding complete — ready to start$/i.test(String(t.title || '').trim()))) {
         await raiseOnboardingAgencyTasks(c.name, c.current_stage);
     }
 }
@@ -11961,7 +13936,7 @@ async function autoAdvanceCompletedOnboarding() {
         if ((c.current_stage || 'Onboarding') !== 'Onboarding') return false;
         if ((c.status || 'active') !== 'active') return false;
 
-        const obTasks = globalTasksData.filter(t =>
+        const obTasks = globalTasksData.concat(globalSetupSteps).filter(t =>
             normalize(t.client || '') === normalize(c.name) && t.stage === 'Onboarding');
 
         return obTasks.length > 0 && obTasks.every(t => t.status === 'Complete');
@@ -11998,12 +13973,12 @@ window.openStageTransitionModal = function() {
     const currentStage = clientObj.current_stage || 'Onboarding';
     const currentIndex = lifecycleStages.indexOf(currentStage);    
     // Set Current Stage Text
-    document.getElementById('trans-current-stage').innerText = currentStage;
+    document.getElementById('trans-current-stage').innerText = clientPhase(clientObj) || currentStage;
     
     // Populate Target Stage Dropdown
     const selectEl = document.getElementById('trans-target-stage');
     selectEl.innerHTML = lifecycleStages.map(stage => 
-        `<option value="${stage}">${stage}</option>`
+        `<option value="${stage}">${stage === 'Onboarding' ? 'Onboarding / Set up' : stage}</option>`
     ).join('');
     
     // Default to the next logical stage, or the current one if at the end
@@ -12038,7 +14013,8 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-contact-name').value = c.contact_name || '';
     document.getElementById('edit-client-industry').value     = c.industry || '';
     document.getElementById('edit-client-email').value        = c.client_email || '';
-    renderClientServicePicker('edit-client-services', c.name);
+    const editPkgs = document.getElementById('edit-client-services');
+    if (editPkgs) editPkgs.innerHTML = packageRowsHtml(c.name, 'edit');
     document.getElementById('edit-client-website-status').value = c.website_status || '';
     renderEditClientPeopleSummary(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
@@ -12376,6 +14352,59 @@ function openGeEgg() {
     document.body.appendChild(s);
 }
 
+// ---- Easter egg #2: type 5min ----
+// Four keys in a row, under a second apart, anywhere except inside a text box, and only for admins.
+// speedlead.js is fetched only then. Best scores go in speed_lead_runs (supabase/sql/speed_lead_runs.sql).
+const SL_SEQUENCE = '5min', SL_GAP_MS = 1000;
+let slKeys = [];
+
+function slTypingInBox(target) {
+    const el = target && target.nodeType === 1 ? target : null;
+    if (!el) return false;
+    const tag = String(el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable === true;
+}
+
+// True on the key that completes the sequence. Pure apart from the buffer, so it can be tested.
+function slKeyPressed(e, now) {
+    if (!e || e.ctrlKey || e.metaKey || e.altKey || e.repeat || typeof e.key !== 'string' || e.key.length !== 1) return false;
+    if (slTypingInBox(e.target)) { slKeys = []; return false; }
+    slKeys = slKeys.filter(k => now - k.t < SL_GAP_MS);
+    slKeys.push({ c: e.key.toLowerCase(), t: now });
+    if (slKeys.length > SL_SEQUENCE.length) slKeys.shift();
+    if (slKeys.map(k => k.c).join('') === SL_SEQUENCE) { slKeys = []; return true; }
+    return false;
+}
+
+function speedLeadOptions() {
+    return {
+        playerEmail: clientEmail,
+        loadScores: () => supabaseClient.from('speed_lead_runs')
+            .select('player_email, player_name, score, avg_reply_ms, created_at')
+            .order('score', { ascending: false }).limit(300),
+        saveScore: (run) => supabaseClient.from('speed_lead_runs').insert([{
+            ...run,
+            player_email: clientEmail,
+            player_name: (currentUserFullName || (currentUserName !== 'User' ? currentUserName : '') || String(clientEmail || '').split('@')[0]).trim().split(/\s+/)[0],
+        }]),
+    };
+}
+
+function openSpeedLead() {
+    if (window.GESpeedLead) { window.GESpeedLead.start(speedLeadOptions()); return; }
+    const s = document.createElement('script');
+    s.src = `${GE_ASSET_BASE}/speedlead.js?v=${Date.now()}`;
+    s.onload = () => window.GESpeedLead && window.GESpeedLead.start(speedLeadOptions());
+    s.onerror = () => console.error('Golden Eye: could not load speedlead.js from ' + s.src);
+    document.body.appendChild(s);
+}
+
+window.addEventListener('keydown', (e) => {
+    if (currentUserRole !== 'admin') return;
+    if (document.getElementById('ge-egg') || document.getElementById('ge-sl')) return;
+    if (slKeyPressed(e, Date.now())) openSpeedLead();
+});
+
 // The sidebar tab (and its phone icon) for admins and VAs, badged with how many clients still
 // owe last week's numbers
 function updateRosterNav() {
@@ -12423,7 +14452,7 @@ function rosterSortValue(c, key) {
         case 'checkin':  return rosterCheckinStatus(c).rank;
         case 'name':     return String(c.name || '').toLowerCase();
         case 'status':   return ['active', 'paused', 'archived'].indexOf(rosterStatusOf(c));
-        case 'stage':    return String(c.current_stage || '').toLowerCase();
+        case 'stage':    { const i = c.current_stage ? displayStages.indexOf(clientPhase(c)) : -1; return i < 0 ? 99 : i; }
         case 'health':   return c.current_score || 0;
         case 'retainer': return parseFloat(c.monthly_retainer || 0);
         case 'payment':  return String(c.payment_status || '');
@@ -12444,6 +14473,8 @@ window.rosterSortBy = function(key) {
 window.renderRoster = function() {
     const list = document.getElementById('roster-list');
     if (!list) return;
+    // Adding a client is an admin's job; members (VAs limited to some clients) see the Roster without it
+    document.getElementById('btn-roster-add-client')?.classList.toggle('hidden', currentUserRole !== 'admin');
 
     const all = globalClientsData.slice();
     const counts = { all: all.length, active: 0, paused: 0, archived: 0 };
@@ -12531,7 +14562,7 @@ window.renderRoster = function() {
             </div>`,
             status: `<span class="ge-label" style="color:${ROSTER_STATUS_COLOR[status] || 'var(--t3)'};">${status}</span>`,
             Services: `<div style="display:flex; flex-wrap:wrap; gap:4px; min-width:0;">${svcHtml}</div>`,
-            stage: `<span class="text-sm" style="color:var(--t2);">${rosterEsc(c.current_stage || '—')}</span>`,
+            stage: `<span class="text-sm" style="color:var(--t2);">${rosterEsc(c.current_stage ? clientPhase(c) : '—')}</span>`,
             checkin: `<span class="ge-label" data-checkin="${ck.state}" style="color:${ckColor};" title="Numbers for ${escapeAttr(weekRangeLabel(reportingWeekStart()))}">${ck.state === 'in' ? '<i class="fa-solid fa-check mr-1"></i>' : ''}${ck.label}</span>`,
             health: `<div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
                 <div class="score-bar-bg" style="width:30px; height:3px;"><div class="score-bar-fill" style="width:${score}%; background:${sc};"></div></div>
@@ -12933,6 +14964,7 @@ function rosterProfileHtml(c) {
             <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="goToClient(this.dataset.client)">Open account</button>
             <button type="button" class="btn-secondary btn text-xs" data-client="${escapeAttr(c.name)}" onclick="rosterOpenEditClient(this.dataset.client)">Edit client</button>
         </div>
+        ${ghlContactNoticeHtml(c.name, { always: true })}
         <div class="rd-grid">
         <div>
         <div class="rd-section">${rosterEditing === 'people' ? rosterPeopleEdit(c) : rosterPeopleView(c)}</div>
@@ -12958,7 +14990,7 @@ function rosterProfileHtml(c) {
             ['Target CPL', c.target_cpl ? `<span class="ge-num">${rosterMoney(c.target_cpl)}</span>` : '—'],
         ])}</div>
 
-        <div class="rd-section">${rosterSectionHead('services.', null)}<div class="flex flex-wrap gap-1.5">${svcHtml}</div></div>
+        <div class="rd-section"><div class="flex justify-between items-center mb-4"><h3 class="ge-title" style="font-size:15px;">services.</h3><button type="button" class="ge-label" style="color:var(--gold); cursor:pointer;" data-client="${escapeAttr(c.name)}" onclick="openPackagesModal(this.dataset.client)">Edit</button></div><div class="flex flex-wrap gap-1.5">${svcHtml}</div></div>
 
         <div class="rd-section">${rosterSectionHead('connections.', null)}${rosterKv([
             ['Meta ad account', set(c.ad_account_id)],
@@ -13131,7 +15163,7 @@ window.saveClientEdits = async function(e) {
     const renaming = normalize(newName) !== normalize(originalName) || newName !== originalName;
     if (renaming && !confirm(`Rename "${originalName}" to "${newName}"?\n\nTheir tasks, health record, check-ins, reports and team access will all be moved across.`)) return;
 
-    const servicePlan = planClientServiceChanges(originalName, 'edit-client-services');
+    const servicePlan = planPackageRows(document.getElementById('edit-client-services'));
     if (servicePlan.end.length && !confirm(`End ${servicePlan.end.map(serviceName).join(', ')} for ${newName}?\n\nIts onboarding steps stop applying. Their history and completed steps are kept.`)) return;
 
     const original = btn.innerHTML;
@@ -13210,7 +15242,7 @@ window.saveClientEdits = async function(e) {
         // After the rename, so add-ons are filed under the client's current name.
         // rename_client() has already moved client_services, so the old rows sit under newName.
         // People are no longer edited here (see openRosterFromEditClient).
-        await applyClientServiceChanges(newName, servicePlan);
+        await applyPackagePlan(newName, servicePlan);
 
         document.getElementById('edit-client-modal').style.display = 'none';
 
@@ -13412,7 +15444,7 @@ window.executeStageTransition = async function() {
 
         // 3. Trigger UI Refresh
         const transitionBtn = document.getElementById('btn-stage-transition');
-        const chip = document.getElementById("c-stage-chip"); if(chip) chip.innerText = targetStage;
+        const chip = document.getElementById("c-stage-chip"); if(chip) chip.innerText = targetStage; if (typeof renderStageProgress === 'function') renderStageProgress();
         
         // 4. Conditional Generation — from the stage's checklist template
         if (generateTasks) {
@@ -13478,6 +15510,16 @@ window.saveNewClient = async function(e) {
         status: 'active'
     };
 
+    // clients.name has no unique constraint, and a name stored twice broke the onboarding view for every client
+    // (onboarding_client_facts_fix.sql). Archived clients count: their history is filed under the name.
+    const dupe = globalClientsData.find(c => normalize(c.name || '') === normalize(payload.name));
+    if (!payload.name || dupe) {
+        alert(payload.name ? `There's already a client called "${stripSlashEscapes(dupe.name)}"${dupe.status === 'archived' ? ' (archived)' : ''}. Use a different name, or open that client instead.` : 'Give the client a name.');
+        btn.innerHTML = 'Create Client Profile';
+        btn.disabled = false;
+        return;
+    }
+
     try {
         const { data, error } = await supabaseClient.from('clients').insert([payload]).select();
         if (error) throw error;
@@ -13522,6 +15564,9 @@ window.saveNewClient = async function(e) {
         await fetchAllGlobalData(globalAllowedClients);
         if(!document.getElementById('page-tasks').classList.contains('hidden')) initTasksPage();
         if(!document.getElementById('page-clients').classList.contains('hidden')) filterAdsData();
+        if (document.getElementById('page-roster') && !document.getElementById('page-roster').classList.contains('hidden')) renderRoster();
+        // Are they in our GHL? (so the onboarding-complete text can reach them). In the background, never blocking.
+        window.checkGhlContact(payload.name, null, { quiet: true });
 
     } catch (err) {
         alert("Error creating client: " + err.message);
