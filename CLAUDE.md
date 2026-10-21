@@ -2110,12 +2110,18 @@ now have **Ignore** handlers and the Google Sheets step a **Resume** one, so one
 and a replay skips rows that already exist (the write is still a plain insert, so the duplicate-key error is what gets ignored). Replaying
 an execution works with no manual deleting now. A replay re-runs the Sheets step, so the "master data" sheet can get duplicate rows
 for clients that had already written. **The alert (built 2026-10-14, `supabase/sql/daily_pull_check.sql`).** A Make handler can't hold the Vault secret, so `daily_pull_check()` runs in the
-database at 13:30 UTC (pg_cron `daily-pull-check`) and texts **Tenny only** (+1 801 709 8501, a constant in the function) through scenario #6, same
+database at 15:45 UTC (pg_cron `daily-pull-check`; it was 13:30 until 2026-10-21, see the second pull below) and texts **Tenny only** (+1 801 709 8501, a constant in the function) through scenario #6, same
 payload as `notify_task_assignee`. It flags a client Make is asked to pull that has no `daily_reports` row for yesterday but had one on at least 5
 of the 7 days before (Make writes no row for a no-spend day, so ads-off or on-and-off clients would otherwise be reported daily). `select daily_pull_check(false)`
 shows what it would say without texting. 21 PGlite checks, 9 of 10 breakages caught (the tenth is an equivalent mutant).
 The blueprint
 was re-saved without Make's cached editor metadata; the original is not in the repo.
+**Second pull (added 2026-10-21, scenario "Midas Dashboard (second pull)", id 6720819, daily 10:30 Eastern).** On 2026-10-21 the 8am
+pull "succeeded" but wrote only 2 of 7 clients for the day before: Facebook returned empty for accounts it hadn't finished reporting, with no
+error (the run used 12 operations instead of 16-18, which is how to spot it), and a replay at 11:22 Eastern filled 3Sixty and Anxiety
+Solutions. The second pull is the same flow minus the Google Sheets step (so the sheet gets no duplicate rows), with the same Ignore handlers,
+so it only adds rows that are missing: the plain insert's duplicate-key error on an existing row is ignored. **Keep the two blueprints in step**
+if the first one's modules change. It doubles Facebook calls, which matters because Meta's app rate limit has stopped the pull twice.
 **`meta-sync` is a backup, not a replacement.** It covers 6 clients and counts leads differently from the pull, and the audit reads
 `daily_reports` for everyone. Keep both running.
 

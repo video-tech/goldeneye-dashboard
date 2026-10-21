@@ -2,6 +2,13 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-21",
+      "area": "Data",
+      "title": "A second ad pull at 10:30 Eastern",
+      "what": "Facebook sometimes hasn't finished reporting an account at 8am, so that morning's pull skipped it (2 of 7 clients on Oct 21). A second pull now runs at 10:30 Eastern and adds only the rows that are missing. The 'ad pull is missing' text to Tenny now goes out at 15:45 UTC, after the second pull, so it only fires for a client that is still missing.",
+      "action": "Run in the SQL Editor: select cron.schedule('daily-pull-check', '45 15 * * *', 'select public.daily_pull_check()');"
+    },
+    {
       "date": "2026-10-20",
       "area": "Onboarding",
       "title": "Quick start only asks about a Facebook page when the client has Ads",

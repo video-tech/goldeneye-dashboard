@@ -4,8 +4,10 @@
 -- 2026-10-14 (Meta's app-level rate limit). Nobody was told; it was found by hand. Make can't send the
 -- alert itself, because the Vault secret can't go into a scenario's blueprint, so the database checks.
 --
--- WHEN: 13:30 UTC every day. The pull runs at 08:00 Eastern (12:00 UTC in summer, 13:00 in winter) and
--- takes about 3 minutes, so this is after it in both, and 2.5 hours before the 16:00 UTC morning audit.
+-- WHEN: 15:45 UTC every day (moved from 13:30 on 2026-10-21). There are now two pulls: 08:00 Eastern, and a second pull
+-- at 10:30 Eastern (14:30 UTC in summer, 15:30 in winter) that fills in accounts Facebook had not finished reporting at
+-- 8am. This runs after the second pull in both seasons (it takes about 3 minutes), and before the 16:00 UTC morning
+-- audit, so a client still missing at this point is genuinely missing.
 --
 -- WHAT COUNTS AS MISSING: a client Make is asked to pull (status not paused/archived, with an ad account
 -- and a business id) that has NO daily_reports row for yesterday, but DID have one on at least 5 of the 7
@@ -114,7 +116,7 @@ commit;
 
 -- The schedule: 13:30 UTC daily.
 do $$ begin perform cron.unschedule('daily-pull-check'); exception when others then null; end $$;
-select cron.schedule('daily-pull-check', '30 13 * * *', 'select public.daily_pull_check()');
+select cron.schedule('daily-pull-check', '45 15 * * *', 'select public.daily_pull_check()');
 
 -- See what it would say right now, without texting:
 select public.daily_pull_check(false);
