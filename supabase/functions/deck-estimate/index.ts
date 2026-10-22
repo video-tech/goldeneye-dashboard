@@ -34,11 +34,13 @@
 //   customer      {first_name, last_name, email, phone|null, address|null, city|null, postal_code|null}
 //   line_items    [{kind, description, qty, unit, rate, amount}], in display order
 //                 kind: decking | footings | railing | steps | waterproofing | demo | addon | custom |
-//                       adjustment | addon_tbd
+//                       discount | adjustment | addon_tbd
 //                 Map kind -> a QuickBooks Product/Service (3Sixty picks these; see the client plan).
 //                 "addon" is a priced add-on (soffit and gutters, underside paint). "custom" is a
 //                 line the rep named and priced; its description is their own words, and it can be
-//                 negative (a discount). "adjustment" is the only other negative line.
+//                 negative (a discount). "discount" is a named promotion ("Promotion: Spring special
+//                 (10% off)"), always negative: map it to QuickBooks' Discount item. "adjustment" is the
+//                 only other negative line.
 //                 "addon_tbd" lines are $0, "quoted at consultation".
 //                 3Sixty's own QuickBooks estimates use lump-sum lines (Deck build, Railing, Deck
 //                 Demo, Deck stairs, Discount), so the scenario may group these rather than map 1:1.
@@ -46,7 +48,9 @@
 //   total         the top of the calculator's range, which the estimate carries
 //   price_low     the bottom of the range, for the memo if wanted
 //   notes         the rep's notes from the calculator, or null
-//   summary       {total_sqft, deck_levels, material, rail_type, rail_lf, steps, addons}
+//   summary       {total_sqft, deck_levels, material, rail_type, rail_lf, steps, addons, inclusions}
+//                 inclusions: what every estimate includes (framing, posts, brackets, footings...),
+//                 "; "-separated. Put it in the estimate's customer-facing message at the bottom.
 //
 // Customer: search QuickBooks by EXACT email (filter on it; never act on a fuzzy search result,
 // see CLAUDE.md's 10-lead incident), create the customer only if none matches.

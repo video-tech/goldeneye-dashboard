@@ -9958,7 +9958,7 @@ async function buildChatSeoBriefing(clientName) {
              estimate: {
                  customer, line_items: e.line_items, total: e.price_high, price_low: e.price_low, notes: e.notes || null,
                  summary: { total_sqft: e.total_sqft, deck_levels: e.deck_levels, material: e.material, rail_type: e.rail_type,
-                            rail_lf: e.rail_lf, steps: e.steps, addons: e.addons }
+                            rail_lf: e.rail_lf, steps: e.steps, addons: e.addons, inclusions: e.inclusions }
              }
          });
          const est = r.data.estimate;

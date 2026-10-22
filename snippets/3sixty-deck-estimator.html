@@ -655,10 +655,16 @@ var CONFIG = {
     { key:"barTop",     label:"Custom bar top" }
   ],
 
-  /* How many custom line items (a name and a price the rep types) to offer.
+  /* The most custom line items (a description and a price the rep types) a rep can add, one click at a time. The request allows 80 lines in all.
      0 on every public build; build-ghl-embed.js sets it for the Golden Eye
      portal copy only.                                                    */
-  customLineItems: 3,
+  customLineItems: 20,
+
+  /* The most promotions (a name plus a dollar or percent discount) a rep can
+     add. 0 on every public build; build-ghl-embed.js sets it for the Golden
+     Eye portal copy only. A percent is taken off the total before any
+     promotion, so promotions never compound.                              */
+  promotions: 10,
 
   maxLevels: 3,
   levelNames:  ["Main deck","Second level","Third level"],
@@ -713,7 +719,7 @@ var Pricing = (function(){
     var p     = CONFIG.pricing;
     var sqft  = d.length * d.width;
     var tier  = tierAt(d.tier);
-    var screws = (d.footingOverride > 0) ? d.footingOverride : footings(sqft);
+    var screws = (d.footingOverride !== null && d.footingOverride >= 0) ? d.footingOverride : footings(sqft);   /* 0 is a real choice: existing footings reused */
     /* Same override pattern as screws: the field shows a suggestion, the
        actual state field only holds a REAL value once the customer (or a
        length/width edit) changes it. Effective value falls back to the
@@ -732,12 +738,16 @@ var Pricing = (function(){
       amount: sqft * tier.psf
     });
 
-    items.push({
-      kind:   "footings", qty: screws, unit: "ea", rate: p.footingEach,
-      label:  "Concrete footings",
-      detail: screws + " x $" + p.footingEach,
-      amount: screws * p.footingEach
-    });
+    /* No footings line at all when the count is 0, so the estimate (and the
+       QuickBooks lines built from it) never carries a $0 footings row. */
+    if(screws > 0){
+      items.push({
+        kind:   "footings", qty: screws, unit: "ea", rate: p.footingEach,
+        label:  "Concrete footings",
+        detail: screws + " x $" + p.footingEach,
+        amount: screws * p.footingEach
+      });
+    }
 
     if(d.hasRail){
       var rail = railFor(d.railType);
@@ -812,7 +822,7 @@ var Pricing = (function(){
     return typed > 0 ? typed : addonLf(d);
   }
 
-  function total(levels, custom){
+  function total(levels, custom, promos){
     var results = [], subtotal = 0, sqft = 0, anyTbd = false;
 
     for(var i=0;i<levels.length;i++){
@@ -838,12 +848,30 @@ var Pricing = (function(){
 
     var adjusted   = Math.round(subtotal * CONFIG.pricing.adjustment);
     var adjustment = adjusted - Math.round(subtotal);
-    var high       = Math.round((adjusted + extraSum) * 100) / 100;
+    /* Promotions: a rep's named discount, in dollars or a percent of the
+       total before any promotion. Never takes the estimate below $1. */
+    var preDiscount = Math.round((adjusted + extraSum) * 100) / 100;
+    var discounts = [], discountSum = 0;
+    for(var q=0;q<(promos || []).length;q++){
+      var pr = promos[q] || {};
+      var pv = parseFloat(pr.value);
+      if(!isFinite(pv) || pv <= 0) continue;
+      var isPct = pr.type === "percent";
+      var damt = isPct ? Math.round(preDiscount * Math.min(pv, 100)) / 100 : Math.round(pv * 100) / 100;
+      damt = Math.min(damt, Math.max(0, Math.round((preDiscount - discountSum - 1) * 100) / 100));
+      if(damt <= 0) continue;
+      var pn = String(pr.name || "").replace(/\s+/g, " ").trim().slice(0, 80);
+      discounts.push({ kind:"discount", qty:1, unit:"ea", rate:-damt, label: pn || "Promotion",
+                       detail: isPct ? (Math.min(pv, 100) + "% off") : "", amount:-damt });
+      discountSum += damt;
+    }
+    var high       = Math.round((preDiscount - discountSum) * 100) / 100;
     var low        = Math.round(high * (1 - CONFIG.pricing.rangeSpread));
 
     return {
       levels:     results,
       custom:     extras,
+      discounts:  discounts,
       totalSqft:  sqft,
       subtotal:   Math.round(subtotal),
       adjustment: adjustment,
@@ -872,6 +900,7 @@ var state = {
   /* Custom line items, [{name, amount}]. amount stays the text that was typed,
      so a half-typed number survives the re-render; Pricing.total() parses it. */
   custom:   [],
+  promos:   [],
   /* Latched by the honeypot. Suppresses every CRM write for the session
      while leaving the calculator fully usable. */
   blocked:  false
@@ -945,13 +974,39 @@ function renderConfig(){
   if(CONFIG.customLineItems > 0){
     html += '<div class="level"><div class="levelbody"><div class="field">';
     html +=   '<div class="flabel">Custom line items <span class="fhint">added exactly as entered &middot; negative for a discount</span></div>';
-    for(var c=0;c<CONFIG.customLineItems;c++){
+    for(var c=0;c<state.custom.length;c++){
       var ci = state.custom[c] || {};
       html += '<div class="inline" style="margin-top:6px;">';
-      html +=   '<input type="text" value="' + esc(ci.name || "") + '" placeholder="Item name" maxlength="80" style="flex:1;min-width:130px;" aria-label="Custom item ' + (c+1) + ' name" oninput="setCustom(' + c + ',\'name\',this.value)">';
+      html +=   '<input type="text" value="' + esc(ci.name || "") + '" placeholder="What is this for? (e.g. Gas)" maxlength="80" style="flex:1;min-width:130px;" aria-label="Custom item ' + (c+1) + ' description" oninput="setCustom(' + c + ',\'name\',this.value)">';
       html +=   '<span class="unit">$</span>';
       html +=   '<input type="number" value="' + esc(ci.amount == null ? "" : ci.amount) + '" step="any" style="width:96px;" aria-label="Custom item ' + (c+1) + ' price" oninput="setCustom(' + c + ',\'amount\',this.value)">';
+      html +=   '<button type="button" onclick="removeCustom(' + c + ')" aria-label="Remove custom item ' + (c+1) + '" title="Remove" style="background:none;border:0;cursor:pointer;font-size:20px;line-height:1;color:inherit;opacity:.6;padding:0 4px;">&times;</button>';
       html += '</div>';
+    }
+    if(state.custom.length < CONFIG.customLineItems){
+      html += '<button type="button" class="btn-add" style="margin-top:8px;" onclick="addCustom()">+ Add line item</button>';
+    }
+    html += '</div></div></div>';
+  }
+
+  /* Promotions: portal copy only, like the custom line items. */
+  if(CONFIG.promotions > 0){
+    html += '<div class="level"><div class="levelbody"><div class="field">';
+    html +=   '<div class="flabel">Promotions <span class="fhint">a percent is taken off the total before promotions</span></div>';
+    for(var pi=0;pi<state.promos.length;pi++){
+      var po = state.promos[pi] || {};
+      html += '<div class="inline" style="margin-top:6px;">';
+      html +=   '<input type="text" value="' + esc(po.name || "") + '" placeholder="Promotion name (e.g. Spring special)" maxlength="80" style="flex:1;min-width:130px;" aria-label="Promotion ' + (pi+1) + ' name" oninput="setPromo(' + pi + ',\'name\',this.value)">';
+      html +=   '<input type="number" value="' + esc(po.value == null ? "" : po.value) + '" step="any" min="0" style="width:84px;" aria-label="Promotion ' + (pi+1) + ' discount" oninput="setPromo(' + pi + ',\'value\',this.value)">';
+      html +=   '<select aria-label="Promotion ' + (pi+1) + ' type" onchange="setPromo(' + pi + ',\'type\',this.value)">';
+      html +=     '<option value="percent"' + (po.type === "dollar" ? "" : " selected") + '>% off</option>';
+      html +=     '<option value="dollar"' + (po.type === "dollar" ? " selected" : "") + '>$ off</option>';
+      html +=   '</select>';
+      html +=   '<button type="button" onclick="removePromo(' + pi + ')" aria-label="Remove promotion ' + (pi+1) + '" title="Remove" style="background:none;border:0;cursor:pointer;font-size:20px;line-height:1;color:inherit;opacity:.6;padding:0 4px;">&times;</button>';
+      html += '</div>';
+    }
+    if(state.promos.length < CONFIG.promotions){
+      html += '<button type="button" class="btn-add" style="margin-top:8px;" onclick="addPromo()">+ Add promotion</button>';
     }
     html += '</div></div></div>';
   }
@@ -975,7 +1030,7 @@ function renderConfig(){
 
 function renderLevel(n, d){
   var sqft = d.length * d.width;
-  var screws = d.footingOverride > 0 ? d.footingOverride : Pricing.footings(sqft);
+  var screws = (d.footingOverride !== null && d.footingOverride >= 0) ? d.footingOverride : Pricing.footings(sqft);
   var suggestedRailLf = Pricing.railLf(d.length, d.width);
   var railLf = d.railLfOverride > 0 ? d.railLfOverride : suggestedRailLf;
   var stepCount = d.stepOverride > 0 ? d.stepOverride : CONFIG.pricing.standardSteps;
@@ -1014,9 +1069,9 @@ function renderLevel(n, d){
 
     /* footings */
     h += '<div class="field">';
-    h +=   '<div class="flabel">Concrete footings <span class="fhint">suggested: ' + Pricing.footings(sqft) + '</span></div>';
+    h +=   '<div class="flabel">Concrete footings <span class="fhint">suggested: ' + Pricing.footings(sqft) + ' &middot; 0 if reusing existing</span></div>';
     h +=   '<div class="inline">';
-    h +=     '<input type="number" value="' + screws + '" min="1" max="40" aria-label="Number of concrete footings" oninput="setField(' + n + ',\'footingOverride\',+this.value)">';
+    h +=     '<input type="number" value="' + screws + '" min="0" max="40" aria-label="Number of concrete footings" oninput="setField(' + n + ',\'footingOverride\',+this.value)">';
     h +=     '<span class="unit">footings &middot; $' + CONFIG.pricing.footingEach + ' each</span>';
     h +=   '</div>';
     h += '</div>';
@@ -1132,7 +1187,7 @@ function yesNo(n, key, val){
 /* ---------- estimate output ---------- */
 
 function renderOut(){
-  var t = Pricing.total(state.levels.slice(0, state.count), state.custom);
+  var t = Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos);
   var b = CONFIG.business;
   var showReal = state.unlocked;
   var h = "";
@@ -1201,6 +1256,10 @@ function renderOut(){
     h += '<tr><td>' + esc(t.custom[cx].label) + '</td><td class="num detail">custom</td>' +
          '<td class="num">' + (t.custom[cx].amount < 0 ? "&minus;" : "") + money(Math.abs(t.custom[cx].amount)) + '</td></tr>';
   }
+  for(var dx=0;dx<t.discounts.length;dx++){
+    h += '<tr class="rowadj"><td>' + esc(t.discounts[dx].label) + '</td><td class="num detail">' + esc(t.discounts[dx].detail || "promotion") + '</td>' +
+         '<td class="num">&minus;' + money(Math.abs(t.discounts[dx].amount)) + '</td></tr>';
+  }
   h += '<tr class="rowtotal"><td>Your estimate</td><td></td><td class="num">' +
        money(t.low) + ' &ndash; ' + money(t.high) + '</td></tr>';
   h += '</tbody></table></div>';
@@ -1209,6 +1268,9 @@ function renderOut(){
        '% under the adjusted total, covering normal variation in site conditions. ' +
        'Based on real 3Sixty Industries jobs, ' + new Date().getFullYear() +
        '. Final price confirmed at your free on-site design consultation.</p>';
+  h += '<p class="note" style="margin-bottom:2px;"><b>Included in every estimate:</b></p><ul class="note" style="margin:0 0 8px 18px;padding:0;">';
+  inclusionsFor(t).forEach(function(x){ h += '<li>' + esc(x) + '</li>'; });
+  h += '</ul>';
   h += '<p class="note"><b>Not included:</b> shading structures and concrete. ' +
        'Items marked TBD are quoted on site.</p>';
   h += '</div></div>';
@@ -1260,6 +1322,55 @@ function setAddonQty(n, key, value){
 function setCustom(i, key, value){
   if(!state.custom[i]) state.custom[i] = { name:"", amount:"" };
   state.custom[i][key] = value;
+  render();
+}
+
+function setPromo(i, key, value){
+  if(!state.promos[i]) state.promos[i] = { name:"", type:"percent", value:"" };
+  state.promos[i][key] = value;
+  render();
+}
+
+function addPromo(){
+  if(state.promos.length >= CONFIG.promotions) return;
+  state.promos.push({ name:"", type:"percent", value:"" });
+  render();
+}
+
+function removePromo(i){
+  state.promos.splice(i, 1);
+  render();
+}
+
+/* What every estimate already includes, from 3Sixty's own estimates (ten of them:
+   framing, posts, brackets, joist tape and the picture frame border are on
+   nearly all). Footings and stair stringers follow what was entered. */
+function inclusionsFor(t){
+  var list = [
+    "2x10 Douglas fir framing",
+    "6x6 posts",
+    "Simpson hardware brackets",
+    "Joist tape on the framing",
+    "Picture frame border",
+    "Decking and fascia in your chosen material"
+  ];
+  var lv = state.levels.slice(0, state.count), steps = false, feet = 0;
+  for(var i=0;i<lv.length;i++){ if(lv[i].hasSteps) steps = true; }
+  for(var j=0;j<t.levels.length;j++) feet += t.levels[j].screws;
+  if(steps) list.push("Stairs built with 2x12 Douglas fir stringers");
+  list.push(feet > 0 ? "Concrete footings (" + feet + ")"
+    : "Existing footings reused. If they cannot safely be reused once construction begins, new footings are added by change order.");
+  return list;
+}
+
+function addCustom(){
+  if(state.custom.length >= CONFIG.customLineItems) return;
+  state.custom.push({ name:"", amount:"" });
+  render();
+}
+
+function removeCustom(i){
+  state.custom.splice(i, 1);
   render();
 }
 
@@ -1340,6 +1451,12 @@ function buildLineItems(t){
     lines.push({ kind:"custom", description:ce.label, qty:1, unit:"ea", rate:ce.amount, amount:ce.amount });
   }
 
+  for(var dl=0;dl<t.discounts.length;dl++){
+    var de = t.discounts[dl];
+    sum += de.amount;
+    lines.push({ kind:"discount", description:"Promotion: " + de.label + (de.detail ? " (" + de.detail + ")" : ""), qty:1, unit:"ea", rate:de.amount, amount:de.amount });
+  }
+
   var adj = cents(t.high - sum);
   if(adj !== 0){
     lines.push({ kind:"adjustment", description:"Estimate adjustment", qty:1, unit:"ea", rate:adj, amount:adj });
@@ -1361,7 +1478,7 @@ function buildLineItems(t){
 /* Flatten the whole configuration into the flat key/value shape both a GHL
    form prefill and a GHL inbound webhook expect. */
 function buildPayload(){
-  var t = Pricing.total(state.levels.slice(0, state.count), state.custom);
+  var t = Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos);
   var materials = [], rails = [], steps = 0, railLf = 0, addons = {}, breakdown = [];
 
   for(var i=0;i<t.levels.length;i++){
@@ -1553,7 +1670,7 @@ function closeGate(){
 }
 
 function gateHeader(){
-  var t = Pricing.total(state.levels.slice(0, state.count), state.custom);
+  var t = Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos);
   var h = "";
   h += '<div class="g-brand">' + esc(CONFIG.business.name) + '</div>';
   h += '<div class="g-head" id="gatehead">Your <em>free</em> deck cost estimate</div>';
@@ -1778,7 +1895,8 @@ function notifyEstimate(){
       addons:      p.addons,
       price_low:   p.price_low,
       price_high:  p.price_high,
-      notes:       p.notes
+      notes:       p.notes,
+      inclusions:  inclusionsFor(Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos)).join("; ")
     }}, "*");
   }catch(e){ if(window.console) console.warn("deck estimate post failed:", e); }
 }

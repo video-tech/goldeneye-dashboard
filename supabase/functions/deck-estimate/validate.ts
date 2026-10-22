@@ -13,10 +13,11 @@
 // consultation, always $0; "custom" is a line a rep named and priced in the portal calculator.
 export const LINE_KINDS = [
     "decking", "footings", "railing", "steps", "waterproofing", "demo", "addon", "custom",
-    "adjustment", "addon_tbd",
+    "discount", "adjustment", "addon_tbd",
 ] as const;
-// The only kinds allowed below zero: the calculator's own adjustment, and a rep's discount.
-const MAY_BE_NEGATIVE = ["adjustment", "custom"];
+// The only kinds allowed below zero: the calculator's own adjustment, a rep's negative custom
+// line, and a named promotion ("discount", always negative).
+const MAY_BE_NEGATIVE = ["adjustment", "custom", "discount"];
 const UNITS = ["sqft", "ea", "lf", "job"];
 
 export type LineItem = {
@@ -28,7 +29,7 @@ export type Customer = {
 };
 export type Summary = {
     total_sqft?: number; deck_levels?: number; material?: string; rail_type?: string;
-    rail_lf?: number; steps?: number; addons?: string;
+    rail_lf?: number; steps?: number; addons?: string; inclusions?: string;
 };
 export type EstimateInput = {
     customer: Customer; line_items: LineItem[]; total: number; price_low: number | null;
@@ -134,6 +135,7 @@ export function validateEstimate(input: unknown): Validated {
     for (const k of ["material", "rail_type", "addons"] as const) {
         const v = clean(s[k]); if (v) summary[k] = v.slice(0, 600);
     }
+    { const v = clean(s.inclusions); if (v) summary.inclusions = v.slice(0, 1500); }
 
     if (errors.length) return { ok: false, errors };
     return {
