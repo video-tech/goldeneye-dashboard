@@ -24,16 +24,17 @@
 
 select cron.schedule(
     'morning-audit',
-    -- 16:00 UTC = 10:00 MDT in summer, 09:00 MST in winter.
+    -- 17:05 UTC = 11:05 MDT in summer, 10:05 MST in winter (16:00 until 2026-10-22).
     --
     -- pg_cron runs in UTC and does not follow daylight saving, so the local time shifts
-    -- an hour twice a year — the same drift already noted on the check-in reminders.
-    -- 16:00 was chosen so BOTH sides of that drift stay clear of the 08:00 ads pull.
-    -- 15:00 UTC would be 08:00 MST in winter, landing right on top of it.
+    -- an hour twice a year. The audit must come after the second ads pull (Make, 11:45
+    -- Eastern: 15:45 UTC in summer, 16:45 in winter) and the 17:00 UTC pull check, in both
+    -- seasons: Facebook sometimes has no numbers for an account at 10:30 Eastern, and an
+    -- audit read before they land reports a healthy client as stale or stopped.
     --
     -- Mon-Fri only. Nobody reads this on a Saturday, and Monday's 28-day baseline
     -- covers the weekend regardless.
-    '0 16 * * 1-5',
+    '5 17 * * 1-5',
     $$
     select net.http_post(
         url     := 'https://hugnttsqucetldllfgoi.supabase.co/functions/v1/morning-audit',

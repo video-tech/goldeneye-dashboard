@@ -2,6 +2,13 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-22",
+      "area": "Data",
+      "title": "The second ad pull and the morning audit run later",
+      "what": "Facebook was still reporting some accounts at 10:30 Eastern, so the second pull missed 3Sixty and Alta Vista on Oct 22 and the audit read them as missing. The second pull now runs at 11:45 Eastern, the 'ad pull is missing' text to Tenny at 17:00 UTC (11:00 Mountain), and the morning audit at 17:05 UTC (11:05 Mountain, 10:05 in winter), so both look only after the second pull.",
+      "action": "Run in the SQL Editor: select cron.alter_job((select jobid from cron.job where jobname = 'daily-pull-check'), schedule := '0 17 * * *'); select cron.alter_job((select jobid from cron.job where jobname = 'morning-audit'), schedule := '5 17 * * 1-5');"
+    },
+    {
       "date": "2026-10-21",
       "area": "Data",
       "title": "A second ad pull at 10:30 Eastern",
