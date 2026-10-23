@@ -78,7 +78,7 @@ function world({ clients = [], updateError = null, insertError = null } = {}) {
     const d = w.document;
     d.getElementById('tags').innerHTML = `<div class="row">${w.conditionEditorHtml({ service_keys: [], website_statuses: [], fact_conditions: { base_package: ['yes'], crm_choice: ['yes'] } })}</div>`;
     const chips = [...d.querySelectorAll('.ob-chip-fact[data-fact="base_package"]')];
-    ok(chips.map((c) => c.textContent.trim()).join('|') === 'Base|SEO only', 'the editor offers Base and SEO only chips: ' + chips.map((c) => c.textContent.trim()));
+    ok(chips.map((c) => c.textContent.trim()).join('|') === 'Base|No Base', 'the editor offers Base and No Base chips: ' + chips.map((c) => c.textContent.trim()));
     ok(chips.find((c) => c.dataset.key === 'yes').getAttribute('aria-pressed') === 'true', 'a step tagged Base shows its chip pressed');
     const read = w.readConditions(d.querySelector('.row'));
     ok(JSON.stringify(read.fact_conditions) === JSON.stringify({ crm_choice: ['yes'], base_package: ['yes'] }), 'saving keeps the Package tag next to the others: ' + JSON.stringify(read.fact_conditions));
@@ -125,7 +125,22 @@ const ev = { preventDefault() {} };
     w.document.getElementById('edit-client-base-package').value = 'no';
     seoBox(w).checked = false;
     await w.saveClientEdits(ev);
-    ok(!w.__calls.some((c) => c.op === 'update') && /SEO Growth ticked/.test(w.__alerts.join()), 'SEO only without SEO ticked is refused before anything saves');
+    ok(!w.__calls.some((c) => c.op === 'update') && /SEO Growth ticked/.test(w.__alerts.join()), 'No Base without Ads or SEO ticked is refused before anything saves');
+}
+{
+    // Ads only, no Base (2026-10-23: Tattoo Ink Utah)
+    // Acme already runs Ads and has no SEO, so the save changes the package and nothing else
+    const w = world(), d = w.document;
+    w.globalClientServices.splice(0, w.globalClientServices.length, { client_name: 'Acme', service_key: 'ads', status: 'active' });
+    d.getElementById('edit-client-id').value = '7';
+    d.getElementById('edit-client-original-name').value = 'Acme';
+    d.getElementById('edit-client-name').value = 'Acme';
+    d.getElementById('edit-client-services').innerHTML = w.packageRowsHtml('Acme', 'edit');
+    d.getElementById('edit-client-base-package').value = 'no';
+    ok(!seoBox(w).checked && d.querySelector('#edit-client-services .pkg-row[data-key="ads"] .pkg-box').checked, 'the Ads-only client shows Ads ticked and SEO not');
+    await w.saveClientEdits(ev);
+    const up = w.__calls.find((c) => c.op === 'update' && c.table === 'clients');
+    ok(up && up.patch.base_package === 'no' && !w.__alerts.length, 'Edit Client saves No Base with Ads ticked and SEO not: ' + w.__alerts.join());
 }
 {
     // Column not there yet: Base saves without it, SEO only is refused rather than saved as Base
@@ -167,7 +182,16 @@ function addWorld(opts) {
     const w = addWorld();
     w.document.getElementById('new-client-base-package').value = 'no';
     await w.saveNewClient(ev);
-    ok(!w.__calls.some((c) => c.op === 'insert') && /SEO Growth ticked/.test(w.__alerts.join()), 'Add Client refuses SEO only without SEO ticked');
+    ok(!w.__calls.some((c) => c.op === 'insert') && /SEO Growth ticked/.test(w.__alerts.join()), 'Add Client refuses No Base without Ads or SEO ticked');
+}
+{
+    const w = addWorld();
+    w.document.getElementById('new-client-services').innerHTML = '<input type="checkbox" class="client-service-box" value="ads"><input type="checkbox" class="client-service-box" value="seo">';
+    w.document.querySelector('#new-client-services .client-service-box[value="ads"]').checked = true;
+    w.document.getElementById('new-client-base-package').value = 'no';
+    await w.saveNewClient(ev);
+    const ins = w.__calls.find((c) => c.op === 'insert');
+    ok(ins && ins.rows[0].base_package === 'no', 'Add Client saves No Base with only Ads ticked: ' + w.__alerts.join());
 }
 {
     const w = addWorld({ insertError: { message: 'column "base_package" of relation "clients" does not exist' } });
@@ -190,7 +214,7 @@ function addWorld(opts) {
 }
 
 // ---- The Roster profile line ----
-ok(/\['Package', c\.base_package === 'no' \? 'SEO only \(no GHL\)' : 'Base \+ add-ons'\]/.test(app), 'the Roster profile shows the package');
+ok(/\['Package', c\.base_package === 'no' \? 'No Base \(no GHL\)' : 'Base \+ add-ons'\]/.test(app), 'the Roster profile shows the package');
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

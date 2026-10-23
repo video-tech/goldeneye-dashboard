@@ -573,7 +573,10 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
   (`ghl-lead-webhook`), so the "Leads —" SEO setup step is tagged Base and their Leads from Google tile stays empty.
 - **ghl-account refuses them** ("SEO only: no GHL account"), in the sweep and in an admin retry. Its clients query is
   `select("*")` so it works before the SQL. **Deploy it with the SQL**, and set nobody to SEO only until both are done.
-- **Set by an admin only:** the Package select in Add Client and Edit Client, which require SEO Growth ticked. Clients can't change it:
+- **Also for Ads-only clients (2026-10-23):** the package is now labelled **No Base** and needs Ads management **or** SEO Growth
+  ticked, for a client on Ads with their own GHL and website (first: Tattoo Ink Utah). Nothing in the database changed: the rule
+  was only in app.js. `clientIsSeoOnly()` and the SQL file keep their names.
+- **Set by an admin only:** the Package select in Add Client and Edit Client, which require Ads or SEO ticked. Clients can't change it:
   `set_client_onboarding_facts()` ignores the key and only admins write `clients`. Before the SQL, a Base save retries without the
   column and an SEO-only save is refused with the file to run, never saved as Base. The Roster profile shows the package.
 - **Order:** app.js first. The Templates editor saves only the tags it has chips for (`readConditions`), so a Templates save with an

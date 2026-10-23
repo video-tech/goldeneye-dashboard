@@ -2,6 +2,12 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-23",
+      "area": "Onboarding",
+      "title": "No Base works for Ads clients too",
+      "what": "The package that skips Base (no GHL account, texting, free website or automations) was only for SEO clients. It's now called No Base and works with Ads management as well, for an Ads client who already has their own GHL and website."
+    },
+    {
       "date": "2026-10-22",
       "area": "Data",
       "title": "The second ad pull and the morning audit run later",

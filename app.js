@@ -2158,6 +2158,7 @@ function obAnswersFor(clientName, stepId) {
 }
 
 // SEO only (clients.base_package = 'no', seo_only_package.sql): no GHL account, so nothing GHL is offered.
+// Since 2026-10-23 the package is called No Base and also covers Ads-only clients; the name stayed.
 function clientIsSeoOnly(clientName) {
     const want = normalize(clientName || '');
     const row = portalClientRows.find(c => normalize(c.name) === want) || globalClientsData.find(c => normalize(c.name) === want);
@@ -12281,7 +12282,7 @@ const FACT_LABELS = {
     crm_choice: { label: 'CRM', values: { no: 'No CRM', yes: 'Wants leads sent to one' } },
     // seo_only_package.sql. Set by an admin in Add / Edit Client, never by a question. Unset = Base.
     // Tag a step "Base" when it's GHL, texting or the free website, so SEO-only clients skip it.
-    base_package: { label: 'Package', values: { yes: 'Base', no: 'SEO only' } }
+    base_package: { label: 'Package', values: { yes: 'Base', no: 'No Base' } }
 };
 // False until onboarding_facts.sql has run, so the editor does not offer tags it could not save
 function factsSupported() {
@@ -14750,7 +14751,7 @@ function rosterBusinessView(c, prof) {
         ['Website', site],
         ['Address', prof?.address ? rosterEsc(prof.address).replace(/\n/g, '<br>') : '—'],
         ['Industry', rosterEsc(c.industry || '—')],
-        ['Package', c.base_package === 'no' ? 'SEO only (no GHL)' : 'Base + add-ons'],
+        ['Package', c.base_package === 'no' ? 'No Base (no GHL)' : 'Base + add-ons'],
         ['Website setup', siteStatus],
         ['Client since', rosterDate(c.client_since || c.created_at)],
     ]) + (clientProfilesReady ? '' : `<p class="text-[11px] mt-3" style="color:var(--t3);">Phone, website, address and notes can be saved once supabase/sql/client_directory.sql has been run.</p>`);
@@ -15209,8 +15210,9 @@ window.saveClientEdits = async function(e) {
 
     const servicePlan = planPackageRows(document.getElementById('edit-client-services'));
     const basePackage = document.getElementById('edit-client-base-package')?.value === 'no' ? 'no' : null;
-    if (basePackage === 'no' && !document.querySelector('#edit-client-services .pkg-row[data-key="seo"] .pkg-box:checked')) {
-        alert('SEO only needs SEO Growth ticked under Add-ons.'); return;
+    // No Base (base_package = 'no') is a client on Ads or SEO alone: they need one of the two (2026-10-23; it was SEO only)
+    if (basePackage === 'no' && !document.querySelector('#edit-client-services .pkg-row[data-key="seo"] .pkg-box:checked, #edit-client-services .pkg-row[data-key="ads"] .pkg-box:checked')) {
+        alert('No Base needs Ads management or SEO Growth ticked under Add-ons.'); return;
     }
     if (servicePlan.end.length && !confirm(`End ${servicePlan.end.map(serviceName).join(', ')} for ${newName}?\n\nIts onboarding steps stop applying. Their history and completed steps are kept.`)) return;
 
@@ -15277,7 +15279,7 @@ window.saveClientEdits = async function(e) {
         let { error } = await supabaseClient.from('clients').update(payload).eq('id', id);
         // Before seo_only_package.sql: save the rest, but never quietly drop an SEO-only choice
         if (error && /base_package/.test(`${error.message || ''} ${error.details || ''}`)) {
-            if (payload.base_package === 'no') throw new Error("SEO only can't be saved until supabase/sql/seo_only_package.sql has been run.");
+            if (payload.base_package === 'no') throw new Error("No Base can't be saved until supabase/sql/seo_only_package.sql has been run.");
             delete payload.base_package;
             ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
         }
@@ -15572,8 +15574,8 @@ window.saveNewClient = async function(e) {
     // clients.name has no unique constraint, and a name stored twice broke the onboarding view for every client
     // (onboarding_client_facts_fix.sql). Archived clients count: their history is filed under the name.
     const dupe = globalClientsData.find(c => normalize(c.name || '') === normalize(payload.name));
-    if (payload.base_package === 'no' && !document.querySelector('#new-client-services .client-service-box[value="seo"]:checked')) {
-        alert('SEO only needs SEO Growth ticked under Add-ons.');
+    if (payload.base_package === 'no' && !document.querySelector('#new-client-services .client-service-box[value="seo"]:checked, #new-client-services .client-service-box[value="ads"]:checked')) {
+        alert('No Base needs Ads management or SEO Growth ticked under Add-ons.');
         btn.innerHTML = 'Create Client Profile';
         btn.disabled = false;
         return;
@@ -15588,7 +15590,7 @@ window.saveNewClient = async function(e) {
     try {
         const { data, error } = await supabaseClient.from('clients').insert([payload]).select();
         if (error && /base_package/.test(`${error.message || ''} ${error.details || ''}`)) {
-            throw new Error("SEO only can't be saved until supabase/sql/seo_only_package.sql has been run. The client wasn't created.");
+            throw new Error("No Base can't be saved until supabase/sql/seo_only_package.sql has been run. The client wasn't created.");
         }
         if (error) throw error;
 
