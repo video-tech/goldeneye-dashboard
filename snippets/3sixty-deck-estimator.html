@@ -715,17 +715,30 @@ var Pricing = (function(){
 
   /* Priced line items for one level. Returns real numbers only; TBD add-ons
      are listed separately so they can never quietly enter a subtotal. */
+  /* An override box holds exactly what was typed (a string, possibly empty) so
+     the field can be cleared and retyped. ovr() is the number that prices: the
+     typed value when it is a usable number (0 only where allowZero), otherwise
+     the suggestion. shown() is what the box displays: the typed text, or the
+     suggestion until the first edit. */
+  function ovr(v, fallback, allowZero){
+    if(v === null || v === undefined) return fallback;
+    var n = parseFloat(v);
+    if(!isFinite(n)) return fallback;
+    return (n > 0 || (allowZero && n === 0)) ? n : fallback;
+  }
+  function shown(v, fallback){ return (v === null || v === undefined) ? fallback : v; }
+
   function level(d){
     var p     = CONFIG.pricing;
     var sqft  = d.length * d.width;
     var tier  = tierAt(d.tier);
-    var screws = (d.footingOverride !== null && d.footingOverride >= 0) ? d.footingOverride : footings(sqft);   /* 0 is a real choice: existing footings reused */
+    var screws = ovr(d.footingOverride, footings(sqft), true);   /* 0 is a real choice: existing footings reused */
     /* Same override pattern as screws: the field shows a suggestion, the
        actual state field only holds a REAL value once the customer (or a
        length/width edit) changes it. Effective value falls back to the
        suggestion so pricing is always driven by one of the two. */
-    var railLf = (d.railLfOverride > 0) ? d.railLfOverride : suggestedRailLf(d.length, d.width);
-    var stepCount = (d.stepOverride > 0) ? d.stepOverride : p.standardSteps;
+    var railLf = ovr(d.railLfOverride, suggestedRailLf(d.length, d.width));
+    var stepCount = ovr(d.stepOverride, p.standardSteps);
     var items = [];
 
     /* kind is the stable key a QuickBooks item gets mapped from. label
@@ -760,7 +773,7 @@ var Pricing = (function(){
     }
 
     if(d.hasSteps){
-      var stairW   = d.stairWidth > 0 ? d.stairWidth : p.stairBaseWidth;
+      var stairW   = ovr(d.stairWidth, p.stairBaseWidth);
       var perStair = tier.stair + Math.max(0, stairW - p.stairBaseWidth) * tier.stairLf;
       items.push({
         kind:   "steps", qty: stepCount, unit: "ea", rate: perStair,
@@ -882,7 +895,7 @@ var Pricing = (function(){
     };
   }
 
-  return { footings:footings, railLf:suggestedRailLf, addonLf:addonLf, addonQty:addonQty, tierAt:tierAt, railFor:railFor, level:level, total:total };
+  return { ovr:ovr, shown:shown, footings:footings, railLf:suggestedRailLf, addonLf:addonLf, addonQty:addonQty, tierAt:tierAt, railFor:railFor, level:level, total:total };
 })();
 </script>
 
@@ -1030,10 +1043,10 @@ function renderConfig(){
 
 function renderLevel(n, d){
   var sqft = d.length * d.width;
-  var screws = (d.footingOverride !== null && d.footingOverride >= 0) ? d.footingOverride : Pricing.footings(sqft);
+  var screws = Pricing.shown(d.footingOverride, Pricing.footings(sqft));
   var suggestedRailLf = Pricing.railLf(d.length, d.width);
-  var railLf = d.railLfOverride > 0 ? d.railLfOverride : suggestedRailLf;
-  var stepCount = d.stepOverride > 0 ? d.stepOverride : CONFIG.pricing.standardSteps;
+  var railLf = Pricing.shown(d.railLfOverride, suggestedRailLf);
+  var stepCount = Pricing.shown(d.stepOverride, CONFIG.pricing.standardSteps);
   var open = d.open;
   var h = "";
 
@@ -1071,7 +1084,7 @@ function renderLevel(n, d){
     h += '<div class="field">';
     h +=   '<div class="flabel">Concrete footings <span class="fhint">suggested: ' + Pricing.footings(sqft) + ' &middot; 0 if reusing existing</span></div>';
     h +=   '<div class="inline">';
-    h +=     '<input type="number" value="' + screws + '" min="0" max="40" aria-label="Number of concrete footings" oninput="setField(' + n + ',\'footingOverride\',+this.value)">';
+    h +=     '<input type="number" value="' + screws + '" min="0" max="40" aria-label="Number of concrete footings" oninput="setField(' + n + ',\'footingOverride\',this.value)">';
     h +=     '<span class="unit">footings &middot; $' + CONFIG.pricing.footingEach + ' each</span>';
     h +=   '</div>';
     h += '</div>';
@@ -1107,7 +1120,7 @@ function renderLevel(n, d){
       }
       h += '</div>';
       h += '<div class="inline" style="margin-top:7px;">';
-      h +=   '<input type="number" value="' + railLf + '" min="0" max="600" aria-label="Railing linear feet" oninput="setField(' + n + ',\'railLfOverride\',+this.value)">';
+      h +=   '<input type="number" value="' + railLf + '" min="0" max="600" aria-label="Railing linear feet" oninput="setField(' + n + ',\'railLfOverride\',this.value)">';
       h +=   '<span class="unit">linear feet <span class="fhint">suggested: ' + suggestedRailLf + '</span></span>';
       h += '</div>';
       h += '<label class="addon" style="margin-top:9px;"><input type="checkbox"' + (d.cocktailRail ? " checked" : "") +
@@ -1122,9 +1135,9 @@ function renderLevel(n, d){
     h +=   yesNo(n, "hasSteps", d.hasSteps);
     if(d.hasSteps){
       h += '<div class="inline" style="margin-top:6px;">';
-      h +=   '<input type="number" value="' + stepCount + '" min="1" max="40" aria-label="Number of steps" oninput="setField(' + n + ',\'stepOverride\',+this.value)">';
+      h +=   '<input type="number" value="' + stepCount + '" min="1" max="40" aria-label="Number of steps" oninput="setField(' + n + ',\'stepOverride\',this.value)">';
       h +=   '<span class="unit">steps</span>';
-      h +=   '<input type="number" value="' + (d.stairWidth > 0 ? d.stairWidth : baseW) + '" min="3" max="20" step="0.5" aria-label="Stair width in feet" oninput="setField(' + n + ',\'stairWidth\',+this.value)">';
+      h +=   '<input type="number" value="' + Pricing.shown(d.stairWidth, baseW) + '" min="3" max="20" step="0.5" aria-label="Stair width in feet" oninput="setField(' + n + ',\'stairWidth\',this.value)">';
       h +=   '<span class="unit">ft wide <span class="fhint">+$' + tierNow.stairLf + ' a stair per foot over ' + baseW + '</span></span>';
       h += '</div>';
     }
@@ -1344,7 +1357,7 @@ function removePromo(i){
 
 /* What every estimate already includes, from 3Sixty's own estimates (ten of them:
    framing, posts, brackets, joist tape and the picture frame border are on
-   nearly all). Footings and stair stringers follow what was entered. */
+   nearly all). Stair stringers follow what was entered; footings are priced on their own line, never listed here. */
 function inclusionsFor(t){
   var list = [
     "2x10 Douglas fir framing",
@@ -1354,12 +1367,9 @@ function inclusionsFor(t){
     "Picture frame border",
     "Decking and fascia in your chosen material"
   ];
-  var lv = state.levels.slice(0, state.count), steps = false, feet = 0;
+  var lv = state.levels.slice(0, state.count), steps = false;
   for(var i=0;i<lv.length;i++){ if(lv[i].hasSteps) steps = true; }
-  for(var j=0;j<t.levels.length;j++) feet += t.levels[j].screws;
   if(steps) list.push("Stairs built with 2x12 Douglas fir stringers");
-  list.push(feet > 0 ? "Concrete footings (" + feet + ")"
-    : "Existing footings reused. If they cannot safely be reused once construction begins, new footings are added by change order.");
   return list;
 }
 
