@@ -10,6 +10,8 @@
 //        For an account Meta refuses big requests for: straight to 7-day pieces (no doomed first
 //        attempt), leaving out the newest 42 days because they are already loaded.
 //   { mode: "check", client? }           Can the token read each client's ad account?
+//   { mode: "fill" }                     Yesterday's ad rows for accounts that spent but have none yet.
+//                                        pg_cron, every 15 min in the morning (morning_audit_wait_for_data.sql).
 //
 // Who may call: the x-cron-secret header (pg_cron, or a one-off call from the SQL Editor), or a
 // signed-in admin. Refused calls are logged as "meta-sync REFUSED: …".
@@ -23,7 +25,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { adminCheck, cronCheck } from "../_shared/admin-auth.ts";
 import {
     parseInsights, parseActivities, isRateLimit, scrubToken, windowEndingYesterday,
-    pickAccounts, windowsInChunks, type AdDayRow, type ActivityRow,
+    pickAccounts, windowsInChunks, accountsToFill, type AdDayRow, type ActivityRow,
 } from "./parse.ts";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
@@ -204,6 +206,54 @@ Deno.serve(async (req: Request) => {
                 }
             }
             return Response.json({ ok: out.every((o) => o.ok), accounts: out });
+        }
+
+        // Fill (2026-10-23): pg_cron calls this every 15 minutes in the morning, after the full daily sync,
+        // so yesterday's ad rows are in before the morning audit lists the ads to turn off. Only accounts
+        // that spent yesterday by the daily pull and still have no ad rows for it are asked, on a 2-day
+        // window; when nobody is missing it makes no call to Meta at all.
+        if (mode === "fill") {
+            const yesterday = windowEndingYesterday(new Date(), 1).until;
+            const spentAccts: string[] = [], haveAccts: string[] = [];
+            const [accounts, dailyRes, stateRes] = await Promise.all([
+                loadAccounts(db),
+                // `*`: daily_reports carries a quoted "Leads" column, so a column list can 400
+                db.from("daily_reports").select("*").eq("date", yesterday),
+                db.from("meta_sync_state").select("client_name, last_window"),
+            ]);
+            if (dailyRes.error) throw new Error(`daily_reports: ${dailyRes.error.message}`);
+            if (stateRes.error) throw new Error(`meta_sync_state: ${stateRes.error.message}`);
+            for (const r of dailyRes.data ?? []) {
+                const row: Record<string, unknown> = {};
+                for (const k in r) row[k.toLowerCase().trim()] = (r as Record<string, unknown>)[k];
+                if (parseFloat(String(row.spend ?? "")) > 0) spentAccts.push(String(row.ad_account_id ?? ""));
+            }
+            for (let from = 0; ; from += 1000) {
+                const { data, error } = await db.from("meta_ad_daily").select("ad_account_id").eq("date", yesterday).range(from, from + 999);
+                if (error) throw new Error(`meta_ad_daily: ${error.message}`);
+                haveAccts.push(...(data ?? []).map((r: any) => String(r.ad_account_id)));
+                if (!data || data.length < 1000) break;
+            }
+            const connectedClients = (stateRes.data ?? []).filter((s: any) => String(s.last_window ?? "").includes("..")).map((s: any) => s.client_name);
+            const todo = accountsToFill(accounts, { spentAccts, haveAccts, connectedClients });
+            const started = Date.now();
+            const results: any[] = [];
+            for (const a of todo) {
+                if (Date.now() - started > TIME_BUDGET_MS) { results.push({ client: a.client_name, skipped: "out of time this run" }); continue; }
+                try {
+                    const r: any = await syncAccount(db, token, a, 2, { deadline: started + REQUEST_DEADLINE_MS });
+                    // last_window is left alone: it records the full daily sync's window
+                    await recordState(db, a.client_name, { ad_account_id: a.ad_account_id, last_run_at: new Date().toISOString(), last_error: null });
+                    results.push({ client: a.client_name, ...r });
+                } catch (e) {
+                    const msg = scrubToken(String((e as Error).message));
+                    await recordState(db, a.client_name, { ad_account_id: a.ad_account_id, last_run_at: new Date().toISOString(), last_error: msg });
+                    results.push({ client: a.client_name, error: msg });
+                    if (e instanceof GraphError && isRateLimit(e)) { results.push({ stopped: "Meta rate limit" }); break; }
+                }
+            }
+            if (todo.length) console.log(`meta-sync fill by ${caller} for ${yesterday}: ${JSON.stringify(results).slice(0, 2000)}`);
+            return Response.json({ mode, yesterday, missing: todo.map((a) => a.client_name), results });
         }
 
         const days = mode === "backfill"

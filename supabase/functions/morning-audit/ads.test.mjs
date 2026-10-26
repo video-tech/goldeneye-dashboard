@@ -128,4 +128,48 @@ const md = buildAuditContext([{ ...stale('Off Co'), verdict: 'ADS_OFF', notes: [
 ok(/## ADS OFF — Meta confirms no spend/.test(md) && /Off Co — Meta shows no spend since 2026-09-29/.test(md), 'the audit context has an ADS OFF section with the note');
 ok(md.indexOf('## ADS OFF') < md.indexOf('## DATA STALE') && /Broken Co/.test(md), 'ADS OFF is listed before DATA STALE, which is still there for real problems');
 
+// ---- Day mode (2026-10-23): judged on yesterday alone ----
+const DAY = TO;
+const bravo = [
+    ...rows('Bravo', 'act2', 'b1', 'no leads yesterday', '2026-09-01', '2026-10-10', 10), ...rows('Bravo', 'act2', 'b1', 'no leads yesterday', DAY, DAY, 60),
+    ...rows('Bravo', 'act2', 'b2', 'at target yesterday', '2026-09-01', '2026-10-10', 10, { '2026-10-06': 1 }), ...rows('Bravo', 'act2', 'b2', 'at target yesterday', DAY, DAY, 100, { [DAY]: 2 }),
+    ...rows('Bravo', 'act2', 'b3', 'good yesterday', '2026-09-01', '2026-10-10', 10), ...rows('Bravo', 'act2', 'b3', 'good yesterday', DAY, DAY, 100, { [DAY]: 3 }),
+    ...rows('Bravo', 'act2', 'b4', 'new <b>ad</b>', '2026-10-09', '2026-10-10', 20), ...rows('Bravo', 'act2', 'b4', 'new <b>ad</b>', DAY, DAY, 80),
+    ...rows('Bravo', 'act2', 'b5', 'bad week, off yesterday', '2026-09-01', '2026-10-10', 50),
+    ...rows('Bravo', 'act2', 'b6', 'small yesterday', '2026-09-01', '2026-10-10', 5), ...rows('Bravo', 'act2', 'b6', 'small yesterday', DAY, DAY, 40),
+];
+const dsig = (target, pull) => ({ ...sig('Bravo', target, pull), recent: { leads: pull, coverage: 1 } });
+r = computeAdFlags([dsig(50, 6)], bravo, AD_ALERT_CONFIG, HIST, { day: DAY });
+const byId = Object.fromEntries(r.flags.map((f) => [f.adId, f]));
+ok(r.mode === 'day' && Object.keys(byId).sort().join() === 'b1,b2,b4', 'day mode flags exactly yesterday\'s bad ads: ' + Object.keys(byId));
+ok(byId.b1.action === 'TURN_OFF' && byId.b1.kind === 'NO_LEADS' && byId.b1.spend === 60, 'no leads on $60 yesterday (target $50): TURN OFF');
+ok(byId.b2.action === 'TURN_OFF' && byId.b2.estCpl === 50 && byId.b2.spend === 100, 'CPL exactly at target yesterday: TURN OFF');
+ok(byId.b4.action === 'LEARNING', 'an ad under 4 days old is listed as still learning, not turned off');
+ok(!byId.b5 && !byId.b6 && !byId.b3, 'not flagged: off yesterday (whatever its week), under one target of spend, or under target');
+ok(byId.b2.week.spend === 160 && byId.b2.week.metaLeads === 3 && Math.round(byId.b2.week.estCpl) === 53, 'each flag carries its last 7 days as context');
+ok(byId.b1.windowTo === DAY && byId.b1.targetKind === 'target', 'the flag names the day and the yardstick');
+// The scale comes from the 7-day window: pull 3 leads against Meta's 6 = 0.5, so b3's 3 leads count as 1.5 ($67 CPL)
+r = computeAdFlags([dsig(50, 3)], bravo, AD_ALERT_CONFIG, HIST, { day: DAY });
+ok(r.flags.some((f) => f.adId === 'b3') && r.checked[0].scale === 0.5, 'Meta\'s leads scaled to the pull over 7 days: b3 is over target');
+// No target: the client's own 30-day CPL from the day read
+r = computeAdFlags([dsig(null, 6)], bravo, AD_ALERT_CONFIG, HIST, { day: DAY, yardstick: () => ({ value: 55 }) });
+ok(r.flags.map((f) => f.adId).sort().join() === 'b1,b4' && r.flags[0].targetKind === 'usual' && r.flags[0].target === 55, 'no target: judged against the usual CPL ($55)');
+r = computeAdFlags([dsig(null, 6)], bravo, AD_ALERT_CONFIG, HIST, { day: DAY, yardstick: () => ({ value: null }) });
+ok(r.noTarget.join() === 'Bravo' && !r.flags.length, 'no target and no usual CPL: not checked');
+ok(computeAdFlags([dsig(null, 6)], bravo, AD_ALERT_CONFIG, HIST, { day: DAY }).noTarget.join() === 'Bravo', 'no yardstick function: no target means not checked');
+// Ad data that doesn't reach yesterday yet
+r = computeAdFlags([dsig(50, 6)], bravo.filter((x) => x.date !== DAY), AD_ALERT_CONFIG, HIST, { day: DAY });
+ok(r.stale.join() === 'Bravo' && !r.flags.length, 'no ad rows for yesterday: listed as not in yet, nothing judged on old days');
+// Rendering
+r = computeAdFlags([dsig(50, 6)], bravo, AD_ALERT_CONFIG, HIST, { day: DAY });
+const dh = renderAdFlagsHtml(r);
+ok(dh.includes('Ads to turn off') && dh.includes('2 ads across 1 client were at or over target yesterday'), 'titled Ads to turn off, counting only TURN OFF: ' + (dh.match(/Ads to turn off<\/strong> — [^<]*/) || [''])[0]);
+ok(dh.includes('Over target but still learning') && dh.includes('Bravo: new &lt;b&gt;ad&lt;/b&gt;') && !dh.includes('<b>ad</b>'), 'learning ads listed apart, names escaped');
+ok(dh.includes('yesterday $100 spent, 2 leads, CPL about $50') && dh.includes('last 7 days $160, 3 leads, CPL about $53'), 'yesterday then the 7-day context');
+ok(dh.includes('target $50 · 2026-10-11'), 'the yardstick and day per client');
+ok(renderAdFlagsHtml(computeAdFlags([dsig(50, 6)], bravo.filter((x) => x.date !== DAY), AD_ALERT_CONFIG, HIST, { day: DAY })).includes("Yesterday's ad data wasn't in yet for Bravo"), 'a client without yesterday\'s ad rows is named');
+ok(renderAdFlagsHtml(computeAdFlags([dsig(50, 6)], bravo.filter((x) => x.ad_id === 'b3'), AD_ALERT_CONFIG, HIST, { day: DAY })).includes('none: no ad was at or over target yesterday'), 'a clean day says so');
+const dc = adFlagsContext(r);
+ok(dc.includes('ADS TO TURN OFF') && dc.includes('- TURN OFF: Bravo: "no leads yesterday"') && dc.includes('STILL LEARNING'), 'the chat context lists them by action');
+
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

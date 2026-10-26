@@ -257,3 +257,18 @@ export function pickAccounts(clients: any[], onlyClient?: string): { ad_account_
     }
     return [...byAcct.entries()].map(([ad_account_id, client_name]) => ({ ad_account_id, client_name }));
 }
+
+// Fill mode (2026-10-23): which accounts still lack yesterday's ad rows. The daily audit lists the ads to
+// turn off from yesterday's rows, and Facebook publishes some accounts' yesterday late, so after the full
+// daily sync this re-asks only for accounts that spent yesterday by the daily pull (spentAccts, digits)
+// but have no meta_ad_daily row for it (haveAccts, digits), and only clients meta-sync has loaded a window
+// for before (connectedClients), so an account it was never given access to isn't asked every 15 minutes.
+export function accountsToFill(
+    accounts: { ad_account_id: string; client_name: string }[],
+    opts: { spentAccts: Iterable<string>; haveAccts: Iterable<string>; connectedClients: Iterable<string> },
+): { ad_account_id: string; client_name: string }[] {
+    const spent = new Set([...opts.spentAccts].map(normalizeAccountId));
+    const have = new Set([...opts.haveAccts].map(normalizeAccountId));
+    const connected = new Set(opts.connectedClients);
+    return accounts.filter((a) => spent.has(a.ad_account_id) && !have.has(a.ad_account_id) && connected.has(a.client_name));
+}

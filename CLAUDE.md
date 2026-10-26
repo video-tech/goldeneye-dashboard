@@ -767,6 +767,38 @@ consistently poor. `supabase/sql/target_cpl.sql` is the migration; the column al
 - **Tested 2026-09-21** on the real weekly figures (26 checks): 3Sixty and SimpliBlinds go CRITICAL,
   PANDEN stays STABLE with no target, and with one goes WATCH at $45 and CRITICAL at $40.
 
+### Judged on yesterday (2026-10-23, `morning-audit/daily.js`)
+
+The audit is read once a morning, so its headline is **the day before**: which clients are red alert and which ads to turn off.
+Tenny's rules, 2026-10-23:
+- **The yardstick** is `target_cpl`, or the client's own CPL over the 30 days before yesterday when there's none.
+- **RED ALERT:** yesterday's CPL at or over the yardstick, or no leads on at least a yardstick's worth of spend. A 7-day CRITICAL
+  also stays red on a day that spent ("the last 7 days are still critical"), never on a day with no spend.
+- **The other day verdicts:** ON TARGET, TOO LITTLE (under one yardstick of spend, no leads), NO YARDSTICK (no target and no
+  30-day leads) and NO SPEND. NO SPEND carries the 7-day engine's reason: ads off, stale data, or no pull row for that day.
+- **Ads to turn off:** `computeAdFlags(..., { day, yardstick })`, the same rules as the week mode below, on yesterday alone.
+  Every flagged ad is TURN OFF, except one under 4 days old, listed apart as still learning (switching it off and on restarts
+  Meta's learning). Meta's leads are still scaled to the pull, with the ratio taken over the 7-day window. Each flag carries its
+  7-day figures as context, and a client whose ad rows don't reach yesterday is named as "not in yet".
+  - **What it can't see:** a client can be red with no ad to turn off. Sunset on Oct 25 spent $156 with no leads across 12 ads,
+    none of which spent a target's worth alone.
+- **The 7/28-day engine (`engine.js`) is unchanged.** Its signal is now the trend line under each client ("a bad day or a bad
+  week?"). The model gets `buildDayContext` first, then `buildAuditContext` under "THE LAST 7 DAYS". The prompt asks for red alerts
+  (biggest spend first), one line of on-target clients, then one muted line for everyone else.
+- **The text** (`sendRedAlert`) has one line per red-alert client plus the turn-off count, through scenario #6 with
+  event `morning_audit_critical` unchanged. It is sent only with the scheduled card, so it goes out once a morning; Run audit
+  never texts. Expect more texts than before: on Oct 25, 4 of 6 spending clients were red, Anxiety Solutions at $22.77 against $20.
+- **meta-sync has to be in by 9:00:** the full sync moved to 14:30 UTC, and `{ "mode": "fill" }` (`accountsToFill`) runs every
+  15 minutes, 15:00–17:45 UTC on weekdays (`meta-sync-fill`, in `morning_audit_wait_for_data.sql`). It asks Meta only about
+  connected accounts that spent yesterday by the pull and have no ad rows for it, and makes no Graph call when none are missing.
+- **The dashboard's Intelligence card** reads `## RED ALERT —` first and shows each client once.
+- **Tests:**
+  - `daily.test.mjs` 34; `ads.test.mjs` 65 (19 on day mode).
+  - `handler.test.mjs` 24 runs the real `index.ts` in node against fakes, at fixed Mountain times: run, skip, wait for ad rows,
+    deadline, button, context, `email_test` and refusals.
+  - `meta-sync/fill.test.mjs` 9; `tests/intelligence-card.test.mjs` 5.
+  - 18 of 18 deliberate breakages caught.
+
 ### Per-ad flags in the morning audit (built 2026-10-12, `morning-audit/ads.js`)
 
 Which individual ads are at or over their client's `target_cpl`, appended to the saved card. Needs
@@ -845,10 +877,22 @@ to 3.
 the call, the same pair already behind `checkin-reminder-am/pm`. `schedule.sql` in that
 folder sets it up and lists the queries for checking on it.
 
-- Fires **17:05 UTC, Mon–Fri** (16:00 until 2026-10-22). That is 11:05 MDT / 10:05 MST — pg_cron
-  does not follow daylight saving, so the time is chosen to land after the second ads pull (11:45
-  Eastern: 15:45 UTC in summer, 16:45 in winter) and the 17:00 UTC pull check in *both* seasons.
-  At 16:00 it read accounts Facebook hadn't reported yet and called them stale or stopped.
+- **Waits for the data, from 9:00 Mountain (2026-10-23, `readiness.js`).** pg_cron calls it every 15 minutes, 15:00–17:45 UTC
+  on weekdays (`supabase/sql/morning_audit_wait_for_data.sql`). The function decides in Mountain time: before 9:00 it waits; from
+  9:00 it runs as soon as every steady spender (rows on 5+ of the 7 days before, the `daily_pull_check` rule) has yesterday's
+  row, and every meta-sync client that spent yesterday has yesterday's ad rows (`adDataMissing`; a client meta-sync never loaded a
+  window for, like Astra, never holds it up); at 10:00 it runs anyway and names who is missing; after noon it leaves the morning alone. Today's card is checked first, so
+  once it exists every later call is a no-op. Only the schedule waits: the dashboard button (`force`) and the chat never do.
+  Why: Facebook publishes some accounts' yesterday as late as ~9:30 Mountain, and a fixed UTC time carried an hour of daylight-saving
+  slack (it was 17:05 UTC, before that 16:00, which read late accounts as stale or stopped).
+- **The email to Aidan (2026-10-23, `email.js`).** After a *scheduled* card is saved, `sendAuditEmail` sends it through Resend
+  (from hello@mail.midasmediafirm.com, the welcome email's verified domain, reply-to video@) to `AUDIT_EMAIL_TO`
+  (info@midasmediafirm.com): subject with the red-alert and turn-off counts, the day, the card (CSS variables turned to hex, anything
+  active stripped, icon-font icons made dots), then one row per client, red alert first: yesterday's verdict, spend, leads and CPL,
+  the yardstick, 7/14/30-day CPL, the 7-day trend with its driver, and notes; on a deadline run, whose pull rows or ad rows were
+  missing. Nothing is recomputed. Secrets `RESEND_API_KEY` and `AUDIT_EMAIL_TO`; either unset means no email and a warning, and a send failure never
+  fails the audit. The button's re-runs never email. `{ "mode": "email_test" }` (an admin, or the SQL Editor with the cron secret) re-sends today's card to `AUDIT_EMAIL_TO`, no model call.
+  Tests: `readiness.test.mjs` 36, `email.test.mjs` 25, `supabase/sql/morning_audit_wait_for_data.test.mjs` 20 (PGlite).
 - **Idempotent.** Returns `{"skipped": ...}` if a card already exists for today, so a
   retry, a manual click, or a second scheduled attempt cannot stack up duplicates.
 - Model is **`gpt-5.6-sol`** through the **Responses API** (not Chat Completions — that
@@ -1874,7 +1918,7 @@ account totals and the morning audit; this adds what it can't say: which ad, and
 - **Token:** `META_ACCESS_TOKEN`, a System User token with `ads_read` only, in Supabase secrets.
   Never logged: Meta's paging links carry it, so every error passes through `scrubToken`. The Meta
   token in Make is separate and untouched.
-- **Runs:** daily at 15:30 UTC (`schedule.sql`), the last 8 days each time, upserted, because Meta
+- **Runs:** daily at 14:30 UTC (was 15:30 in `schedule.sql`; moved by `morning_audit_wait_for_data.sql`, which also adds `{"mode":"fill"}` every 15 minutes before the audit), the last 8 days each time, upserted, because Meta
   keeps attributing leads to the click day for 7 days. Backfill (up to 180 days) and a token
   check run from the SQL Editor with the cron secret (`schedule.sql` has both). Every mode only
   reads Meta and writes these tables, which is why the cron secret may run all of them.
@@ -2114,7 +2158,7 @@ now have **Ignore** handlers and the Google Sheets step a **Resume** one, so one
 and a replay skips rows that already exist (the write is still a plain insert, so the duplicate-key error is what gets ignored). Replaying
 an execution works with no manual deleting now. A replay re-runs the Sheets step, so the "master data" sheet can get duplicate rows
 for clients that had already written. **The alert (built 2026-10-14, `supabase/sql/daily_pull_check.sql`).** A Make handler can't hold the Vault secret, so `daily_pull_check()` runs in the
-database at 17:00 UTC (pg_cron `daily-pull-check`; 13:30 until 2026-10-21, 15:45 until 2026-10-22, see the second pull below) and texts **Tenny only** (+1 801 709 8501, a constant in the function) through scenario #6, same
+database at 10:05 Mountain in both seasons (pg_cron `daily-pull-check` at 16:05 and 17:05 UTC through `daily_pull_check_scheduled()`, which only acts in the 10 o'clock Mountain hour; 13:30 UTC until 2026-10-21, 15:45 then 17:00 until 2026-10-23) and texts **Tenny only** (+1 801 709 8501, a constant in the function) through scenario #6, same
 payload as `notify_task_assignee`. It flags a client Make is asked to pull that has no `daily_reports` row for yesterday but had one on at least 5
 of the 7 days before (Make writes no row for a no-spend day, so ads-off or on-and-off clients would otherwise be reported daily). `select daily_pull_check(false)`
 shows what it would say without texting. 21 PGlite checks, 9 of 10 breakages caught (the tenth is an equivalent mutant).
@@ -2129,6 +2173,10 @@ if the first one's modules change. It doubles Facebook calls, which matters beca
 **Moved to 11:45 Eastern on 2026-10-22:** that morning both pulls missed Oct 21 for 3Sixty ($91.61) and Alta Vista ($52.95), while
 meta-sync at 11:30 Eastern had both, so Facebook publishes some accounts' yesterday between 10:30 and 11:30 Eastern. The pull check
 (17:00 UTC) and the morning audit (17:05 UTC) moved after it, so neither reads before the second pull in either season.
+**Since 2026-10-23 the second pull only asks about who's missing:** its Search Rows reads the view `ads_pull_missing` (clients the
+pull covers with no row for yesterday, Mountain date; service_role only, since a view skips RLS) every 15 minutes, 10:30–11:45
+Eastern (8:30–9:45 Mountain), every day. A run with nobody missing is 1 operation and no Facebook call. The audit waits for it
+(see Running it unattended).
 **`meta-sync` is a backup, not a replacement.** It covers 6 clients and counts leads differently from the pull, and the audit reads
 `daily_reports` for everyone. Keep both running.
 

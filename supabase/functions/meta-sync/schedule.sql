@@ -8,6 +8,7 @@
 --   select cron.alter_job(j.jobid, command := regexp_replace(j.command, 'Bearer [^'']+', 'Bearer ' || (select k from good)))
 --   from cron.job j where j.jobname = 'meta-sync-daily';
 
+-- Since 2026-10-23 supabase/sql/morning_audit_wait_for_data.sql moves this to 14:30 UTC and adds meta-sync-fill.
 -- Daily at 15:30 UTC (09:30 MDT / 08:30 MST): after the 08:00-local Make pull, before the 16:00
 -- morning audit, in both daylight-saving states. Every day: weekend spend is still spend.
 select cron.schedule(

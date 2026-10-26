@@ -544,5 +544,5 @@ export function buildAuditContext(signals) {
     return md;
 }
 
-export { AUDIT_CONFIG, computeClientSignal, resolveAuditAnchor, toDayNumber, todayDayNumber, summarizeWindow, decomposeCplChange };
+export { AUDIT_CONFIG, DRIVER_MEANING, computeClientSignal, resolveAuditAnchor, toDayNumber, todayDayNumber, summarizeWindow, decomposeCplChange };
 // ==== END SHARED ENGINE ====

@@ -15,12 +15,16 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { adminCheck, cronCheck } from "../_shared/admin-auth.ts";
 import {
     AUDIT_CONFIG,
+    DRIVER_MEANING,
     buildAuditContext,
     computeClientSignal,
     resolveAuditAnchor,
     todayDayNumber,
 } from "./engine.js";
 import { adFlagsContext, applyAdsOff, computeAdFlags, renderAdFlagsHtml } from "./ads.js";
+import { buildDayContext, computeDayRead, redAlertLine } from "./daily.js";
+import { adDataMissing, decideRun, denverNow, steadyMissing } from "./readiness.js";
+import { renderAuditEmail, sendViaResend } from "./email.js";
 
 // Enough history for the 28-day baseline plus the 7-day window, with room to spare so
 // a few missing days never shorten the baseline.
@@ -86,8 +90,9 @@ async function loadAdRows(db: any, names: string[]) {
 // Everything meta-sync knows that the audit uses: per-ad rows (for the ads section, and to tell "ads
 // are off" from "the pull is broken") and each client's sync state. Wanted for clients with a target
 // CPL and for any whose daily-pull data looks missing. Null when meta-sync's tables cannot be read.
-async function loadAdData(db: any, signals: any[]) {
-    const wanted = signals.filter((s) => parseFloat(s.targetCpl) > 0 || s.verdict === "DATA_STALE" || s.verdict === "DATA_GAPS");
+async function loadAdData(db: any, signals: any[], spentYesterday: string[] = []) {
+    const spent = new Set(spentYesterday);
+    const wanted = signals.filter((s) => spent.has(s.name) || parseFloat(s.targetCpl) > 0 || s.verdict === "DATA_STALE" || s.verdict === "DATA_GAPS");
     if (!wanted.length) return { rows: [] as any[], cutoff: undefined as string | undefined, syncState: [] as any[] };
     const loaded = await loadAdRows(db, wanted.map((s) => s.name));
     if (!loaded) return null;
@@ -96,65 +101,54 @@ async function loadAdData(db: any, signals: any[]) {
     return { rows: loaded.rows, cutoff: loaded.cutoff as string | undefined, syncState: error ? [] : (syncState ?? []) };
 }
 
+// The audit reports on YESTERDAY (2026-10-23): who is red alert, and why. The ads to turn off are
+// listed by code under the card (ads.js), so the model never names an ad.
 const PROMPT_INSTRUCTIONS = `
 INSTRUCTIONS:
-You are a senior media buyer briefing the team on the agency's Meta accounts.
+You are a senior media buyer writing the agency's morning audit. It is read once a day, and its job
+is to say what happened YESTERDAY: which clients are red alert and why. The ads to turn off are listed
+separately, below what you write, by the system. Do not list ads.
 
-The analysis is already done. Each client sits under a heading that states its verdict,
-and that heading is authoritative. Your job is to explain what each one means and what to
-do about it — not to reclassify anything, recompute anything, or infer a trend from the
-raw numbers. Never give a client a marker color or icon its own verdict does not match.
+Two blocks of facts sit above. The first (AUDIT DAY) is the day read: each client's verdict for
+yesterday, under a heading that is authoritative. The second (THE LAST 7 DAYS) is the trend: the
+7-day verdict, the CPL driver and the creative flag. Use it only to say whether a red alert is a bad
+day or a bad week, and where to look. Never reclassify a client, recompute a figure, or give a client
+a marker its own day verdict does not match.
 
-Only ever mention a client that appears above. You have account-level daily totals and
-nothing else: no campaign, ad set, ad, or creative data reaches you. Never name an ad,
-never say which creative to pause, and never comment on budget splits inside an account
-— you cannot see any of that. What you can do is say where in the funnel the problem is
-and therefore where someone should go and look. That is the point of the driver field:
-lead with it. "CPL is up 40%, and it is all click-to-lead — check the landing page
-before touching the ads" is the shape of a useful line. "CPL is up 40%, review the ads"
-is not. Where no driver is given, say the number and say it needs looking into rather
-than inventing a cause.
+Only ever mention a client that appears above. You have account-level daily totals: no campaign, ad
+set, ad or creative names reach you, so never name an ad or say which creative to pause.
 
-Format your response entirely in ready-to-render HTML. Do NOT use markdown code blocks
-like \`\`\`html. Just return the raw HTML string.
+Format your response entirely in ready-to-render HTML. Do NOT use markdown code blocks like
+\`\`\`html. Just return the raw HTML string. No grid, no boxes, no columns.
 
-Write one short paragraph per client worth mentioning — no grid, no boxes, no columns.
-Order them by urgency: CRITICAL and SPEND STOPPED first, then WATCH, then SCALE
-CANDIDATES and any IMPROVING client whose gain came with more budget rather than better
-efficiency, then ADS OFF, then DATA STALE / DATA GAPS. Skip a client entirely if their verdict is STABLE or INSUFFICIENT_VOLUME with
-nothing notable to say — a quiet client gets no paragraph, not a filler sentence.
+1. RED ALERT clients first, biggest spend first. One paragraph each, opening with this marker:
+<p><i class="fa-solid fa-fire" style="color:var(--neg);"></i> <strong style="color:var(--neg);">[Client name]</strong> — [sentences]</p>
+Then one or two plain sentences: what yesterday cost (spend, leads, CPL against the target or usual
+CPL, exactly as given), how that compares with their 7 and 30-day CPL, and whether the last 7 days
+agree (their 7-day trend). If a driver is given, use it to say where to look: CPM means auction or
+targeting, CTR means creative or a saturated audience, CVR means the landing page or form rather than
+the ads. A red alert whose reason is "the last 7 days are still critical" had an acceptable day: say so,
+and that the week is still the problem.
 
-Every paragraph opens with one marker line naming the client, colored and iconed for its
-verdict — exactly one of these five, matched to the client's own heading, never invented
-or mixed:
+2. Then ONE line for the clients ON TARGET yesterday:
+<p><i class="fa-solid fa-circle-check" style="color:var(--pos);"></i> <strong style="color:var(--pos);">On target</strong> — [Client $CPL, Client $CPL, ...]</p>
+If one of them has a 7-day WATCH trend or a falling CTR, add a short clause for it in that same line.
 
-<p><i class="fa-solid fa-fire" style="color:var(--neg);"></i> <strong style="color:var(--neg);">[Client name]</strong> — [sentence]</p>       for CRITICAL / SPEND STOPPED
-<p><i class="fa-solid fa-eye" style="color:var(--warn);"></i> <strong style="color:var(--warn);">[Client name]</strong> — [sentence]</p>       for WATCH
-<p><i class="fa-solid fa-arrow-trend-up" style="color:var(--pos);"></i> <strong style="color:var(--pos);">[Client name]</strong> — [sentence]</p>   for SCALE CANDIDATE / IMPROVING-on-more-budget
-<p><i class="fa-solid fa-plug-circle-exclamation" style="color:var(--t3);"></i> <strong style="color:var(--t3);">[Client name]</strong> — [sentence]</p>  for DATA STALE / DATA GAPS
-<p><i class="fa-solid fa-circle-pause" style="color:var(--t3);"></i> <strong style="color:var(--t3);">[Client name]</strong> — [sentence]</p>  for ADS OFF
+3. Then ONE muted line for everyone else (too little to judge, no yardstick, no spend), with the reason
+given for each, short:
+<p><i class="fa-solid fa-circle-minus" style="color:var(--t3);"></i> <strong style="color:var(--t3);">Nothing to judge</strong> — [Client: reason; Client: reason]</p>
+A client with no spend because the daily pull has no row, or the data is stale or gappy, is a data
+problem: say the daily pull should be checked. A client whose ads are off (Meta confirms it) is not a
+data problem: say the ads are off and the team should confirm it's intended.
 
-After the marker, write one to two plain sentences: what happened, in real numbers, and
-the first thing to check. Lead with the biggest spender within each verdict group. For a
-WATCH client whose note says CTR is falling, lead with that and say the creative needs
-looking at — that is an early warning worth acting on while CPL still looks fine. For a
-DATA STALE / DATA GAPS client, say plainly that the pull looks broken and the numbers
-cannot be trusted yet, rather than describing it as a performance problem. For an ADS OFF
-client the opposite is true: say in one sentence that their ads have not spent since the day
-the note gives, that Meta confirms it, that nothing is wrong with the data, and that the team
-should confirm it is intended. Never call it a broken pull.
-
-A quiet morning is a real and good result. If nothing needs a paragraph, write a single
-plain line saying so — "Nothing critical today." — with no icon and no color. Never
-promote a client from a calmer verdict to fill space, and never manufacture a concern.
-
-Keep the text tight and direct. Cite the actual figures you were given.`;
-
+Leave out any of the three parts that has nobody in it. If nobody is red alert, the first line is a plain
+"Nothing red yesterday." with no icon and no color. Never promote a client to fill space, never invent a
+concern. Keep it tight and cite the figures you were given.`;
 async function loadSignals(db: any) {
     const cutoff = new Date(Date.now() - HISTORY_DAYS * 86400000).toISOString().split("T")[0];
 
     const [clientsRes, adsRes, healthRes] = await Promise.all([
-        db.from("clients").select("name, ad_account_id, status, target_cpl"),
+        db.from("clients").select("name, ad_account_id, business_id, status, target_cpl"),
         // Deliberately `*` rather than a column list. daily_reports carries Google
         // Sheets header casing — the lead count is `"Leads"`, a quoted and therefore
         // case-sensitive identifier, because Make built the table from a sheet. Naming
@@ -190,23 +184,62 @@ async function loadSignals(db: any) {
     const rowsPerClient = clients.map((c: any) => reportsForClient(c, rows));
     const anchor = resolveAuditAnchor(rowsPerClient, todayDayNumber(), AUDIT_CONFIG);
 
-    return clients.map((c: any, i: number) => computeClientSignal(c, rowsPerClient[i], anchor, AUDIT_CONFIG));
+    const signals = clients.map((c: any, i: number) => computeClientSignal(c, rowsPerClient[i], anchor, AUDIT_CONFIG));
+    // Every client row (not only active ones) and the lowercased rows go back too: the scheduled run's
+    // readiness check (readiness.js) uses the Make pull's own client filter, not the audit's.
+    // rowsPerClient lines up with signals, for the day read (daily.js).
+    return { signals, rowsPerClient, allClients: clientsRes.data ?? [], rows };
 }
 
-// Text the two admins when the audit finds a CRITICAL account. Built entirely from
-// `signals` — never from the model's HTML — for the same reason the dashboard cards
-// are: the model is a writer here, not a source of truth, and an SMS is exactly the
-// kind of thing that must never carry a hallucinated number. A parsing step over the
-// model's prose to find "who's critical" would reintroduce the risk this whole rebuild
-// was about removing.
-//
-// Only CRITICAL fires this, by design — SPEND_STOPPED is a real problem too, but it is
-// an operational one (a paused campaign, an expired card) rather than a performance
-// one, and folding it in was left for later so a text stays rare enough to open.
-// Silent on a quiet morning: no CRITICAL clients means no POST at all.
-async function sendCriticalAlert(db: any, signals: any[]) {
-    const critical = signals.filter((s) => s.verdict === "CRITICAL");
-    if (!critical.length) return;
+// Names of the audit's clients with spend on `day` in the daily pull.
+function spentOn(signals: any[], rowsPerClient: any[][], day: string) {
+    return signals.filter((_s, i) => rowsPerClient[i].some((r: any) => String(r.date ?? "").slice(0, 10) === day && parseFloat(r.spend) > 0)).map((s) => s.name);
+}
+
+// For the wait: which clients have meta_ad_daily rows for `day`, and meta-sync's state. Null when either
+// can't be read, and then the audit doesn't wait on ad data (the ads section says what's missing).
+async function loadAdReadiness(db: any, day: string) {
+    try {
+        const names = new Set<string>();
+        for (let from = 0; ; from += 1000) {
+            const { data, error } = await db.from("meta_ad_daily").select("client_name").eq("date", day).range(from, from + 999);
+            if (error) throw error;
+            (data ?? []).forEach((r: any) => names.add(r.client_name));
+            if (!data || data.length < 1000) break;
+        }
+        const { data: syncState, error } = await db.from("meta_sync_state").select("client_name, last_window");
+        if (error) throw error;
+        return { withAdRows: [...names], syncState: syncState ?? [] };
+    } catch (err) {
+        console.error("ad readiness not read, not waiting on ad data:", err);
+        return null;
+    }
+}
+
+// The audit email (email.js): the card plus every client's yesterday and context, to AUDIT_EMAIL_TO
+// through Resend. Never throws; the result goes in the log and the response.
+async function sendAuditEmail(html: string, dayReads: any[], signals: any[], adResult: any, missing: string[], deadline: boolean, adMissing: string[] = []) {
+    const now = new Date();
+    const dateLabel = new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", weekday: "short", month: "short", day: "numeric" }).format(now);
+    const mail = renderAuditEmail({ html, dayReads, signals, adResult, missing, adMissing, deadline, dateLabel });
+    const res = await sendViaResend({
+        apiKey: (Deno.env.get("RESEND_API_KEY") ?? "").trim(),
+        to: Deno.env.get("AUDIT_EMAIL_TO") ?? "",
+        ...mail,
+    });
+    if (res.sent) console.log(`morning-audit email sent to ${res.to.join(", ")}`);
+    else console.warn(`morning-audit email not sent: ${res.reason}`);
+    return res;
+}
+
+// Text the admins when a client is RED ALERT yesterday (2026-10-23; before that, a 7-day CRITICAL). Built
+// entirely from the day reads, never from the model's HTML: a text must never carry a hallucinated number.
+// One line per red-alert client, then how many ads to turn off. Silent when nobody is red. Sent with the
+// scheduled card only, so it goes out once a morning; the dashboard's Run audit button never texts.
+// (The payload keeps event "morning_audit_critical": Make scenario #6 routes on it.)
+async function sendRedAlert(db: any, dayReads: any[], adResult: any) {
+    const red = dayReads.filter((r) => r.verdict === "RED_ALERT").sort((a, b) => b.spend - a.spend);
+    if (!red.length) return { sent: false, reason: "nobody red" };
 
     const { data: recipientRows, error: recErr } = await db
         .from("admin_alert_recipients")
@@ -220,35 +253,19 @@ async function sendCriticalAlert(db: any, signals: any[]) {
     const recipients = (recipientRows ?? [])
         .map((r: any) => ({ name: r.name, phone: "+1" + String(r.phone ?? "").replace(/\D/g, "").slice(-10) }))
         .filter((r: any) => r.phone.length === 12);
-    if (!recipients.length) return;
+    if (!recipients.length) return { sent: false, reason: "no recipients" };
 
-    const lines = critical.map((s) => {
-        const cpl = s.recent.cpl === null ? "no leads" : `$${Math.round(s.recent.cpl)} CPL`;
-        const pct = (s.cplDelta === Infinity || s.cplDelta === null)
-            ? "" : ` (${s.cplDelta >= 0 ? "+" : ""}${Math.round(s.cplDelta * 100)}%)`;
-        const driver = s.drivers?.dominant ? `, ${s.drivers.dominant.toUpperCase()} driven` : "";
-        // The percentage is against the target when the client has one, otherwise their
-        // own usual, so a text has to say which.
-        const vs = s.yardstick ? ` vs $${Math.round(s.yardstick)} ${s.yardstickKind === "target" ? "target" : "usual"}` : "";
-        return `${s.name}: ${cpl}${pct}${vs} on $${Math.round(s.recent.spend)} spend${driver}`;
-    });
-
-    // No \n here. Make's HTTPS module builds its GHL request body from raw text with
-    // {{2.message}} substituted straight in — it does not escape variables dropped into
-    // a raw-text field, so a literal newline lands as an unescaped control character
-    // inside what has to be valid JSON and breaks the request downstream. A single
-    // line sidesteps the whole class of problem rather than asking every future editor
-    // of the Make scenario to remember an escapeJSON() wrapper.
-    const message = `🚨 Morning Audit — ${critical.length} critical account${critical.length > 1 ? "s" : ""}: `
-        + lines.join(" • ")
+    const turnOff = (adResult?.flags ?? []).filter((f: any) => f.action === "TURN_OFF").length;
+    // No \n anywhere: Make's HTTPS module builds the GHL request from raw text with {{2.message}}
+    // substituted straight in, so a newline would break the JSON (see CLAUDE.md, Gotchas).
+    const message = `🚨 Morning audit, ${red[0].day}: ${red.length} red alert${red.length > 1 ? "s" : ""}: `
+        + red.map(redAlertLine).join(" • ")
+        + (turnOff ? ` • ${turnOff} ad${turnOff > 1 ? "s" : ""} to turn off` : "")
         + ` • Full audit: https://goldeneye.midasmediafirm.com`;
 
-    // Never let a failed webhook lose the audit card already saved by the caller — log
-    // and move on, exactly like the exception block in notify_admins_client_request().
+    // Never let a failed webhook lose the audit card already saved by the caller.
     try {
-        // The hook URL is in this public repo, so Make's scenario filters on this secret (see
-        // CLAUDE.md, the 2026-09-11 onboarding-text incident). An unset secret still sends,
-        // and Make drops it, which is the safe direction for an alert to ourselves.
+        // The hook URL is in this public repo, so Make's scenario filters on this secret.
         const res = await fetch(ADMIN_ALERT_WEBHOOK, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -257,23 +274,26 @@ async function sendCriticalAlert(db: any, signals: any[]) {
                 event: "morning_audit_critical",
                 kind: "morning_audit_critical",
                 message,
-                critical_count: critical.length,
-                clients: critical.map((s) => ({
-                    name: s.name,
-                    spend: Math.round(s.recent.spend),
-                    leads: s.recent.leads,
-                    expected_leads: s.expectedLeads,
-                    cpl: s.recent.cpl,
-                    baseline_cpl: s.baseline.cpl,
-                    cpl_delta: s.cplDelta === Infinity ? null : s.cplDelta,
-                    driver: s.drivers?.dominant ?? null,
+                critical_count: red.length,
+                ads_to_turn_off: turnOff,
+                clients: red.map((r) => ({
+                    name: r.name,
+                    day: r.day,
+                    spend: Math.round(r.spend),
+                    leads: r.leads,
+                    cpl: r.cpl,
+                    yardstick: r.yardstick,
+                    yardstick_kind: r.yardstickKind,
+                    reason: r.reason,
                 })),
                 recipients,
             }),
         });
-        if (!res.ok) console.error(`critical alert webhook returned ${res.status}`);
+        if (!res.ok) { console.error(`red alert webhook returned ${res.status}`); return { sent: false, reason: `webhook ${res.status}` }; }
+        return { sent: true, clients: red.length };
     } catch (err) {
-        console.error("critical alert webhook failed:", err);
+        console.error("red alert webhook failed:", err);
+        return { sent: false, reason: String((err as Error)?.message ?? err) };
     }
 }
 
@@ -314,6 +334,7 @@ Deno.serve(async (req: Request) => {
         const body = await req.json().catch(() => ({}));
         const force = body?.force === true;
         const contextOnly = body?.mode === "context";
+        const emailTest = body?.mode === "email_test";
 
         const db = createClient(
             Deno.env.get("SUPABASE_URL")!,
@@ -329,6 +350,8 @@ Deno.serve(async (req: Request) => {
         //   - Anyone else is refused, with the reason in the log.
         const fromCron = cronCheck(req, Deno.env.get("MAKE_WEBHOOK_SECRET"));
         if (fromCron) {
+            // email_test is allowed: it only re-sends today's saved card to AUDIT_EMAIL_TO, with no model call,
+            // so the email can be checked from the SQL Editor.
             if (force || contextOnly) {
                 console.warn("morning-audit REFUSED: cron secret used for", force ? "force" : "context");
                 return Response.json({ error: "The schedule can only run the daily audit." }, { status: 403, headers: cors });
@@ -341,23 +364,77 @@ Deno.serve(async (req: Request) => {
             }
         }
 
-        const signals = await loadSignals(db);
-        const adData = await loadAdData(db, signals).catch((err) => {
+        // The scheduled run checks for today's card before reading anything else: from 9:00 Mountain it is
+        // called every 15 minutes, and once the card exists the rest of the morning's calls are no-ops.
+        if (fromCron && !force && !emailTest) {
+            const since = new Date(); since.setHours(0, 0, 0, 0);
+            const { data: done } = await db.from("morning_audits").select("id").gte("created_at", since.toISOString()).limit(1);
+            if (done?.length) return Response.json({ skipped: "an audit already exists for today", id: done[0].id }, { headers: cors });
+        }
+
+        const { signals, rowsPerClient, allClients, rows: reportRows } = await loadSignals(db);
+        // The day the audit reports on: the engine's anchor, which is yesterday once the pull is in
+        const auditDay: string = signals[0]?.window?.recentTo ?? denverNow(new Date()).yesterday;
+
+        // Wait for the data (2026-10-23). Facebook publishes some accounts' yesterday as late as 9:30
+        // Mountain, so the schedule runs as soon as every steady spender has yesterday's row, and every
+        // meta-sync client that spent yesterday has yesterday's ad rows, or at 10:00 Mountain regardless.
+        // Only the schedule waits; the dashboard button and the chat never do.
+        let gate: { missing: string[]; adMissing: string[]; deadline: boolean } | null = null;
+        if (fromCron && !emailTest) {
+            const now = denverNow(new Date());
+            const missing = steadyMissing(allClients, reportRows, now.yesterday);
+            const adReady = await loadAdReadiness(db, now.yesterday);
+            const adMissing = adReady
+                ? adDataMissing({ spentYesterday: spentOn(signals, rowsPerClient, now.yesterday), ...adReady })
+                : [];
+            const decision = decideRun({ minutes: now.minutes, ready: missing.length === 0 && adMissing.length === 0 });
+            if (!decision.run) {
+                return Response.json({ waiting: decision.reason, missing, ad_data_missing: adMissing, denver_time: now.label }, { headers: cors });
+            }
+            gate = { missing, adMissing, deadline: !!decision.deadline };
+        }
+
+        const spentYesterday = spentOn(signals, rowsPerClient, auditDay);
+        const adData = await loadAdData(db, signals, spentYesterday).catch((err) => {
             console.error("loadAdData failed:", err);
             return null;
         });
         // Where the daily pull has no rows for a client, ask meta-sync whether their ads are simply
         // off. If Meta confirms it, the verdict becomes ADS OFF instead of "the pull looks broken".
         if (adData) applyAdsOff(signals, adData.rows, adData.syncState);
-        const context = buildAuditContext(signals);
-        // Which individual ads are at or over their client's target CPL. Decided in code (ads.js), then
-        // appended to the saved card; the model never sees an ad name or an ad figure.
-        const adResult = adData ? computeAdFlags(signals, adData.rows, undefined, adData.cutoff) : null;
+        // Yesterday, per client (daily.js): the headline. The 7-day signals are the trend under it.
+        const dayReads = signals.map((s: any, i: number) => computeDayRead(s, rowsPerClient[i]));
+        const readByName = new Map(dayReads.map((r: any) => [r.name, r]));
+        const context = buildDayContext(dayReads, signals, DRIVER_MEANING)
+            + "\n=== THE LAST 7 DAYS: the trend behind each client, for context ===\n"
+            + buildAuditContext(signals);
+        // The ads to turn off: any ad at or over the yardstick yesterday, decided in code (ads.js) and
+        // appended to the saved card; the model never sees an ad name or an ad figure. Clients with no
+        // target are judged against their own 30-day CPL, the same yardstick as their day read.
+        const adResult = adData
+            ? computeAdFlags(signals.filter((s: any) => spentYesterday.includes(s.name)), adData.rows, undefined, adData.cutoff, {
+                day: auditDay,
+                yardstick: (s: any) => ({ value: readByName.get(s.name)?.yardstick ?? null }),
+            })
+            : null;
+
+        // A check of the email (an admin, or the SQL Editor with the cron secret): today's saved card, re-sent
+        // with today's figures to AUDIT_EMAIL_TO. No model call, no text.
+        if (emailTest) {
+            const since = new Date(); since.setHours(0, 0, 0, 0);
+            const { data: card } = await db.from("morning_audits").select("html_body, created_at")
+                .gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(1);
+            if (!card?.length) return Response.json({ error: "No audit card yet today. Run the audit first." }, { status: 400, headers: cors });
+            const missing = steadyMissing(allClients, reportRows, denverNow(new Date()).yesterday);
+            const result = await sendAuditEmail(card[0].html_body, dayReads, signals, adResult, missing, false);
+            return Response.json({ email: result }, { headers: cors });
+        }
 
         // The dashboard's AI chat wants the matrix without spending a model call on it. It also
-        // gets the flagged ads, which the card's model deliberately does not.
+        // gets the ads to turn off, which the card's model deliberately does not.
         if (contextOnly) {
-            return Response.json({ context: context + (adResult ? adFlagsContext(adResult) : ""), signals }, { headers: cors });
+            return Response.json({ context: context + (adResult ? adFlagsContext(adResult) : ""), signals, dayReads }, { headers: cors });
         }
 
         // Idempotent by default: cron fires once, but a retry, a manual click, or a
@@ -419,21 +496,29 @@ Deno.serve(async (req: Request) => {
             .select();
         if (error) throw error;
 
-        // Only for a card actually created just now — the skipped-because-it-already-
-        // exists branch above returns before this point, so a retry or a second
-        // scheduled attempt never sends a second text for the same morning.
-        await sendCriticalAlert(db, signals).catch((err) =>
-            console.error("sendCriticalAlert failed:", err));
+        // The red-alert text and the morning email go out with the scheduled card only, which is made once
+        // a morning (the skip above returns before this point). The dashboard's Run audit button (force)
+        // makes a new card without texting or emailing anyone a second time.
+        const text = gate ? await sendRedAlert(db, dayReads, adResult).catch((err) => {
+            console.error("sendRedAlert failed:", err);
+            return { sent: false, reason: String((err as Error)?.message ?? err) };
+        }) : null;
+        const email = gate ? await sendAuditEmail(html, dayReads, signals, adResult, gate.missing, gate.deadline, gate.adMissing) : null;
 
+        const count = (list: any[]) => list.reduce((acc: Record<string, number>, x: any) => {
+            acc[x.verdict] = (acc[x.verdict] || 0) + 1;
+            return acc;
+        }, {});
         return Response.json({
             id: data?.[0]?.id ?? null,
             created_at: data?.[0]?.created_at ?? null,
+            day: auditDay,
             clients: signals.length,
-            verdicts: signals.reduce((acc: Record<string, number>, s: any) => {
-                acc[s.verdict] = (acc[s.verdict] || 0) + 1;
-                return acc;
-            }, {}),
+            yesterday: count(dayReads),
+            verdicts: count(signals),
+            ads_to_turn_off: (adResult?.flags ?? []).filter((f: any) => f.action === "TURN_OFF").length,
             usage: response.usage,
+            ...(gate ? { ran: gate.deadline ? "deadline" : "ready", missing: gate.missing, ad_data_missing: gate.adMissing, text, email } : {}),
             html,
         }, { headers: cors });
     } catch (err) {

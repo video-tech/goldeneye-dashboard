@@ -4,7 +4,9 @@
 -- 2026-10-14 (Meta's app-level rate limit). Nobody was told; it was found by hand. Make can't send the
 -- alert itself, because the Vault secret can't go into a scenario's blueprint, so the database checks.
 --
--- WHEN: 17:00 UTC every day (13:30 until 2026-10-21, then 15:45 until 2026-10-22). There are two pulls: 08:00 Eastern,
+-- WHEN (since 2026-10-23): 10:05 Mountain in both seasons, through daily_pull_check_scheduled() in
+-- supabase/sql/morning_audit_wait_for_data.sql, which also holds the schedule. Before that: 17:00 UTC
+-- (13:30 until 2026-10-21, then 15:45 until 2026-10-22). There are two pulls: 08:00 Eastern,
 -- and a second pull at 11:45 Eastern (15:45 UTC in summer, 16:45 in winter) that fills in accounts Facebook had not
 -- finished reporting. On 2026-10-22 two accounts with spend were still empty at 10:30 Eastern but present by 11:30, which
 -- is why the second pull moved to 11:45. This runs after it in both seasons (it takes about 3 minutes), and before the
@@ -115,9 +117,8 @@ revoke execute on function public.daily_pull_check(boolean, date) from public, a
 
 commit;
 
--- The schedule: 17:00 UTC daily.
-do $$ begin perform cron.unschedule('daily-pull-check'); exception when others then null; end $$;
-select cron.schedule('daily-pull-check', '0 17 * * *', 'select public.daily_pull_check()');
+-- The schedule is set in supabase/sql/morning_audit_wait_for_data.sql (job daily-pull-check, 10:05 Mountain).
+-- Re-running this file leaves it alone.
 
 -- See what it would say right now, without texting:
 select public.daily_pull_check(false);

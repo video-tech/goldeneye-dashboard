@@ -4643,9 +4643,12 @@ function showOverviewChat() {
         // expected "name | field | ... | notes" shape is simply skipped, never shown wrong.
         function parseAuditSignalsForIntelligenceCard(md) {
             if (!md) return [];
-            const SECTION_COLOR = { CRITICAL: '--neg', WATCH: '--warn', 'SCALE CANDIDATES': '--pos', IMPROVING: '--pos' };
+            // RED ALERT is the day read (yesterday, daily.js, listed first since 2026-10-23); the rest are the
+            // 7-day trend below it. A client in both shows once, under the first.
+            const SECTION_COLOR = { 'RED ALERT': '--neg', CRITICAL: '--neg', WATCH: '--warn', 'SCALE CANDIDATES': '--pos', IMPROVING: '--pos' };
             let section = null;
             const out = [];
+            const seen = new Set();
             md.split('\n').forEach(line => {
                 const h = line.match(/^## ([A-Z ]+?) —/);
                 if (h) { section = SECTION_COLOR[h[1].trim()] ? h[1].trim() : null; return; }
@@ -4653,7 +4656,7 @@ function showOverviewChat() {
                 const fields = line.split(' | ');
                 const name = (fields[0] || '').trim();
                 const note = (fields[fields.length - 1] || '').trim();
-                if (name && note) out.push({ client: name, note, dot: SECTION_COLOR[section] });
+                if (name && note && !seen.has(name)) { seen.add(name); out.push({ client: name, note, dot: SECTION_COLOR[section] }); }
             });
             return out;
         }

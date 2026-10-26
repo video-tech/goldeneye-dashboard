@@ -2,6 +2,21 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-26",
+      "area": "Reports",
+      "title": "The morning audit reports on yesterday: red alerts and ads to turn off",
+      "what": "Each morning's audit now judges every client on the day before. A client is red alert when yesterday's cost per lead was at or over their target, or they got no leads on a target's worth of spend (clients with no target are measured against their own last 30 days). Under the written audit is a list of ads to turn off: every ad at or over target yesterday, with its last 7 days beside it. Ads under 4 days old are listed separately as still learning. The 7, 14 and 30-day figures are there for comparison, and the old 7-day read is shown as each client's trend. Red alerts text Tenny and Aidan once a morning; the Run audit button never texts.",
+      "note": "A red alert can come from one expensive day, since a single day's cost per lead moves a lot on small accounts.",
+      "action": "Deploy meta-sync, then morning-audit, then run supabase/sql/morning_audit_wait_for_data.sql in the SQL Editor (it also moves the ad-level sync earlier)."
+    },
+    {
+      "date": "2026-10-23",
+      "area": "Reports",
+      "title": "The morning audit lands around 9:00 Mountain, and Aidan gets it by email",
+      "what": "The audit no longer waits for a fixed time. From 9:00 Mountain it runs as soon as every client who spends daily has yesterday's numbers, and at 10:00 at the latest. The second ad pull now checks every 15 minutes from 8:30 to 9:45 Mountain, and only asks Facebook about clients still missing. When the audit is saved, Aidan gets an email with the written audit and every client's figures.",
+      "action": "Set RESEND_API_KEY and AUDIT_EMAIL_TO, deploy morning-audit, then run supabase/sql/morning_audit_wait_for_data.sql in the SQL Editor."
+    },
+    {
       "date": "2026-10-23",
       "area": "Onboarding",
       "title": "No Base works for Ads clients too",
