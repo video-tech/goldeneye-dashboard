@@ -855,7 +855,7 @@
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
     if(tabName === 'seo') renderCpSeo();
-    if(tabName === 'deckcalc') { ensureDeckCalcLoaded(); deckQbRefresh(); }
+    if(tabName === 'deckcalc') { ensureDeckCalcLoaded(); deckQbRefresh(); deckShareLoadHistory(); }
     if(tabName === 'leaderboard') renderAnonymizedLeaderboard();
     if(tabName === 'knowledge') renderKnowledgeBase();
     if(tabName === 'profile') renderCpProfile();
@@ -3477,7 +3477,7 @@ window.maybeShowWeeklyCheckin = function() {
             // The last client's deck must never be sent as this client's estimate.
             deckCalcEstimate = null;
             updateDeckCalcTabVisibility();
-            if(!document.getElementById('cp-view-deckcalc').classList.contains('hidden')) { ensureDeckCalcLoaded(); deckQbRefresh(); }
+            if(!document.getElementById('cp-view-deckcalc').classList.contains('hidden')) { ensureDeckCalcLoaded(); deckQbRefresh(); deckShareLoadHistory(); }
         }
 
         function getLocalYYYYMMDD(dateObj) { return dateObj.getFullYear() + '-' + String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + String(dateObj.getDate()).padStart(2, '0'); }
@@ -9880,6 +9880,7 @@ async function buildChatSeoBriefing(clientName) {
      if (d.deckEstimate && typeof d.deckEstimate === 'object' && Array.isArray(d.deckEstimate.line_items)) {
          deckCalcEstimate = d.deckEstimate;
          deckQbRenderDeck();
+         deckShareRenderDeck();
          return;
      }
      const h = Number(d.iframeHeight);
@@ -10008,6 +10009,150 @@ async function buildChatSeoBriefing(clientName) {
              <span style="color:var(--t1); flex:1;" class="truncate" title="${escapeAttr(r.created_by)}">${escapeAttr(r.customer_name)}</span>
              <span style="color:var(--t1); font-variant-numeric:tabular-nums;">${escapeAttr(total)}</span>
              <span style="color:${color[r.status] || 'var(--t2)'}; width:150px; text-align:right; flex-shrink:0;" title="${escapeAttr(r.error || '')}">${escapeAttr(status)}</span>
+         </div>`;
+     }).join('');
+     wrap.classList.remove('hidden');
+ }
+
+ // ---- Send the homeowner a read-only link (supabase/functions/estimate-share) ----
+ // The same deck the QuickBooks panel uses (deckCalcEstimate, posted by the calculator), frozen
+ // into a link the homeowner opens at estimate.html. The function checks access, re-validates the
+ // lines and stores the snapshot; the page itself needs no sign-in. Links last 30 days, and
+ // "Turn off" ends one at once.
+ const ESTIMATE_SHARE_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/estimate-share";
+ const ESTIMATE_VIEW_BASE = "https://video-tech.github.io/goldeneye-dashboard/estimate.html";
+ let deckShareBusy = false;
+
+ async function callEstimateShare(body) {
+     const { data: { session } } = await supabaseClient.auth.getSession();
+     if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+     const res = await fetch(ESTIMATE_SHARE_FN, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+         body: JSON.stringify(body)
+     });
+     const data = await res.json().catch(() => ({}));
+     return { ok: res.ok, status: res.status, data };
+ }
+
+ const deckShareLinkFor = (token, preview) => `${ESTIMATE_VIEW_BASE}?t=${token}${preview ? '&p=1' : ''}`;
+
+ function deckShareRenderDeck() {
+     const el = document.getElementById('cp-share-deck');
+     const btn = document.getElementById('cp-share-create');
+     if (!el || !btn) return;
+     const e = deckCalcEstimate;
+     if (!e || !Array.isArray(e.line_items) || !e.line_items.length) {
+         el.textContent = 'Waiting for the calculator…';
+         btn.disabled = true;
+         return;
+     }
+     const money = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-US');
+     el.textContent = `${e.total_sqft} sq ft · ${e.material} · ${money(e.price_low)} – ${money(e.price_high)}`;
+     btn.disabled = deckShareBusy;
+ }
+
+ async function deckShareCreate() {
+     const msg = document.getElementById('cp-share-msg');
+     const btn = document.getElementById('cp-share-create');
+     const out = document.getElementById('cp-share-result');
+     const show = (text, color) => { msg.textContent = text; msg.style.color = color; msg.classList.remove('hidden'); };
+     const e = deckCalcEstimate;
+     if (!e || deckShareBusy) return;
+     const client = currentActiveClient;
+     deckShareBusy = true;
+     btn.disabled = true;
+     btn.textContent = 'Creating…';
+     out.classList.add('hidden');
+     show('Making the link…', 'var(--t2)');
+     try {
+         const r = await callEstimateShare({
+             mode: 'create', client,
+             estimate: {
+                 prepared_for: (document.getElementById('cp-share-for')?.value || '').trim(),
+                 line_items: e.line_items, total: e.price_high, price_low: e.price_low, notes: e.notes || null,
+                 inclusions: Array.isArray(e.inclusions_list) ? e.inclusions_list : [],
+                 alternatives: Array.isArray(e.alternatives) ? e.alternatives : [],
+                 business: e.business_name, phone: e.business_phone,
+                 total_sqft: e.total_sqft, deck_levels: e.deck_levels
+             }
+         });
+         if (!r.ok || !r.data.token) {
+             show(r.data.error || `Something went wrong (${r.status}).`, 'var(--neg)');
+         } else {
+             document.getElementById('cp-share-link').value = r.data.url;
+             document.getElementById('cp-share-open').href = deckShareLinkFor(r.data.token, true);
+             out.classList.remove('hidden');
+             let copied = false;
+             try { await navigator.clipboard.writeText(r.data.url); copied = true; } catch (_) { /* the Copy button still works */ }
+             show(copied ? 'Link made and copied. It stays open for 30 days.' : 'Link made. It stays open for 30 days.', 'var(--pos)');
+         }
+     } catch (err) {
+         show(err.message, 'var(--neg)');
+     } finally {
+         deckShareBusy = false;
+         btn.textContent = 'Create link';
+         deckShareRenderDeck();
+         deckShareLoadHistory();
+     }
+ }
+
+ async function deckShareCopy(url) {
+     const msg = document.getElementById('cp-share-msg');
+     try {
+         await navigator.clipboard.writeText(url);
+         if (msg) { msg.textContent = 'Link copied.'; msg.style.color = 'var(--pos)'; msg.classList.remove('hidden'); }
+     } catch (_) { window.prompt('Copy this link:', url); }
+ }
+
+ async function deckShareCopyToken(token) {
+     if (!/^[0-9a-f]{64}$/.test(token)) return;
+     return deckShareCopy(deckShareLinkFor(token, false));
+ }
+
+ async function deckShareRevoke(token) {
+     if (!/^[0-9a-f]{64}$/.test(token)) return;
+     if (!confirm('Turn this link off? The homeowner will see "no longer available".')) return;
+     try {
+         const r = await callEstimateShare({ mode: 'revoke', client: currentActiveClient, token });
+         if (!r.ok) alert(r.data.error || `Something went wrong (${r.status}).`);
+     } catch (err) {
+         alert(err.message);
+     }
+     deckShareLoadHistory();
+ }
+
+ // Read straight from shared_estimates: RLS (client_row_visible) scopes it to this client.
+ async function deckShareLoadHistory() {
+     const wrap = document.getElementById('cp-share-history-wrap');
+     const box = document.getElementById('cp-share-history');
+     if (!wrap || !box) return;
+     const client = currentActiveClient;
+     const { data, error } = await supabaseClient.from('shared_estimates')
+         .select('token, created_at, expires_at, revoked_at, prepared_for, total, view_count, last_viewed_at')
+         .eq('client_name', client).order('created_at', { ascending: false }).limit(10);
+     if (client !== currentActiveClient) return;
+     if (error || !data || !data.length) { wrap.classList.add('hidden'); return; }
+     const day = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+     box.innerHTML = data.filter(r => /^[0-9a-f]{64}$/.test(r.token)).map(r => {
+         const off = !!r.revoked_at, expired = !off && new Date(r.expires_at).getTime() <= Date.now();
+         const status = off ? 'Off' : expired ? 'Expired' : 'Active';
+         const color = off || expired ? 'var(--t3)' : 'var(--pos)';
+         const total = '$' + Math.round(Number(r.total) || 0).toLocaleString('en-US');
+         const views = Number(r.view_count) || 0;
+         const seen = views ? `${views} view${views === 1 ? '' : 's'} · last ${day(r.last_viewed_at)}` : 'Not opened yet';
+         const live = !off && !expired;
+         return `<div style="display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
+             <span style="color:var(--t3); width:52px; flex-shrink:0;">${escapeAttr(day(r.created_at))}</span>
+             <span style="color:var(--t1); flex:1; min-width:120px;" class="truncate">${escapeAttr(r.prepared_for || 'No name')}</span>
+             <span style="color:var(--t1); font-variant-numeric:tabular-nums;">${escapeAttr(total)}</span>
+             <span style="color:var(--t2); min-width:150px;">${escapeAttr(seen)}</span>
+             <span style="color:${color}; width:56px;">${status}</span>
+             ${live ? `<span style="display:flex; gap:10px;">
+                 <a href="#" onclick="deckShareCopyToken('${r.token}'); return false;" style="color:var(--t1); text-decoration:underline;">Copy</a>
+                 <a href="${deckShareLinkFor(r.token, true)}" target="_blank" rel="noopener" style="color:var(--t1); text-decoration:underline;">Open</a>
+                 <a href="#" onclick="deckShareRevoke('${r.token}'); return false;" style="color:var(--neg); text-decoration:underline;">Turn off</a>
+             </span>` : ''}
          </div>`;
      }).join('');
      wrap.classList.remove('hidden');

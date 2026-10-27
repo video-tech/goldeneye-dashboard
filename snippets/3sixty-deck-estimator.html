@@ -197,6 +197,12 @@ input[type=checkbox]{width:15px;height:15px;accent-color:var(--green);cursor:poi
 }
 .herosub{font-size:13px;color:var(--muted);margin-top:5px;}
 .herosub em{font-style:normal;color:var(--subtle);font-size:12px;}
+.altmat{padding:.9rem 1.1rem;}
+.altmat .althead{font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+.altmat .altrow{font-size:13.5px;line-height:1.45;padding:7px 0;border-top:1px solid var(--border);}
+.altmat .altrow:first-of-type{border-top:0;}
+.altmat .altprice{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.altmat .altdiff{color:var(--muted);font-size:12px;white-space:nowrap;}
 .herostats{
   display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
   margin-top:14px;padding-top:12px;border-top:1px solid var(--hair);
@@ -544,6 +550,9 @@ var CONFIG = {
      this page's own config - but there is no reason for a funnel page to receive it. */
   postEstimateToParent: true,
 
+  /* Portal copy only: a "Save this estimate" card that downloads the quote as a PDF. */
+  pdfExport: true,
+
   /* ---- business details ------------------------------------------------- */
   business: {
     name:     "3Sixty Industries",
@@ -665,6 +674,16 @@ var CONFIG = {
      Eye portal copy only. A percent is taken off the total before any
      promotion, so promotions never compound.                              */
   promotions: 10,
+
+  /* "If you went with this material" box under the price. Good / Better / Best
+     here are by DECK MATERIAL only (railing, stairs count, footings and every
+     other choice stay as entered). tierIdx points into tiers[] above; these
+     are the same three materials the simple Good/Better/Best build uses.      */
+  materialCompare: [
+    { label:"Good",   tierIdx:0 },
+    { label:"Better", tierIdx:4 },
+    { label:"Best",   tierIdx:5 }
+  ],
 
   maxLevels: 3,
   levelNames:  ["Main deck","Second level","Third level"],
@@ -1199,6 +1218,27 @@ function yesNo(n, key, val){
 
 /* ---------- estimate output ---------- */
 
+/* The same estimate with every level's decking swapped to each Good/Better/Best
+   material in turn. Only the material changes (decking per sqft and the
+   per-stair rate follow it); a material already chosen on every level is
+   left out, so the box only ever shows alternatives. */
+function materialAlternatives(t){
+  var lv = state.levels.slice(0, state.count), out = [];
+  for(var i=0;i<CONFIG.materialCompare.length;i++){
+    var mc = CONFIG.materialCompare[i], tier = CONFIG.tiers[mc.tierIdx];
+    if(!tier) continue;
+    var same = lv.every(function(d){ return d.tier === mc.tierIdx; });
+    if(same) continue;
+    var swapped = lv.map(function(d){
+      var c = {}; for(var k in d){ if(Object.prototype.hasOwnProperty.call(d, k)) c[k] = d[k]; }
+      c.tier = mc.tierIdx; return c;
+    });
+    var alt = Pricing.total(swapped, state.custom, state.promos);
+    out.push({ label:mc.label, name:tier.mfr + " " + tier.name, low:alt.low, high:alt.high, diff:Math.round(alt.high - t.high) });
+  }
+  return out;
+}
+
 function renderOut(){
   var t = Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos);
   var b = CONFIG.business;
@@ -1221,6 +1261,17 @@ function renderOut(){
   h +=         '<div><div class="statlabel">Deck levels</div><div class="statvalue">' + state.count + '</div></div>';
   h +=       '</div>';
   h +=     '</div>';
+  var alts = materialAlternatives(t);
+  if(alts.length){
+    h += '<div class="card altmat"><div class="althead">Compare materials' + (state.count > 1 ? ' (all levels)' : '') + '</div>';
+    for(var ai=0;ai<alts.length;ai++){
+      var a = alts[ai];
+      h += '<div class="altrow">If you went with <b>' + esc(a.label) + '</b> material (' + esc(a.name) + '), it would be ' +
+           '<span class="altprice">' + money(a.low) + ' &ndash; ' + money(a.high) + '</span> ' +
+           '<span class="altdiff">(' + (a.diff >= 0 ? '+' : '&minus;') + money(Math.abs(a.diff)) + ')</span></div>';
+    }
+    h += '</div>';
+  }
   h +=   '</div>';
   if(!showReal){
     h += '<div class="lockover">';
@@ -1886,6 +1937,177 @@ window.addEventListener("resize", notifyHeight);
 window.addEventListener("load", function(){ setTimeout(notifyHeight, 120); });
 
 /* ---------- current estimate for the framing page (Golden Eye portal only) ---------- */
+/* ---------- PDF export (portal copy only, CONFIG.pdfExport) ---------- */
+/* The estimate as a one-or-two page PDF a rep can save or send. jsPDF is loaded
+   the first time the button is used, so nothing is fetched until then. The
+   model is built from the same buildLineItems() the QuickBooks estimate uses,
+   so the PDF and the QuickBooks lines can never say different things. */
+var JSPDF_URL = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+
+/* jsPDF's built-in fonts only cover Latin-1; drop anything else. */
+function pdfText(s){
+  var out = "", str = String(s == null ? "" : s);
+  for(var i=0;i<str.length;i++){
+    var c = str.charCodeAt(i);
+    if(c === 174 || c === 153) continue;          /* registered / trademark marks */
+    if(c === 183){ out += "-"; continue; }       /* middle dot */
+    out += ((c >= 32 && c <= 126) || (c >= 160 && c <= 255)) ? str.charAt(i) : (c === 10 ? " " : "");
+  }
+  return out;
+}
+
+function pdfMoney(n){
+  var neg = n < 0, v = Math.abs(n);
+  var s = "$" + v.toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+  return neg ? "-" + s : s;
+}
+
+function pdfFileName(preparedFor, d){
+  var base = "", p = String(preparedFor || "");
+  for(var i=0;i<p.length;i++){
+    var c = p.charCodeAt(i);
+    var ok = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+    base += ok ? p.charAt(i) : (base.length && base.charAt(base.length-1) !== "-" ? "-" : "");
+  }
+  while(base.length && base.charAt(base.length-1) === "-") base = base.slice(0, -1);
+  var day = d.getFullYear() + "-" + ("0" + (d.getMonth()+1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  return "3Sixty-Estimate" + (base ? "-" + base : "") + "-" + day + ".pdf";
+}
+
+/* Everything the PDF says, as plain data. */
+function pdfModel(preparedFor){
+  var t = Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos);
+  var rows = buildLineItems(t).map(function(l){
+    var detail = "";
+    if(l.kind === "addon_tbd") detail = "quoted on site";
+    else if(l.qty !== 1 && l.unit !== "ea" && l.unit !== "job") detail = l.qty + " " + l.unit + " x " + pdfMoney(l.rate);
+    else if(l.qty !== 1) detail = l.qty + " x " + pdfMoney(l.rate);
+    return { text: pdfText(l.description), detail: pdfText(detail), amount: l.kind === "addon_tbd" ? "TBD" : pdfMoney(l.amount) };
+  });
+  var d = new Date();
+  return {
+    business: pdfText(CONFIG.business.name), phone: pdfText(CONFIG.business.phone),
+    date: d.toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" }),
+    fileName: pdfFileName(preparedFor, d),
+    preparedFor: pdfText(preparedFor || ""),
+    rows: rows, total: pdfMoney(t.high),
+    inclusions: inclusionsFor(t).map(pdfText),
+    notes: pdfText(state.notes || "")
+  };
+}
+
+/* Draw the model with a jsPDF constructor. Letter size, points. */
+function drawPdf(JsPDF, m){
+  var doc = new JsPDF({ unit:"pt", format:"letter" });
+  var L = 48, R = 564, bottom = 735, y = 60;
+  var green = [38, 70, 52], grey = [110, 110, 110];
+  function ensure(h){ if(y + h > bottom){ doc.addPage(); y = 56; } }
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(20); doc.setTextColor(green[0], green[1], green[2]);
+  doc.text(m.business, L, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(grey[0], grey[1], grey[2]);
+  doc.text("Deck estimate", R, y - 12, { align:"right" });
+  doc.text(m.date, R, y + 2, { align:"right" });
+  y += 20;
+  if(m.phone){ doc.text(m.phone, L, y); y += 14; }
+  if(m.preparedFor){
+    y += 8; doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(30, 30, 30);
+    doc.text("Prepared for: " + m.preparedFor, L, y); y += 6;
+  }
+  y += 14; doc.setDrawColor(200, 200, 200); doc.line(L, y, R, y); y += 18;
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(grey[0], grey[1], grey[2]);
+  doc.text("ITEM", L, y); doc.text("DETAIL", 350, y); doc.text("AMOUNT", R, y, { align:"right" });
+  y += 8; doc.line(L, y, R, y); y += 16;
+
+  doc.setFontSize(10.5);
+  m.rows.forEach(function(r){
+    var lines = doc.splitTextToSize(r.text, 290);
+    var det = doc.splitTextToSize(r.detail, 130);
+    var h = Math.max(lines.length, det.length) * 13 + 7;
+    ensure(h);
+    doc.setFont("helvetica", "normal"); doc.setTextColor(30, 30, 30);
+    doc.text(lines, L, y);
+    doc.setTextColor(grey[0], grey[1], grey[2]); doc.setFontSize(9.5);
+    doc.text(det, 350, y); doc.setFontSize(10.5);
+    doc.setTextColor(30, 30, 30);
+    doc.text(r.amount, R, y, { align:"right" });
+    y += h;
+  });
+
+  ensure(44); y += 2; doc.setDrawColor(green[0], green[1], green[2]); doc.line(L, y, R, y); y += 22;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(green[0], green[1], green[2]);
+  doc.text("Estimate total", L, y); doc.text(m.total, R, y, { align:"right" }); y += 30;
+
+  ensure(40);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+  doc.text("Included in every estimate", L, y); y += 15;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+  m.inclusions.forEach(function(x){
+    var ls = doc.splitTextToSize(x, R - L - 14);
+    ensure(ls.length * 13);
+    doc.text("-", L, y); doc.text(ls, L + 12, y); y += ls.length * 13;
+  });
+  y += 10;
+
+  if(m.notes){
+    ensure(40);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.text("Notes", L, y); y += 15;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+    var nl = doc.splitTextToSize(m.notes, R - L);
+    for(var i=0;i<nl.length;i++){ ensure(13); doc.text(nl[i], L, y); y += 13; }
+    y += 10;
+  }
+
+  ensure(30);
+  doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(grey[0], grey[1], grey[2]);
+  var foot = doc.splitTextToSize("This is an estimate. The final price is confirmed at your on-site design consultation.", R - L);
+  doc.text(foot, L, y);
+  return doc;
+}
+
+function loadJsPdf(cb){
+  if(window.jspdf && window.jspdf.jsPDF) return cb(null, window.jspdf.jsPDF);
+  var s = document.createElement("script");
+  s.src = JSPDF_URL;
+  s.onload = function(){ cb(window.jspdf && window.jspdf.jsPDF ? null : new Error("jsPDF did not load"), window.jspdf && window.jspdf.jsPDF); };
+  s.onerror = function(){ cb(new Error("Could not load the PDF tool. Check the connection and try again.")); };
+  document.head.appendChild(s);
+}
+
+function downloadPdf(){
+  var msg = document.getElementById("pdf-msg"), btn = document.getElementById("pdf-btn");
+  var who = document.getElementById("pdf-for");
+  var say = function(t){ if(msg) msg.textContent = t; };
+  if(btn) btn.disabled = true; say("Making your PDF...");
+  loadJsPdf(function(err, JsPDF){
+    if(btn) btn.disabled = false;
+    if(err || !JsPDF){ say(err ? err.message : "Could not make the PDF."); return; }
+    try{
+      var m = pdfModel(who ? who.value.trim() : "");
+      drawPdf(JsPDF, m).save(m.fileName);
+      say("Saved " + m.fileName);
+    }catch(e){ say("Could not make the PDF: " + (e && e.message ? e.message : e)); if(window.console) console.warn(e); }
+  });
+}
+
+/* The small card under the notes. Only built where pdfExport is on. */
+function mountPdfCard(){
+  if(!CONFIG.pdfExport || document.getElementById("pdf-card")) return;
+  var notes = document.getElementById("notes");
+  if(!notes || !notes.parentNode || !notes.parentNode.parentNode) return;
+  var card = document.createElement("div");
+  card.className = "card"; card.id = "pdf-card";
+  card.innerHTML =
+    '<div class="cardhead">Save this estimate</div>' +
+    '<div class="inline" style="margin-top:6px;">' +
+      '<input type="text" id="pdf-for" placeholder="Prepared for (customer name, optional)" maxlength="80" style="flex:1;min-width:150px;" aria-label="Prepared for">' +
+      '<button type="button" class="btn-add" id="pdf-btn" style="margin:0;" onclick="downloadPdf()">Download PDF</button>' +
+    '</div>' +
+    '<div class="fhint" id="pdf-msg" style="margin-top:6px;"></div>';
+  notes.parentNode.parentNode.appendChild(card);
+}
+
 /* The same deck fields and line items the GHL payload carries, minus identity: the portal
    collects the customer itself. line_items goes as an array here, not the JSON string GHL's
    flat fields need. Only once unlocked, so a gated build that ever turned this on could not
@@ -1894,6 +2116,7 @@ function notifyEstimate(){
   if(!CONFIG.postEstimateToParent || !state.unlocked) return;
   try{
     var p = buildPayload();
+    var tt = Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos);
     window.parent.postMessage({ deckEstimate:{
       line_items:  JSON.parse(p.line_items),
       total_sqft:  p.total_sqft,
@@ -1906,7 +2129,11 @@ function notifyEstimate(){
       price_low:   p.price_low,
       price_high:  p.price_high,
       notes:       p.notes,
-      inclusions:  inclusionsFor(Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos)).join("; ")
+      inclusions:  inclusionsFor(tt).join("; "),
+      inclusions_list: inclusionsFor(tt),
+      alternatives: materialAlternatives(tt).map(function(x){ return { label:x.label, name:x.name, low:x.low, high:x.high }; }),
+      business_name: CONFIG.business.name,
+      business_phone: CONFIG.business.phone
     }}, "*");
   }catch(e){ if(window.console) console.warn("deck estimate post failed:", e); }
 }
@@ -1915,6 +2142,7 @@ function notifyEstimate(){
 /* "input", not "change": change only fires on blur, so a rep who types a note and goes straight
    to the portal's Create button would send the estimate without it. Notes don't re-render, so
    the framing page is told directly. */
+mountPdfCard();
 document.getElementById("notes").addEventListener("input", function(){
   state.notes = this.value;
   notifyEstimate();

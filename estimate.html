@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Your deck estimate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Fraunces:opsz,wght@9..144,300;9..144,400&display=swap">
+<style>
+/* The page a homeowner opens from a link their contractor sent (supabase/functions/estimate-share).
+   Read-only by construction: it only ever displays a frozen snapshot, and every piece of text goes
+   in through textContent, never innerHTML. Same palette as the cost calculator. */
+:root{
+  --bg:#f5f3ee; --card:#ffffff; --surface:#edeae3;
+  --border:#d5d2c9; --hair:#e5e2d9;
+  --text:#1c1a17; --muted:#6b6860; --subtle:#9c9a92;
+  --green:#63893c; --green-dark:#4a6e2a; --green-light:#eef4e6;
+  --danger:#a3332f; --danger-light:#fbeae9;
+  --r:10px; --rl:14px; --shadow:0 1px 3px rgba(28,26,23,.05);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+#page{max-width:760px;margin:0 auto;padding:22px 16px 48px;}
+.head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;padding-bottom:14px;margin-bottom:18px;border-bottom:1px solid var(--hair);}
+.brand{font-family:"Fraunces",Georgia,serif;font-size:22px;font-weight:300;color:var(--green-dark);letter-spacing:-.2px;}
+.date{font-size:13px;color:var(--muted);}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--rl);padding:1.1rem 1.2rem;margin-bottom:14px;box-shadow:var(--shadow);}
+.hero{padding:1.5rem 1.3rem;}
+.for{font-size:14px;color:var(--muted);margin-bottom:4px;}
+.for b{color:var(--text);font-weight:600;}
+.meta{font-size:12px;color:var(--muted);margin-bottom:10px;}
+.price{font-family:"Fraunces",Georgia,serif;font-size:44px;font-weight:300;letter-spacing:-1.5px;line-height:1.05;font-variant-numeric:tabular-nums;}
+.sub{font-size:13px;color:var(--muted);margin-top:6px;}
+.valid{display:inline-block;margin-top:12px;font-size:12px;color:var(--green-dark);background:var(--green-light);border-radius:20px;padding:3px 11px;}
+h2{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:10px;}
+table{width:100%;border-collapse:collapse;}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600;text-align:left;padding:0 0 7px;border-bottom:1px solid var(--hair);}
+td{padding:9px 0;border-bottom:1px solid var(--hair);vertical-align:top;font-size:14px;}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:12px;}
+.detail{color:var(--muted);font-size:12.5px;}
+.mdetail{display:none;}
+tr.total td{border-bottom:0;border-top:2px solid var(--green-dark);padding-top:12px;font-weight:600;font-size:16px;color:var(--green-dark);}
+.alt{padding:9px 0;border-top:1px solid var(--hair);font-size:14px;}
+.alt:first-of-type{border-top:0;}
+.alt .p{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.alt .d{color:var(--muted);font-size:12.5px;white-space:nowrap;}
+ul{margin:0 0 0 18px;font-size:14px;}
+li{padding:2px 0;}
+.notes{white-space:pre-wrap;font-size:14px;}
+.foot{font-size:12.5px;color:var(--muted);margin-top:18px;}
+.foot a{color:var(--green-dark);font-weight:600;text-decoration:none;}
+.btns{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;}
+button.print{font:inherit;font-size:13px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:var(--r);padding:8px 14px;cursor:pointer;}
+button.print:hover{border-color:var(--green);color:var(--green-dark);}
+.msg{text-align:center;padding:48px 16px;}
+.msg h1{font-family:"Fraunces",Georgia,serif;font-weight:300;font-size:26px;margin-bottom:8px;}
+.msg p{color:var(--muted);max-width:420px;margin:0 auto;}
+@media(max-width:560px){.price{font-size:34px;} td{font-size:13.5px;} .hide-sm{display:none;} .mdetail{display:block;}}
+@media print{body{background:#fff;} .btns{display:none;} .card{box-shadow:none;break-inside:avoid;}}
+</style>
+</head>
+<body>
+<div id="page"><div class="msg"><p>Loading your estimate&hellip;</p></div></div>
+
+<script>
+/* The function this page reads from. Public "view" mode: the token in the link is the only credential. */
+var FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/estimate-share";
+
+var page = document.getElementById("page");
+
+function el(tag, cls, text){
+  var e = document.createElement(tag);
+  if(cls) e.className = cls;
+  if(text != null) e.textContent = text;
+  return e;
+}
+function money(n, cents){
+  var v = Math.abs(Number(n) || 0);
+  var s = "$" + v.toLocaleString("en-US", cents ? { minimumFractionDigits:2, maximumFractionDigits:2 } : { maximumFractionDigits:0 });
+  return Number(n) < 0 ? "-" + s : s;
+}
+function longDate(iso){
+  var p = String(iso || "").slice(0, 10).split("-");
+  if(p.length !== 3) return "";
+  return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+}
+
+function showMessage(title, text){
+  page.textContent = "";
+  var m = el("div", "msg");
+  m.appendChild(el("h1", null, title));
+  m.appendChild(el("p", null, text));
+  page.appendChild(m);
+}
+
+/* "280 sqft x $45.00" under an item, the same wording the calculator uses. */
+function detailFor(l){
+  if(l.kind === "addon_tbd") return "quoted on site";
+  if(l.qty !== 1 && l.unit !== "ea" && l.unit !== "job") return l.qty + " " + l.unit + " x " + money(l.rate, true);
+  if(l.qty !== 1) return l.qty + " x " + money(l.rate, true);
+  return "";
+}
+
+function render(res){
+  var s = res.snapshot || {};
+  page.textContent = "";
+
+  var head = el("div", "head");
+  head.appendChild(el("div", "brand", s.business || "Deck estimate"));
+  head.appendChild(el("div", "date", longDate(s.date)));
+  page.appendChild(head);
+
+  /* the price */
+  var hero = el("div", "card hero");
+  if(s.prepared_for){
+    var f = el("div", "for", "Estimate for ");
+    f.appendChild(el("b", null, s.prepared_for));
+    hero.appendChild(f);
+  }
+  var bits = [];
+  if(s.deck_levels) bits.push(s.deck_levels > 1 ? s.deck_levels + "-level deck" : "Single-level deck");
+  if(s.total_sqft) bits.push(s.total_sqft + " sqft");
+  bits.push("fully installed");
+  hero.appendChild(el("div", "meta", bits.join(" · ")));
+  var low = s.price_low != null ? s.price_low : s.total;
+  hero.appendChild(el("div", "price", low < s.total ? money(low) + " – " + money(s.total) : money(s.total)));
+  hero.appendChild(el("div", "sub", "All materials and labor included"));
+  if(res.expires_at) hero.appendChild(el("div", "valid", "Valid until " + longDate(String(res.expires_at).slice(0, 10))));
+  page.appendChild(hero);
+
+  /* the breakdown */
+  var card = el("div", "card");
+  card.appendChild(el("h2", null, "Estimate breakdown"));
+  var t = el("table");
+  var thead = el("thead"), hr = el("tr");
+  hr.appendChild(el("th", null, "Item"));
+  var thd = el("th", "hide-sm", "Details"); hr.appendChild(thd);
+  var tha = el("th", "num", "Price"); hr.appendChild(tha);
+  thead.appendChild(hr); t.appendChild(thead);
+  var tb = el("tbody");
+  (s.line_items || []).forEach(function(l){
+    var tr = el("tr");
+    var first = el("td", null, l.description);
+    var d = detailFor(l);
+    if(d){ first.appendChild(el("div", "detail mdetail", d)); }
+    tr.appendChild(first);
+    tr.appendChild(el("td", "num detail hide-sm", d));
+    tr.appendChild(el("td", "num", l.kind === "addon_tbd" ? "TBD" : money(l.amount, true)));
+    tb.appendChild(tr);
+  });
+  var tot = el("tr", "total");
+  tot.appendChild(el("td", null, "Estimate total"));
+  tot.appendChild(el("td", "hide-sm"));
+  tot.appendChild(el("td", "num", money(s.total, true)));
+  tb.appendChild(tot);
+  t.appendChild(tb); card.appendChild(t);
+  if(s.price_low != null && s.price_low < s.total){
+    card.appendChild(el("p", "foot", "The low end of the range is about 5% under this total, to allow for normal variation in site conditions."));
+  }
+  page.appendChild(card);
+
+  /* other materials */
+  if(s.alternatives && s.alternatives.length){
+    var alt = el("div", "card");
+    alt.appendChild(el("h2", null, "Compare materials"));
+    s.alternatives.forEach(function(a){
+      var row = el("div", "alt");
+      row.appendChild(document.createTextNode("If you went with "));
+      row.appendChild(el("b", null, a.label));
+      row.appendChild(document.createTextNode(" material (" + a.name + "), it would be "));
+      row.appendChild(el("span", "p", money(a.low) + " – " + money(a.high)));
+      var diff = Math.round(a.high - s.total);
+      row.appendChild(document.createTextNode(" "));
+      row.appendChild(el("span", "d", "(" + (diff >= 0 ? "+" : "−") + money(Math.abs(diff)) + ")"));
+      alt.appendChild(row);
+    });
+    page.appendChild(alt);
+  }
+
+  /* what is included */
+  if(s.inclusions && s.inclusions.length){
+    var inc = el("div", "card");
+    inc.appendChild(el("h2", null, "Included in every estimate"));
+    var ul = el("ul");
+    s.inclusions.forEach(function(x){ ul.appendChild(el("li", null, x)); });
+    inc.appendChild(ul);
+    page.appendChild(inc);
+  }
+
+  if(s.notes){
+    var n = el("div", "card");
+    n.appendChild(el("h2", null, "Notes"));
+    n.appendChild(el("div", "notes", s.notes));
+    page.appendChild(n);
+  }
+
+  var foot = el("p", "foot", "This is an estimate. The final price is confirmed at your on-site design consultation. ");
+  if(s.phone){
+    foot.appendChild(document.createTextNode("Questions? Call "));
+    var a = el("a", null, s.phone);
+    a.href = "tel:" + String(s.phone).replace(/[^0-9+]/g, "");
+    foot.appendChild(a);
+    foot.appendChild(document.createTextNode("."));
+  }
+  page.appendChild(foot);
+
+  var btns = el("div", "btns");
+  var pb = el("button", "print", "Print or save as PDF");
+  pb.type = "button";
+  pb.addEventListener("click", function(){ window.print(); });
+  btns.appendChild(pb);
+  page.appendChild(btns);
+
+  document.title = (s.business ? s.business + " · " : "") + "Your deck estimate";
+}
+
+(function boot(){
+  var q = new URLSearchParams(location.search);
+  var token = (q.get("t") || "").trim();
+  if(!/^[0-9a-f]{64}$/.test(token)){
+    showMessage("This link isn’t complete", "Open the link exactly as it was sent to you, or ask for a new one.");
+    return;
+  }
+  fetch(FN, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "view", token: token, preview: q.get("p") === "1" })
+  }).then(function(r){
+    return r.json().catch(function(){ return {}; }).then(function(data){ return { ok: r.ok, status: r.status, data: data }; });
+  }).then(function(r){
+    if(r.ok && r.data && r.data.snapshot) return render(r.data);
+    if(r.status === 404) return showMessage("This estimate isn’t available", (r.data && r.data.error) || "The link has expired or was turned off. Ask for a new one.");
+    showMessage("We couldn’t load your estimate", "Please try again in a minute.");
+  }).catch(function(){
+    showMessage("We couldn’t load your estimate", "Check your connection and try again.");
+  });
+})();
+</script>
+</body>
+</html>

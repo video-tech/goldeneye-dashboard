@@ -2769,6 +2769,30 @@
                     <iframe id="cp-deckcalc-frame" title="Deck cost estimator" scrolling="no" style="width:100%; border:none; display:block; height:1400px;"></iframe>
                 </div>
 
+                <!-- Send the homeowner a read-only link to this estimate (estimate-share edge function).
+                     Always shown on this tab; the deck comes from the calculator itself
+                     (postEstimateToParent), never re-typed here. The page they open is estimate.html. -->
+                <div id="cp-deckcalc-share" class="glass p-6">
+                    <h3 class="ge-title" style="font-size:16px;">Send the homeowner a link</h3>
+                    <p style="color:var(--t2); font-size:13px; margin-top:6px;">A read-only page with this estimate: the price, every line and what's included. They can look and print it, but can't change anything. It stays open for 30 days and you can turn it off any time.</p>
+                    <p id="cp-share-deck" style="color:var(--t1); font-size:13px; margin-top:14px; margin-bottom:18px;">Waiting for the calculator…</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="modal-label">Prepared for <span style="color:var(--t3);">(optional, shown on the page)</span></label><input type="text" id="cp-share-for" class="glass-input" autocomplete="off" maxlength="80" placeholder="Homeowner name"></div>
+                    </div>
+                    <p id="cp-share-msg" class="text-sm hidden" style="margin-top:16px;"></p>
+                    <div id="cp-share-result" class="hidden" style="margin-top:14px;"><div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <input type="text" id="cp-share-link" class="glass-input" readonly style="flex:1; min-width:240px;" onclick="this.select()">
+                        <button type="button" class="btn text-sm" onclick="deckShareCopy(document.getElementById('cp-share-link').value)">Copy</button>
+                        <a id="cp-share-open" class="btn text-sm" href="#" target="_blank" rel="noopener">Open</a>
+                    </div></div>
+                    <button id="cp-share-create" onclick="deckShareCreate()" class="btn-primary btn text-sm" style="margin-top:16px;" disabled>Create link</button>
+
+                    <div id="cp-share-history-wrap" class="hidden" style="margin-top:28px;">
+                        <h4 class="ge-label">Recent links</h4>
+                        <div id="cp-share-history" style="margin-top:10px;"></div>
+                    </div>
+                </div>
+
                 <!-- Create a QuickBooks estimate from the deck above. Hidden until the deck-estimate
                      edge function says this client's QuickBooks is connected (deckQbRefresh in
                      app.js); until then the tab is exactly what it was. The deck comes from the

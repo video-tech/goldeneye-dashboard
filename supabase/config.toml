@@ -435,3 +435,8 @@ verify_jwt = false
 # (cron secret, or a signed-in admin through _shared/admin-auth.ts), so the gateway's JWT check is off for it.
 [functions.ghl-contact-check]
 verify_jwt = false
+
+# Public by design: the homeowner link page has no sign-in. "view" needs only the link token; every
+# other mode checks the caller inside the function (see estimate-share/handler.ts).
+[functions.estimate-share]
+verify_jwt = false
