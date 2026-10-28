@@ -855,7 +855,7 @@
     if(tabName === 'creatives') renderClientCreatives();
     if(tabName === 'settings') renderCpSettings();
     if(tabName === 'seo') renderCpSeo();
-    if(tabName === 'deckcalc') { ensureDeckCalcLoaded(); deckQbRefresh(); deckShareLoadHistory(); }
+    if(tabName === 'deckcalc') { ensureDeckCalcLoaded(); deckQbRefresh(); deckShareLoadHistory(); deckGhlRefresh(); }
     if(tabName === 'leaderboard') renderAnonymizedLeaderboard();
     if(tabName === 'knowledge') renderKnowledgeBase();
     if(tabName === 'profile') renderCpProfile();
@@ -3477,7 +3477,7 @@ window.maybeShowWeeklyCheckin = function() {
             // The last client's deck must never be sent as this client's estimate.
             deckCalcEstimate = null;
             updateDeckCalcTabVisibility();
-            if(!document.getElementById('cp-view-deckcalc').classList.contains('hidden')) { ensureDeckCalcLoaded(); deckQbRefresh(); deckShareLoadHistory(); }
+            if(!document.getElementById('cp-view-deckcalc').classList.contains('hidden')) { ensureDeckCalcLoaded(); deckQbRefresh(); deckShareLoadHistory(); deckGhlRefresh(); }
         }
 
         function getLocalYYYYMMDD(dateObj) { return dateObj.getFullYear() + '-' + String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + String(dateObj.getDate()).padStart(2, '0'); }
@@ -9881,6 +9881,7 @@ async function buildChatSeoBriefing(clientName) {
          deckCalcEstimate = d.deckEstimate;
          deckQbRenderDeck();
          deckShareRenderDeck();
+         deckGhlRenderDeck();
          return;
      }
      const h = Number(d.iframeHeight);
@@ -10155,6 +10156,227 @@ async function buildChatSeoBriefing(clientName) {
              </span>` : ''}
          </div>`;
      }).join('');
+     wrap.classList.remove('hidden');
+ }
+
+ // ---- Save the estimate PDF to a GHL contact (supabase/functions/ghl-estimate-contact) ----
+ // Search the client's own GHL contacts, pick one, and the calculator's PDF is saved to that contact
+ // (uploaded to their GHL media library, with a note on the contact linking to it). The PDF is made by
+ // the calculator frame, which knows the deck: this page asks it for the bytes with a postMessage and
+ // only accepts the answer from that frame. The panel stays hidden until the function says this client's
+ // GHL is connected. Nothing is sent to the customer.
+ const GHL_ESTIMATE_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ghl-estimate-contact";
+ let deckGhlContact = null;       // the picked contact {id, name, phone, email}
+ let deckGhlResults = [];         // what the last search found
+ let deckGhlBusy = false;
+ let deckGhlSeq = 0;              // drops the answer of a search that has been typed over
+ let deckGhlTimer = null;
+ const deckGhlPending = new Map();   // pdf request id -> resolve
+
+ async function callGhlContactFn(body) {
+     const { data: { session } } = await supabaseClient.auth.getSession();
+     if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+     const res = await fetch(GHL_ESTIMATE_FN, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+         body: JSON.stringify(body)
+     });
+     const data = await res.json().catch(() => ({}));
+     return { ok: res.ok, status: res.status, data };
+ }
+
+ // Answers from the calculator frame (only our own frame is believed).
+ window.addEventListener('message', (e) => {
+     const frame = document.getElementById('cp-deckcalc-frame');
+     if (!frame || e.source !== frame.contentWindow) return;
+     const r = e.data && e.data.pdfResult;
+     if (!r || typeof r.id !== 'string') return;
+     const done = deckGhlPending.get(r.id);
+     if (done) { deckGhlPending.delete(r.id); done(r); }
+ });
+
+ function deckGhlRequestPdf(preparedFor) {
+     const frame = document.getElementById('cp-deckcalc-frame');
+     return new Promise((resolve) => {
+         if (!frame || !frame.contentWindow) return resolve({ error: 'The calculator isn\'t loaded.' });
+         const id = 'pdf' + Date.now() + Math.random().toString(36).slice(2, 8);
+         const timer = setTimeout(() => { deckGhlPending.delete(id); resolve({ error: 'The calculator didn\'t answer. Reload the tab and try again.' }); }, 25000);
+         deckGhlPending.set(id, (r) => { clearTimeout(timer); resolve(r); });
+         frame.contentWindow.postMessage({ makePdf: { id, preparedFor } }, '*');
+     });
+ }
+
+ // Shows the panel only when the function answers ready for THIS client. Anything else leaves it hidden.
+ async function deckGhlRefresh() {
+     const panel = document.getElementById('cp-deckcalc-ghl');
+     if (!panel) return;
+     const client = currentActiveClient;
+     panel.classList.add('hidden');
+     deckGhlContact = null; deckGhlResults = [];
+     try {
+         const r = await callGhlContactFn({ mode: 'status', client });
+         if (client !== currentActiveClient) return;
+         if (!(r.ok && r.data.ready)) return;
+         panel.classList.remove('hidden');
+         deckGhlRenderPicked();
+         deckGhlRenderDeck();
+         deckGhlLoadHistory();
+     } catch (err) {
+         console.warn('ghl-estimate-contact status:', err.message);
+     }
+ }
+
+ function deckGhlRenderDeck() {
+     const el = document.getElementById('cp-ghl-deck');
+     const btn = document.getElementById('cp-ghl-save');
+     if (!el || !btn) return;
+     const e = deckCalcEstimate;
+     if (!e || !Array.isArray(e.line_items) || !e.line_items.length) {
+         el.textContent = 'Waiting for the calculator…';
+         btn.disabled = true;
+         return;
+     }
+     const money = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-US');
+     el.textContent = `${e.total_sqft} sq ft · ${e.material} · ${money(e.price_low)} – ${money(e.price_high)}`;
+     btn.disabled = deckGhlBusy || !deckGhlContact;
+ }
+
+ function deckGhlRenderPicked() {
+     const box = document.getElementById('cp-ghl-picked');
+     const name = document.getElementById('cp-ghl-picked-name');
+     if (!box || !name) return;
+     if (!deckGhlContact) { box.classList.add('hidden'); name.textContent = ''; }
+     else {
+         name.textContent = [deckGhlContact.name, deckGhlContact.phone, deckGhlContact.email].filter(Boolean).join(' · ');
+         box.classList.remove('hidden');
+     }
+     deckGhlRenderDeck();
+ }
+
+ function deckGhlRenderResults(message) {
+     const box = document.getElementById('cp-ghl-results');
+     if (!box) return;
+     box.textContent = '';
+     if (message) {
+         const p = document.createElement('p');
+         p.style.cssText = 'color:var(--t3); font-size:13px; padding:8px 0;';
+         p.textContent = message;
+         box.appendChild(p);
+         return;
+     }
+     deckGhlResults.forEach((c, i) => {
+         const b = document.createElement('button');
+         b.type = 'button';
+         b.style.cssText = 'display:flex; gap:12px; align-items:baseline; width:100%; text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); font-size:13px; color:var(--t1); background:transparent; cursor:pointer;';
+         const n = document.createElement('span'); n.style.cssText = 'flex:1; font-weight:600;'; n.textContent = c.name;
+         const d = document.createElement('span'); d.style.cssText = 'color:var(--t2);'; d.textContent = [c.phone, c.email].filter(Boolean).join(' · ');
+         b.appendChild(n); b.appendChild(d);
+         b.addEventListener('click', () => deckGhlPick(i));
+         box.appendChild(b);
+     });
+ }
+
+ function deckGhlOnType() {
+     clearTimeout(deckGhlTimer);
+     const q = (document.getElementById('cp-ghl-q')?.value || '').trim();
+     if (q.length < 2) { deckGhlSeq++; deckGhlResults = []; deckGhlRenderResults(''); return; }
+     deckGhlTimer = setTimeout(() => deckGhlSearch(q), 350);
+ }
+
+ async function deckGhlSearch(q) {
+     const seq = ++deckGhlSeq;
+     const client = currentActiveClient;
+     deckGhlRenderResults('Searching…');
+     try {
+         const r = await callGhlContactFn({ mode: 'search', client, query: q });
+         if (seq !== deckGhlSeq || client !== currentActiveClient) return;   // typed over, or switched clients
+         if (!r.ok) { deckGhlResults = []; return deckGhlRenderResults(r.data.error || `Something went wrong (${r.status}).`); }
+         deckGhlResults = Array.isArray(r.data.contacts) ? r.data.contacts : [];
+         deckGhlRenderResults(deckGhlResults.length ? '' : 'No contacts found.');
+     } catch (err) {
+         if (seq === deckGhlSeq) deckGhlRenderResults(err.message);
+     }
+ }
+
+ function deckGhlPick(i) {
+     const c = deckGhlResults[i];
+     if (!c) return;
+     deckGhlContact = c;
+     deckGhlResults = [];
+     deckGhlRenderResults('');
+     const q = document.getElementById('cp-ghl-q'); if (q) q.value = '';
+     deckGhlRenderPicked();
+ }
+
+ function deckGhlClear() {
+     deckGhlContact = null;
+     deckGhlRenderPicked();
+ }
+
+ async function deckGhlSave() {
+     const msg = document.getElementById('cp-ghl-msg');
+     const btn = document.getElementById('cp-ghl-save');
+     const show = (text, color) => { msg.textContent = text; msg.style.color = color; msg.classList.remove('hidden'); };
+     if (!deckCalcEstimate || !deckGhlContact || deckGhlBusy) return;
+     const client = currentActiveClient, contact = deckGhlContact;
+     deckGhlBusy = true;
+     btn.disabled = true;
+     btn.textContent = 'Saving…';
+     show('Making the PDF…', 'var(--t2)');
+     try {
+         const pdf = await deckGhlRequestPdf(contact.name);
+         if (pdf.error || !pdf.base64) { show(pdf.error || 'The calculator couldn\'t make the PDF.', 'var(--neg)'); return; }
+         show(`Saving to ${contact.name}…`, 'var(--t2)');
+         const r = await callGhlContactFn({
+             mode: 'attach', client, contact_id: contact.id, file_name: pdf.fileName, pdf_base64: pdf.base64,
+             total: pdf.total, material: pdf.material
+         });
+         if (r.ok && r.data.ok) {
+             show(`Saved to ${r.data.contact_name || contact.name}'s contact in GHL: a note with a link to the PDF.`, 'var(--pos)');
+         } else {
+             show(r.data.error || `Something went wrong (${r.status}).`, r.data.partial ? 'var(--warn)' : 'var(--neg)');
+         }
+     } catch (err) {
+         show(err.message, 'var(--neg)');
+     } finally {
+         deckGhlBusy = false;
+         btn.textContent = 'Save PDF to contact';
+         deckGhlRenderDeck();
+         deckGhlLoadHistory();
+     }
+ }
+
+ // Read straight from contact_estimate_files: RLS (client_row_visible) scopes it to this client.
+ async function deckGhlLoadHistory() {
+     const wrap = document.getElementById('cp-ghl-history-wrap');
+     const box = document.getElementById('cp-ghl-history');
+     if (!wrap || !box) return;
+     const client = currentActiveClient;
+     const { data, error } = await supabaseClient.from('contact_estimate_files')
+         .select('created_at, contact_name, total, status, file_url, error')
+         .eq('client_name', client).order('created_at', { ascending: false }).limit(10);
+     if (client !== currentActiveClient) return;
+     if (error || !data || !data.length) { wrap.classList.add('hidden'); return; }
+     box.textContent = '';
+     data.forEach((r) => {
+         const row = document.createElement('div');
+         row.style.cssText = 'display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;';
+         const cell = (text, css) => { const s = document.createElement('span'); s.style.cssText = css; s.textContent = text; return s; };
+         row.appendChild(cell(new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), 'color:var(--t3); width:52px; flex-shrink:0;'));
+         row.appendChild(cell(r.contact_name || 'Contact', 'color:var(--t1); flex:1; min-width:120px;'));
+         row.appendChild(cell('$' + Math.round(Number(r.total) || 0).toLocaleString('en-US'), 'color:var(--t1); font-variant-numeric:tabular-nums;'));
+         const partial = r.status === 'partial';
+         const st = cell(partial ? 'PDF saved, note failed' : 'Saved', `color:${partial ? 'var(--warn)' : 'var(--pos)'};`);
+         if (r.error) st.title = r.error;
+         row.appendChild(st);
+         if (/^https:\/\//.test(r.file_url || '')) {
+             const a = document.createElement('a');
+             a.href = r.file_url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'PDF';
+             a.style.cssText = 'color:var(--t1); text-decoration:underline;';
+             row.appendChild(a);
+         }
+         box.appendChild(row);
+     });
      wrap.classList.remove('hidden');
  }
 

@@ -2793,6 +2793,29 @@
                     </div>
                 </div>
 
+                <!-- Save the estimate PDF to a contact in the client's own GHL (ghl-estimate-contact edge
+                     function). Hidden until the function says this client's GHL is connected
+                     (deckGhlRefresh in app.js). The PDF is made by the calculator frame above. -->
+                <div id="cp-deckcalc-ghl" class="glass p-6 hidden">
+                    <h3 class="ge-title" style="font-size:16px;">Save the estimate to a GHL contact</h3>
+                    <p style="color:var(--t2); font-size:13px; margin-top:6px;">Find the customer in GHL and the estimate PDF is saved on their contact: a note with a link to the PDF. Nothing is sent to the customer.</p>
+                    <p id="cp-ghl-deck" style="color:var(--t1); font-size:13px; margin-top:14px; margin-bottom:18px;">Waiting for the calculator…</p>
+                    <label class="modal-label" for="cp-ghl-q">Find a contact</label>
+                    <input type="text" id="cp-ghl-q" class="glass-input" autocomplete="off" maxlength="80" placeholder="Name, phone or email" oninput="deckGhlOnType()">
+                    <div id="cp-ghl-results" style="margin-top:6px;"></div>
+                    <div id="cp-ghl-picked" class="hidden" style="margin-top:12px; font-size:13px; color:var(--t2);">
+                        Saving to: <b id="cp-ghl-picked-name" style="color:var(--t1);"></b>
+                        <a href="#" onclick="deckGhlClear(); return false;" style="margin-left:8px; color:var(--t1); text-decoration:underline;">change</a>
+                    </div>
+                    <p id="cp-ghl-msg" class="text-sm hidden" style="margin-top:16px;"></p>
+                    <button id="cp-ghl-save" onclick="deckGhlSave()" class="btn-primary btn text-sm" style="margin-top:16px;" disabled>Save PDF to contact</button>
+
+                    <div id="cp-ghl-history-wrap" class="hidden" style="margin-top:28px;">
+                        <h4 class="ge-label">Recent saves</h4>
+                        <div id="cp-ghl-history" style="margin-top:10px;"></div>
+                    </div>
+                </div>
+
                 <!-- Create a QuickBooks estimate from the deck above. Hidden until the deck-estimate
                      edge function says this client's QuickBooks is connected (deckQbRefresh in
                      app.js); until then the tab is exactly what it was. The deck comes from the

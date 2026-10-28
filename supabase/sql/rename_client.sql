@@ -141,6 +141,8 @@ begin
     update deck_estimates             set client_name = new_name where client_name = old_name;
     -- Added 2026-10-27 with homeowner estimate links (supabase/sql/shared_estimates.sql). Run that first.
     update shared_estimates           set client_name = new_name where client_name = old_name;
+    -- Added 2026-10-28 with PDFs saved to GHL contacts (supabase/sql/contact_estimate_files.sql). Run that first.
+    update contact_estimate_files     set client_name = new_name where client_name = old_name;
     -- Added 2026-10-02 with the Roster page (supabase/sql/client_directory.sql). Run that first.
     update client_profiles            set client_name = new_name where client_name = old_name;
     -- Added 2026-10-05 with meta-sync (supabase/functions/meta-sync/schema.sql). Run that first.

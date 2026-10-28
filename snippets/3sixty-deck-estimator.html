@@ -550,7 +550,7 @@ var CONFIG = {
      this page's own config - but there is no reason for a funnel page to receive it. */
   postEstimateToParent: true,
 
-  /* Portal copy only: a "Save this estimate" card that downloads the quote as a PDF. */
+  /* Portal copy and the staff GHL page: a "Save this estimate" card that downloads the quote as a PDF. */
   pdfExport: true,
 
   /* ---- business details ------------------------------------------------- */
@@ -665,13 +665,12 @@ var CONFIG = {
   ],
 
   /* The most custom line items (a description and a price the rep types) a rep can add, one click at a time. The request allows 80 lines in all.
-     0 on every public build; build-ghl-embed.js sets it for the Golden Eye
-     portal copy only.                                                    */
+     0 on the customer-facing builds. build-ghl-embed.js turns it on for the
+     Golden Eye portal copy and for ghl-embed-open.html (3Sixty staff only).  */
   customLineItems: 20,
 
   /* The most promotions (a name plus a dollar or percent discount) a rep can
-     add. 0 on every public build; build-ghl-embed.js sets it for the Golden
-     Eye portal copy only. A percent is taken off the total before any
+     add. Same builds as customLineItems above. A percent is taken off the total before any
      promotion, so promotions never compound.                              */
   promotions: 10,
 
@@ -1937,7 +1936,7 @@ window.addEventListener("resize", notifyHeight);
 window.addEventListener("load", function(){ setTimeout(notifyHeight, 120); });
 
 /* ---------- current estimate for the framing page (Golden Eye portal only) ---------- */
-/* ---------- PDF export (portal copy only, CONFIG.pdfExport) ---------- */
+/* ---------- PDF export (portal copy and the staff GHL page, CONFIG.pdfExport) ---------- */
 /* The estimate as a one-or-two page PDF a rep can save or send. jsPDF is loaded
    the first time the button is used, so nothing is fetched until then. The
    model is built from the same buildLineItems() the QuickBooks estimate uses,
@@ -2090,6 +2089,30 @@ function downloadPdf(){
     }catch(e){ say("Could not make the PDF: " + (e && e.message ? e.message : e)); if(window.console) console.warn(e); }
   });
 }
+
+/* The Golden Eye portal asks for the PDF itself (to save it on a GHL contact). Only the page that frames us
+   may ask, and only the portal copy, which is the one that has a parent to answer. */
+window.addEventListener("message", function(e){
+  if(!CONFIG.pdfExport || !CONFIG.postEstimateToParent || e.source !== window.parent) return;
+  var d = e.data && e.data.makePdf;
+  if(!d || typeof d.id !== "string") return;
+  var reply = function(o){
+    var r = { id:d.id };
+    for(var k in o){ if(Object.prototype.hasOwnProperty.call(o, k)) r[k] = o[k]; }
+    try{ window.parent.postMessage({ pdfResult:r }, "*"); }catch(x){}
+  };
+  loadJsPdf(function(err, JsPDF){
+    if(err || !JsPDF){ reply({ error: err ? err.message : "Could not load the PDF tool." }); return; }
+    try{
+      var m = pdfModel(String(d.preparedFor || "").slice(0, 80));
+      var uri = drawPdf(JsPDF, m).output("datauristring");
+      var at = uri.indexOf("base64,");
+      var t = Pricing.total(state.levels.slice(0, state.count), state.custom, state.promos);
+      var tier = CONFIG.tiers[state.levels[0].tier];
+      reply({ fileName:m.fileName, base64:uri.slice(at + 7), total:t.high, material: tier ? pdfText(tier.mfr + " " + tier.name) : "" });
+    }catch(x){ reply({ error: "Could not make the PDF: " + (x && x.message ? x.message : x) }); }
+  });
+});
 
 /* The small card under the notes. Only built where pdfExport is on. */
 function mountPdfCard(){
