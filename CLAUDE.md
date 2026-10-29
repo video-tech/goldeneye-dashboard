@@ -1219,6 +1219,13 @@ that folder, then `supabase/sql/rename_client.sql`, then deploy.
   function falls back to asking without the column, but the list does nothing until it exists.
   The SQL also deletes the 42 mislabeled rows. The log line now carries the GHL `location` id.
   12 checks run the real `decide()`, including the column-missing fallback.
+- **Wix embedded forms (2026-10-26, `wixEmbedSite`).** A GHL form in a Wix "Embed HTML" box runs in an iframe on
+  `www-<site-with-dashes>.filesusr.com`, and GHL records that as the landing page, so every PANDEN and Caliber /contact lead was
+  dropped as off-site (the logs show 3 PANDEN leads on Oct 19-20). The iframe host now counts as the site whose dashed name it
+  carries (exact match; `lead_hosts` is checked against the decoded host), and the row stores the site host with the referrer's
+  path (the page the form is on). The iframe's referrer is always the site, so these classify as `unknown` / `wix_embed`, never
+  organic; only a UTM tag on the form's own URL survives. `wix-embed.test.mjs` (node `--experimental-strip-types`), 22 checks,
+  2 of 2 breakages caught.
 - **Every new SEO client needs one real Google-search test lead** before their organic count is
   trusted, because each site's form or booking setup decides whether the source survives.
 - **Security.** `verify_jwt = false` for this one function, because GHL can't send the gateway

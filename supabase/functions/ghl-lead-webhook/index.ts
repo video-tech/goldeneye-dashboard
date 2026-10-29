@@ -79,6 +79,22 @@ export function onDomain(host: string | null, domain: string | null): boolean {
     return h === domain || h.endsWith("." + domain);
 }
 
+// A GHL form pasted into a Wix "Embed HTML" box runs in an iframe on Wix's user-files host, so
+// GHL records that iframe as the landing page: https://www-example-com.filesusr.com/html/….html
+// for a form on www.example.com. The first label is the site's host with its dots turned into
+// dashes. Returns that site host when the embed belongs to `domain`, else null. Found 2026-10-23:
+// every /contact form lead from PANDEN and Caliber had been dropped as "not on the client's
+// website". Compared in the dashed form, so a domain with its own hyphens still matches exactly.
+export function wixEmbedSite(host: string | null, domain: string | null): string | null {
+    if (!host || !domain) return null;
+    const m = /^([a-z0-9-]+)\.filesusr\.com$/.exec(host.toLowerCase());
+    if (!m) return null;
+    const dashed = domain.replace(/\./g, "-");
+    if (m[1] === dashed) return domain;
+    if (m[1] === "www-" + dashed) return "www." + domain;
+    return null;
+}
+
 function hostOf(u: unknown): string | null {
     const s = str(u);
     if (!s) return null;
@@ -291,9 +307,15 @@ export async function decide(payload: any): Promise<Decision> {
     // A domain can host other people's pages: Midas's own domain carries client landing pages
     // (everoakcabinetry.midasmediafirm.com), and those are not Midas's website leads. A client
     // with lead_hosts counts only those hosts.
+    // The site host the form was really on: the landing host itself, or the page a Wix
+    // embedded form sits in (wixEmbedSite).
+    const siteHost = (c: LocationClient): string | null => {
+        const domain = domainOf(c.gsc_property);
+        return onDomain(landingHost, domain) ? landingHost : wixEmbedSite(landingHost, domain);
+    };
     const hostAllowed = (c: LocationClient) =>
-        !c.lead_hosts?.length || c.lead_hosts.some((h) => bare(String(h)) === bare(landingHost));
-    const onSite = seo.filter((c) => onDomain(landingHost, domainOf(c.gsc_property)));
+        !c.lead_hosts?.length || c.lead_hosts.some((h) => bare(String(h)) === bare(siteHost(c)!));
+    const onSite = seo.filter((c) => siteHost(c) !== null);
     if (!onSite.length) return skip("landing page is not on the client's website");
     const matches = onSite.filter(hostAllowed);
     if (!matches.length) return skip("landing page is on the client's domain but not one of its own lead hosts");
@@ -301,6 +323,17 @@ export async function decide(payload: any): Promise<Decision> {
 
     const client = matches[0];
     const c = classify(payload, domainOf(client.gsc_property));
+    const site = siteHost(client)!;
+    if (site !== landingHost) {
+        // A Wix embed: record the page the form sits on, which GHL gives as the referrer, and
+        // say why the source is lost. The iframe's referrer is always the site itself, so the
+        // visitor's real source never reaches GHL.
+        let ref: URL | null = null;
+        try { ref = new URL(String(payload.contact?.attributionSource?.referrer ?? "")); } catch { ref = null; }
+        c.landing_host = site;
+        c.landing_path = ref && onDomain(ref.hostname, domainOf(client.gsc_property)) ? ref.pathname : null;
+        if (c.source === "unknown" && c.source_detail === "self_referral") c.source_detail = "wix_embed";
+    }
     await storeLead({
         ghl_contact_id: contactId,
         client_name: client.name,

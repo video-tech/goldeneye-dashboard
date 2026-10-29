@@ -10,6 +10,12 @@
       "action": "Deploy meta-sync, then morning-audit, then run supabase/sql/morning_audit_wait_for_data.sql in the SQL Editor (it also moves the ad-level sync earlier)."
     },
     {
+      "date": "2026-10-26",
+      "area": "SEO",
+      "title": "Website leads from Wix contact forms now count",
+      "what": "A GHL form placed on a Wix site sits inside a Wix frame, and Golden Eye was reading that frame as a different website, so every lead from PANDEN's and Caliber's contact forms was thrown away. They now count as website leads, recorded against the page the form is on. Their source shows as unknown, because the frame hides where the visitor came from."
+    },
+    {
       "date": "2026-10-23",
       "area": "Reports",
       "title": "The morning audit lands around 9:00 Mountain, and Aidan gets it by email",
