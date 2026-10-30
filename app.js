@@ -7490,7 +7490,7 @@ async function buildReportSeoBlock(clientName, s, e) {
         const priorStart = new Date(priorEnd); priorStart.setDate(priorStart.getDate() - days + 1);
         const range = { p_client: seoClient.name, p_start: ymd(s), p_end: ymd(e), p_prior_start: ymd(priorStart), p_prior_end: ymd(priorEnd) };
 
-        const [ovRes, kwRes, almostRes, logRes, dailyRes] = await Promise.all([
+        const [ovRes, kwRes, almostRes, logRes, dailyRes, wlRes] = await Promise.all([
             supabaseClient.rpc('seo_client_overview', range),
             supabaseClient.rpc('seo_keyword_summary', range),
             supabaseClient.rpc('seo_almost_page_one', { ...range, p_min_impressions: Math.max(10, days), p_limit: 5 }),
@@ -7498,7 +7498,8 @@ async function buildReportSeoBlock(clientName, s, e) {
                 .eq('client_name', seoClient.name).gte('live_date', range.p_start).lte('live_date', range.p_end)
                 .order('live_date', { ascending: false }),
             supabaseClient.from('seo_daily').select('date, clicks, impressions, position')
-                .eq('client_name', seoClient.name).gte('date', range.p_start).lte('date', range.p_end).order('date')
+                .eq('client_name', seoClient.name).gte('date', range.p_start).lte('date', range.p_end).order('date'),
+            supabaseClient.rpc('seo_website_leads', range)
         ]);
 
         const daily = dailyRes.data || [];
@@ -7535,6 +7536,13 @@ async function buildReportSeoBlock(clientName, s, e) {
                 lines.push(`- Leads from Google (tracked on their website): ${delta(ov.organic_leads, ov.prior_organic_leads, 'leads')}`);
             } else if (range.p_end >= LEAD_TRACKING_START) {
                 lines.push(`- Leads from Google (tracked on their website): ${(num(ov.organic_leads) || 0).toLocaleString()} — tracking started ${LEAD_TRACKING_START}, so there is nothing to compare with yet`);
+            }
+            // All website leads, when some arrive with no source (a form that hides it), so the report doesn't read as zero
+            const wl = websiteLeadsSummary(wlRes?.data?.[0], ov.organic_leads, ov.prior_organic_leads, range);
+            if (wl) {
+                lines.push(`- All leads through their website, any source (their website form doesn't always pass on where a visitor came from, so never call these all Google leads): ${wl.comparable
+                    ? delta(wl.cur, wl.prior, 'leads')
+                    : `${wl.cur.toLocaleString()} — tracking started ${wl.start}, so there is nothing to compare with yet`}`);
             }
             if (num(ov.google_closes)) lines.push(`- Jobs they told us they closed from Google: ${num(ov.google_closes)}${num(ov.google_revenue) ? ` worth $${Math.round(num(ov.google_revenue)).toLocaleString()}` : ''} (from their own check-ins)`);
             // Only when it's genuinely positive, the same rule as their SEO tab
@@ -7626,7 +7634,7 @@ async function buildChatSeoBriefing(clientName) {
         const range = { p_client: c.name, p_start: ymd(s), p_end: ymd(e), p_prior_start: ymd(priorStart), p_prior_end: ymd(priorEnd) };
         const safe = p => p.then(r => r, err => ({ error: err }));
 
-        const [base, dailyRes, pagesRes, moversRes, kwRes, compRes, auditRes, leadsRes, logRes] = await Promise.all([
+        const [base, dailyRes, pagesRes, moversRes, kwRes, compRes, auditRes, leadsRes, logRes, wlRes] = await Promise.all([
             buildReportSeoBlock(c.name, s, e),
             safe(supabaseClient.from('seo_daily').select('date, clicks, impressions, position')
                 .eq('client_name', c.name).gte('date', ymd(trendStart)).lte('date', range.p_end).order('date')),
@@ -7640,8 +7648,11 @@ async function buildChatSeoBriefing(clientName) {
                 .eq('client_name', c.name).gte('created_at', ymd(priorStart)).lte('created_at', `${range.p_end}T23:59:59`)),
             safe(supabaseClient.from('seo_changelog').select('live_date, kind, title')
                 .eq('client_name', c.name).gte('live_date', ymd(logStart)).lte('live_date', range.p_end)
-                .order('live_date', { ascending: true }).limit(60))
+                .order('live_date', { ascending: true }).limit(60)),
+            safe(supabaseClient.rpc('seo_website_leads', range))
         ]);
+        // When this client's lead tracking began (earlier than the global date when their history was backfilled)
+        const leadStart = String(wlRes?.data?.[0]?.tracking_start || LEAD_TRACKING_START).slice(0, 10);
 
         const parts = [];
         if (c.seo_start_date) parts.push(`SEO work for this client started ${String(c.seo_start_date).slice(0, 10)}.`);
@@ -7706,7 +7717,7 @@ async function buildChatSeoBriefing(clientName) {
         }
 
         const leads = leadsRes.data || [];
-        if (!leadsRes.error && range.p_end >= LEAD_TRACKING_START) {
+        if (!leadsRes.error && range.p_end >= leadStart) {
             const count = (from, to) => {
                 const out = {};
                 for (const l of leads) {
@@ -7716,7 +7727,7 @@ async function buildChatSeoBriefing(clientName) {
                 return out;
             };
             const fmt = o => Object.keys(o).length ? Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') : 'none';
-            parts.push(`WEBSITE LEADS BY SOURCE (lead tracking began ${LEAD_TRACKING_START}; nothing before that was measured, so never compare with earlier periods): last 28 days: ${fmt(count(range.p_start, range.p_end))}${range.p_prior_end >= LEAD_TRACKING_START ? `; previous 28 days: ${fmt(count(range.p_prior_start, range.p_prior_end))}` : ''}`);
+            parts.push(`WEBSITE LEADS BY SOURCE (lead tracking began ${leadStart}; nothing before that was measured, so never compare with earlier periods; "unknown" means the form didn't pass on where the visitor came from, never assume Google; "paid" is ad funnels): last 28 days: ${fmt(count(range.p_start, range.p_end))}${range.p_prior_start >= leadStart ? `; previous 28 days: ${fmt(count(range.p_prior_start, range.p_prior_end))}` : ''}`);
         }
 
         const text = parts.length ? parts.join('\n\n') : 'SEO is connected for this client, but no data has synced yet.';
@@ -7774,6 +7785,19 @@ async function buildChatSeoBriefing(clientName) {
      return leads.filter(l => { if (l.source !== 'organic') return false; const d = new Date(l.created_at); return d >= s && d <= e; }).length;
  }
 
+ // Website leads, from seo_website_leads: every lead from the client's own site except paid funnels, whatever its source,
+ // and the day tracking began for that client (earlier than LEAD_TRACKING_START when their history was backfilled, like
+ // PANDEN's from 2024). Some forms hide the source (a GHL form in a Wix frame), so "Leads from Google" can read 0 while the
+ // site brings in leads. Null when the RPC failed or website leads say nothing beyond the organic count.
+ // comparable: the whole prior window falls inside tracking, so a change can be stated.
+ function websiteLeadsSummary(wl, organicCur, organicPrior, range) {
+     if (!wl) return null;
+     const cur = Number(wl.website_leads) || 0, prior = Number(wl.prior_website_leads) || 0;
+     if (cur + prior <= (Number(organicCur) || 0) + (Number(organicPrior) || 0)) return null;
+     const start = String(wl.tracking_start || LEAD_TRACKING_START).slice(0, 10);
+     return { cur, prior, start, comparable: range.p_prior_start >= start };
+ }
+
  // opts.invert: true means a DECREASE is the improvement — position, where a smaller
  // number is better, is the one metric on this tab that needs it.
  function seoDeltaPill(cur, prior, opts) {
@@ -7793,7 +7817,8 @@ async function buildChatSeoBriefing(clientName) {
  async function loadSeoAdminData(clientName) {
      const [dailyRes, leadsRes] = await Promise.all([
          supabaseClient.from('seo_daily').select('date, clicks, impressions, position').eq('client_name', clientName).order('date'),
-         supabaseClient.from('lead_sources').select('created_at, source').eq('client_name', clientName)
+         // Organic only: the tile counts nothing else, and a backfilled history (PANDEN: 500+ rows) would near the 1000-row cap
+         supabaseClient.from('lead_sources').select('created_at, source').eq('client_name', clientName).eq('source', 'organic')
      ]);
      if (dailyRes.error) console.error('seo_daily load failed:', dailyRes.error);
      if (leadsRes.error) console.error('lead_sources load failed:', leadsRes.error);
@@ -9714,6 +9739,19 @@ async function buildChatSeoBriefing(clientName) {
          setTile('seo-kpi-pos', cur.position != null ? cur.position.toFixed(1) : '—', seoDeltaPill(cur.position, pri.position, { invert: true }));
          setTile('seo-kpi-leads', curLeads.toLocaleString(), seoDeltaPill(curLeads, priLeads));
 
+         // Website leads: always shown here (admins want the number even when it matches the organic one)
+         const wlRange = { p_client: clientName, p_start: seoLocalYmd(s), p_end: seoLocalYmd(e), p_prior_start: seoLocalYmd(priorStart), p_prior_end: seoLocalYmd(priorEnd) };
+         supabaseClient.rpc('seo_website_leads', wlRange).then(({ data, error }) => {
+             const el = document.getElementById('seo-kpi-webleads');
+             if (!el || cSelectedAccount !== clientName && normalize(cSelectedAccount) !== normalize(clientName)) return;
+             const wl = data?.[0];
+             if (error || !wl) { if (error) console.error('seo_website_leads failed:', error); el.innerText = '—'; return; }
+             const cur = Number(wl.website_leads) || 0, prior = Number(wl.prior_website_leads) || 0;
+             const start = String(wl.tracking_start || LEAD_TRACKING_START).slice(0, 10);
+             el.innerHTML = `${cur.toLocaleString()} ${wlRange.p_prior_start >= start ? seoDeltaPill(cur, prior) : '<span class="text-gray-500 text-[10px] font-bold">—</span>'}`;
+             el.title = `Tracked since ${start}`;
+         });
+
          // Changelog first, so the chart can draw its markers. A client's entries number in the
          // dozens, not the thousands, so they're read whole.
          const { data: changelog, error: changelogErr } = await supabaseClient
@@ -10552,7 +10590,7 @@ async function buildChatSeoBriefing(clientName) {
      // Hold the previous render while refetching (no flash). Show the spinner only the first time.
      if (body.classList.contains('hidden')) { empty.classList.add('hidden'); loading.classList.remove('hidden'); }
 
-     const [ovRes, sinceRes, kwRes, almostRes, dailyRes, logRes, vsRes] = await Promise.all([
+     const [ovRes, sinceRes, kwRes, almostRes, dailyRes, logRes, vsRes, wlRes] = await Promise.all([
          supabaseClient.rpc('seo_client_overview', range),
          supabaseClient.rpc('seo_since_start', { p_client: client }),
          supabaseClient.rpc('seo_keyword_summary', range),
@@ -10560,7 +10598,9 @@ async function buildChatSeoBriefing(clientName) {
          supabaseClient.from('seo_daily').select('date, clicks').eq('client_name', client).gte('date', range.p_start).lte('date', range.p_end).order('date'),
          supabaseClient.from('seo_changelog').select('id, live_date, kind, title, url, notes').eq('client_name', client).order('live_date', { ascending: false }).limit(200),
          // Competitors: the section hides itself when the SQL isn't there or nobody is tracked
-         supabaseClient.rpc('seo_competitor_overview', { p_client: client, p_start: range.p_start, p_end: range.p_end })
+         supabaseClient.rpc('seo_competitor_overview', { p_client: client, p_start: range.p_start, p_end: range.p_end }),
+         // All website leads; the line hides itself when the SQL isn't there
+         supabaseClient.rpc('seo_website_leads', range)
      ]);
      if (token !== cpSeoRenderToken) return;   // a newer render (client or range change) owns the tab
 
@@ -10587,6 +10627,18 @@ async function buildChatSeoBriefing(clientName) {
          const d = $('cp-seo-leads-delta'); d.className = 'text-xs font-bold text-gray-500'; d.innerText = `Tracking began ${cpSeoDate(LEAD_TRACKING_START)}`;
      } else {
          cpSeoDelta($('cp-seo-leads-delta'), ov.organic_leads, ov.prior_organic_leads, 5, n(ov.prior_organic_leads) === 1 ? 'lead' : 'leads');
+     }
+     if (wlRes?.error) console.error('Organic Search: seo_website_leads failed', wlRes.error);
+     const wl = websiteLeadsSummary(wlRes?.data?.[0], ov.organic_leads, ov.prior_organic_leads, range);
+     const wlBox = $('cp-seo-webleads');
+     if (wlBox) {
+         wlBox.classList.toggle('hidden', !wl);
+         if (wl) {
+             $('cp-seo-webleads-count').innerText = wl.cur.toLocaleString();
+             const d = $('cp-seo-webleads-delta');
+             if (wl.comparable) cpSeoDelta(d, wl.cur, wl.prior, 5, wl.prior === 1 ? 'lead' : 'leads');
+             else { d.className = 'text-xs font-bold text-gray-500'; d.innerText = `Tracking began ${cpSeoDate(wl.start)}`; }
+         }
      }
      $('cp-seo-visits').innerText = (n(ov.clicks) || 0).toLocaleString();
      cpSeoDelta($('cp-seo-visits-delta'), ov.clicks, ov.prior_clicks, 50, 'visits');

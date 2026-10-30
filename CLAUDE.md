@@ -1226,6 +1226,18 @@ that folder, then `supabase/sql/rename_client.sql`, then deploy.
   path (the page the form is on). The iframe's referrer is always the site, so these classify as `unknown` / `wix_embed`, never
   organic; only a UTM tag on the form's own URL survives. `wix-embed.test.mjs` (node `--experimental-strip-types`), 22 checks,
   2 of 2 breakages caught.
+- **Website leads (2026-10-30, `supabase/sql/seo_website_leads.sql`).** `seo_website_leads(client, start, end, prior_start, prior_end)`
+  counts every `lead_sources` row except `paid` (any source, Denver days) and returns `tracking_start`: the earlier of 2026-09-11
+  and the client's first lead, so a client backfilled from GHL is compared over what was really measured. SECURITY INVOKER.
+  Organic counts keep the global `LEAD_TRACKING_START`, because a backfill can't say which old leads came from Google.
+  - **Why:** PANDEN's form is in a Wix frame, so all its leads are `unknown` / `wix_embed` and Leads from Google reads 0.
+    `panden_lead_backfill*.sql` (scratchpad, run 2026-10-30) loaded its 510 website-form leads from Jan 2024; its 3,564 quiz-funnel
+    leads were left out (paid). Since: about 15 a month, flat from 2024 to Oct 2026.
+  - **Where:** admin SEO tab tile `seo-kpi-webleads` (always shown); client tab `#cp-seo-webleads`, shown only when website leads
+    exceed organic ones (`websiteLeadsSummary`); a line in `buildReportSeoBlock` telling the model not to call them all Google
+    leads; and the chat's by-source section uses the client's own start date. The admin organic-leads load is now `source = organic`
+    only, so a backfilled history can't reach the 1000-row cap.
+  - **Tests:** `seo_website_leads.test.mjs` (PGlite) 11, 3 of 3 breakages caught; `tests/website-leads.test.mjs` 17, 2 of 2 caught.
 - **Every new SEO client needs one real Google-search test lead** before their organic count is
   trusted, because each site's form or booking setup decides whether the source survives.
 - **Security.** `verify_jwt = false` for this one function, because GHL can't send the gateway

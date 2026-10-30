@@ -1160,12 +1160,13 @@
                                     <button type="button" onclick="openCaptureSeoBaseline()" class="text-xs font-bold text-gray-300 bg-white/5 hover:bg-white/10 px-4 py-2 rounded-lg transition" title="Save today's numbers for this range permanently, so a case study's baseline can't drift if Search Console later revises this period"><i class="fa-solid fa-camera mr-1.5"></i>Capture Baseline</button>
                                     <button type="button" onclick="openSeoCaseStudy()" class="text-xs font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-4 py-2 rounded-lg transition"><i class="fa-solid fa-file-lines mr-1.5"></i>Case Study</button>
                                 </div>
-                                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
                                     <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Clicks</p><h4 class="text-xl font-bold text-blue-400" id="seo-kpi-clicks">0</h4></div>
                                     <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Impressions</p><h4 class="text-xl font-bold text-purple-400" id="seo-kpi-imp">0</h4></div>
                                     <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg CTR</p><h4 class="text-xl font-bold text-green-400" id="seo-kpi-ctr">0%</h4></div>
                                     <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Avg Position</p><h4 class="text-xl font-bold text-yellow-400" id="seo-kpi-pos">0.0</h4></div>
                                     <div class="glass p-4"><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Organic Leads</p><h4 class="text-xl font-bold text-emerald-400" id="seo-kpi-leads">0</h4></div>
+                                    <div class="glass p-4" title="Every lead from the client's own website except paid funnels, whatever its source. Some forms (like a GHL form inside a Wix frame) hide the source, so these aren't all counted as organic."><p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Website Leads</p><h4 class="text-xl font-bold text-teal-300" id="seo-kpi-webleads">—</h4></div>
                                 </div>
                                 <div class="glass p-6 min-h-[400px]">
                                     <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-6 text-center">Organic Traffic Trend</h3>
@@ -2664,6 +2665,11 @@
                                 <p id="cp-seo-leads" class="text-4xl md:text-5xl font-bold text-white tracking-tight">0</p>
                                 <p id="cp-seo-leads-delta" class="text-xs font-bold"></p>
                                 <p class="text-xs text-gray-500">People who found you on Google and reached out through your website</p>
+                                <div id="cp-seo-webleads" class="hidden pt-3 mt-2 border-t border-white/10 space-y-1">
+                                    <p class="text-sm text-gray-300"><span id="cp-seo-webleads-count" class="text-lg font-bold text-white">0</span> leads from your website in total</p>
+                                    <p id="cp-seo-webleads-delta" class="text-xs font-bold"></p>
+                                    <p class="text-xs text-gray-500">Every enquiry through your website. Some website forms don't tell us where the visitor came from, so not all of these are counted as Google above.</p>
+                                </div>
                             </div>
                             <div id="cp-seo-jobs" class="py-5 md:px-6 md:border-l border-t md:border-t-0 border-white/10 space-y-1.5"></div>
                             <div class="py-5 md:pl-6 md:border-l border-t md:border-t-0 border-white/10 space-y-1.5">

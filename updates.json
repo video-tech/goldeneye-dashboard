@@ -2,6 +2,13 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-10-30",
+      "area": "SEO",
+      "title": "Website leads: every lead from a client's site, not only the ones traced to Google",
+      "what": "Some website forms hide where a visitor came from (PANDEN's contact form sits inside a Wix frame), so Leads from Google read 0 while the site was bringing in leads. The SEO tab now has a Website Leads tile beside Organic Leads, and the client's Organic Search tab shows their total website leads under Leads from Google whenever there are more of them. Ad funnel leads are left out. A client whose older leads were loaded from GHL is compared from their first lead (PANDEN: January 2024). Weekly reports and the chat get the same number, and are told not to call them all Google leads.",
+      "action": "Run supabase/sql/seo_website_leads.sql in the SQL Editor. Until then the new tile shows a dash and nothing else changes."
+    },
+    {
       "date": "2026-10-26",
       "area": "Reports",
       "title": "The morning audit reports on yesterday: red alerts and ads to turn off",
