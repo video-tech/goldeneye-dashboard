@@ -16,7 +16,7 @@ let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) pass++; else { fail++; console.log('FAIL:', n); } };
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
 const cut = (from, to) => { const a = app.indexOf(from), b = app.indexOf(to, a + 1); if (a < 0 || b < 0) throw new Error('marker ' + (a < 0 ? from : to)); return app.slice(a, b); };
-const code = cut('function obClientWebsiteStatus', '// ---- private and secret answers')
+const code = cut('const CLIENT_FACT_DEFAULTS', '// ---- private and secret answers')
     + cut('const OB_QUESTION_TYPES', '// Offer the questions above this one')
     + cut('function readObQuestions', 'function obQuestionProblems');
 

@@ -1974,6 +1974,10 @@
                                     <option value="">Package: Base + add-ons</option>
                                     <option value="no">Package: No Base</option>
                                 </select>
+                                <select id="ob-preview-contractor" class="glass-input !py-1.5 !w-48" onchange="runOnboardingPreview()">
+                                    <option value="">Business: contractor</option>
+                                    <option value="no">Business: not a contractor</option>
+                                </select>
                             </div>
                             <div id="ob-preview-result" class="text-sm"></div>
                         </div>
@@ -2421,7 +2425,7 @@
                 <div class="cp-split grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div class="cp-order-checkins space-y-3">
                         <h3 class="ge-label px-1">02. your weekly numbers.</h3>
-                        <div class="glass overflow-x-auto"><table class="history-table w-full"><thead><tr class="text-left"><th>Week of</th><th>Estimates</th><th>Closed</th><th class="text-right">Revenue</th></tr></thead><tbody id="job-history-body"></tbody></table></div>
+                        <div class="glass overflow-x-auto"><table class="history-table w-full"><thead><tr class="text-left"><th>Week of</th><th id="job-history-th-est">Estimates</th><th id="job-history-th-closed">Closed</th><th class="text-right">Revenue</th></tr></thead><tbody id="job-history-body"></tbody></table></div>
                     </div>
 
                     <div class="cp-order-tasks space-y-3">
@@ -3124,6 +3128,14 @@
                             <p class="text-[10px] mt-1" style="color:var(--t3);">No Base skips everything GHL: no GHL account, texting, free website or automations. Tick Ads management or SEO Growth above too.</p>
                         </div>
                         <div class="col-span-2">
+                            <label class="modal-label">Business type</label>
+                            <select id="new-client-contractor" class="glass-input">
+                                <option value="">Contractor (goes to the customer, quotes and closes jobs)</option>
+                                <option value="no">Not a contractor (shop, clinic, studio, agency, real estate...)</option>
+                            </select>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Not a contractor swaps the questions about travel, job value, estimates, financing and renderings for ones that fit, and relabels their weekly check-in.</p>
+                        </div>
+                        <div class="col-span-2">
                             <label class="modal-label">Website</label>
                             <select id="new-client-website-status" class="glass-input">
                                 <option value="">Not sure yet</option>
@@ -3236,6 +3248,14 @@
                                 <option value="no">No Base (Ads or SEO only)</option>
                             </select>
                             <p class="text-[10px] mt-1" style="color:var(--t3);">No Base skips everything GHL: no GHL account, texting, free website or automations. Tick Ads management or SEO Growth above too.</p>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="modal-label">Business type</label>
+                            <select id="edit-client-contractor" class="glass-input">
+                                <option value="">Contractor (goes to the customer, quotes and closes jobs)</option>
+                                <option value="no">Not a contractor (shop, clinic, studio, agency, real estate...)</option>
+                            </select>
+                            <p class="text-[10px] mt-1" style="color:var(--t3);">Not a contractor swaps the questions about travel, job value, estimates, financing and renderings for ones that fit, and relabels their weekly check-in.</p>
                         </div>
                         <div class="col-span-2">
                             <label class="modal-label">Website</label>

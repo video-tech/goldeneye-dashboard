@@ -587,6 +587,34 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
   this file, in PGlite: Base + SEO and Base only get exactly the steps they got before, SEO only gets none of the Base ones, re-running
   changes nothing. 22 checks, 4 of 4 breakages caught. `tests/seo-only-package.test.mjs` (jsdom), 18 checks, 3 of 3 caught; ghl-account 3 more.
 
+**Contractor or not (built 2026-11-02, `supabase/sql/contractor_fact.sql`).** Onboarding and the check-in were written for
+contractors (go to the customer, quote and close jobs). `clients.contractor` is `'no'` for any other business (shop, clinic,
+studio, agency, real estate); null or `yes` is a contractor, so every existing client is unchanged. Two groups only.
+- **It's a client fact, so the one rule still decides.** `contractor` is in `onboarding_fact_defaults()` (unset = `yes`) and
+  `onboarding_client_facts()`. **That file restates all four facts**, because the last file to redefine the defaults wins: a
+  later one must carry `contractor` too. Set by an admin only (Business type in Add / Edit Client, shown on the Roster
+  profile); `set_client_onboarding_facts()` ignores the key. Before the SQL, saving "Not a contractor" is refused with the
+  file to run, never saved as a contractor.
+- **Steps:** "Your jobs and offers" is tagged `{"contractor": ["yes"]}` and "Your customers and offers" (new, Ads, `{"contractor": ["no"]}`)
+  replaces it: what a new customer is worth, close share (both team-only), how people book, offer, ad cities.
+- **Questions inside a step carry the same tag** (`q.fact_conditions`), applied in `obQuestionsFor()` by `obFactConditionsMatch()`, which
+  mirrors `onboarding_facts_match()` (an unknown fact hides the question). Service area: "Do your customers come to you, or do you
+  go to them?" (`c_visit`) replaces the travel radius and excluded areas for non-contractors, who see the neutral versions
+  (`c_radius_nc`, `c_exclude_nc`) only for "We go to them" / "Both". Your new website has neutral features, pages and content
+  questions (`w_*_nc`). The Templates question editor has "Only ask if the business is" chips and keeps any tag it has no chip for.
+- **Check-in words only** (`checkinTerms(client)`): appointments held / new customers instead of estimates / jobs closed, in the form
+  (the Roster passes `opts.client` for a VA), the history, the health tab, the case study and SEO tile, and the chat and report prompts.
+  The columns (`estimates_count`, `closes_count`, `closes_by_source`) are unchanged, so every total and SEO function still adds up.
+  The all-clients dashboard tiles still say Estimates.
+- **Also:** Quick start's CRM list gains Mindbody, Vagaro, Square, Calendly (for everyone); the team step's "quotes or closes jobs"
+  reads "books or signs up customers" (`obStepDescription`). Set to `no` on 2026-11-02: Anxiety Solutions, Astra Real Estate,
+  FreeBird Recruiting, PureAirK9, Tattoo Ink Utah.
+- **Not done:** the website style picker's four looks come from contractor sites; the GHL Master pipeline (Estimate scheduled / Estimate
+  sent) and cost-quiz fields (`ghl-setup/plan.ts`) are unchanged and adjusted by hand; `ghl-account` doesn't pick a pipeline by the fact.
+- **Order:** app.js first (a Templates save from an app.js with no Contractor chips would strip the tags), then the SQL.
+- **Tests:** `supabase/sql/contractor_fact.test.mjs` runs the real earlier SQL then this file in PGlite, 40 checks, 4 of 4 breakages
+  caught; `tests/contractor-fact.test.mjs` (jsdom), 42 checks, 4 of 4 caught.
+
 **Questions steps (built 2026-09-15)** are a step type answered inside Golden Eye rather than an
 embedded GHL form, for forms nothing in GHL uses. The SEO intake is one. Schema is in
 `supabase/sql/onboarding_questions.sql`.

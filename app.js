@@ -750,6 +750,11 @@
                 const { data: pkgRows } = await supabaseClient.from('clients').select('name, base_package').in('name', allowedClients);
                 (pkgRows || []).forEach(p => portalClientRows.filter(r => r.name === p.name).forEach(r => { r.base_package = p.base_package; }));
             } catch (e) { console.warn('Package not loaded:', e); }
+            // Contractor or not (contractor_fact.sql): its own query too, for the same reason. Failing means everyone is a contractor.
+            try {
+                const { data: ctRows } = await supabaseClient.from('clients').select('name, contractor').in('name', allowedClients);
+                (ctRows || []).forEach(p => portalClientRows.filter(r => r.name === p.name).forEach(r => { r.contractor = p.contractor; }));
+            } catch (e) { console.warn('Contractor flag not loaded:', e); }
 
             // client_name is matched here rather than in the query: the column holds
             // free text and reports are saved with whatever name was selected, so an
@@ -2037,7 +2042,7 @@ window.renderGetStarted = function() {
                     </div>
                     <div>
                         <h4 class="font-bold ${complete ? 'text-gray-400 line-through' : 'text-white'}">${escapeAttr(stripSlashEscapes(s.title))}</h4>
-                        ${s.description && (!complete || expand) ? `<p class="text-sm text-gray-400 mt-1">${escapeAttr(stripSlashEscapes(s.description))}</p>` : ''}
+                        ${s.description && (!complete || expand) ? `<p class="text-sm text-gray-400 mt-1">${escapeAttr(stripSlashEscapes(obStepDescription(s)))}</p>` : ''}
                     </div>
                 </div>
                 <div class="flex items-center gap-3 shrink-0">
@@ -2165,6 +2170,32 @@ function clientIsSeoOnly(clientName) {
     return row?.base_package === 'no';
 }
 
+// Contractor or not (clients.contractor = 'no', contractor_fact.sql). Unset counts as a contractor, like every other
+// client fact: these defaults mirror onboarding_fact_defaults() in the database.
+const CLIENT_FACT_DEFAULTS = { contractor: 'yes', base_package: 'yes', facebook_page: 'yes', crm_choice: 'no' };
+function obClientFact(clientName, key) {
+    const want = normalize(clientName || '');
+    const row = portalClientRows.find(c => normalize(c.name) === want) || globalClientsData.find(c => normalize(c.name) === want);
+    return row?.[key] || CLIENT_FACT_DEFAULTS[key];
+}
+function clientIsContractor(clientName) {
+    return obClientFact(clientName, 'contractor') !== 'no';
+}
+// The same rule as onboarding_facts_match(): every key with a non-empty list must have the client's value in it, and a
+// key we know nothing about hides the question rather than showing it to everyone.
+function obFactConditionsMatch(conds, clientName) {
+    const entries = Object.entries(conds || {}).filter(([, v]) => Array.isArray(v) && v.length);
+    return entries.every(([k, v]) => v.includes(obClientFact(clientName, k)));
+}
+
+// A step's description for this client. The team step asks for "anyone who quotes or closes jobs", which reads wrong
+// for a business that isn't a contractor (contractor_fact.sql), so only that phrase is swapped.
+function obStepDescription(s, clientName = currentActiveClient) {
+    const d = s?.description || '';
+    if (s?.step_type === 'team' && !clientIsContractor(clientName)) return d.replace(/quotes or closes jobs/i, 'books or signs up customers');
+    return d;
+}
+
 function obClientWebsiteStatus(clientName) {
     const want = normalize(clientName || '');
     const row = portalClientRows.find(c => normalize(c.name) === want) || globalClientsData.find(c => normalize(c.name) === want);
@@ -2183,7 +2214,9 @@ function obQuestionsFor(step, clientName) {
     return (Array.isArray(step.questions) ? step.questions : [])
         .filter(q => q && q.id && q.label)
         .filter(q => !(q.website_statuses || []).length || (web && q.website_statuses.includes(web)))
-        .filter(q => !(q.service_keys || []).length || !svc || q.service_keys.some(k => svc.includes(k)));
+        .filter(q => !(q.service_keys || []).length || !svc || q.service_keys.some(k => svc.includes(k)))
+        // Tagged with a client fact (contractor_fact.sql): a question for contractors only, or for everyone else only
+        .filter(q => obFactConditionsMatch(q.fact_conditions, clientName));
 }
 
 // ---- private and secret answers (onboarding_questionnaire.sql) ----
@@ -3072,6 +3105,32 @@ const money0 = n => '$' + Math.round(Number(n) || 0).toLocaleString();
 // Where a closed job came from. "google" is the SEO row: the SEO tab's "Jobs closed from
 // Google" reads it, and only it. The keys are stored in weekly_checkins.closes_by_source, so
 // don't rename them. See supabase/sql/weekly_checkins_closes_by_source.sql.
+// The weekly check-in keeps its columns (estimates_count, closes_count, closes_by_source) for everyone, so totals, health
+// scores and the SEO functions work the same. Only the words change for a business that isn't a contractor
+// (contractor_fact.sql): appointments held instead of estimates given, new customers instead of jobs closed.
+function checkinTerms(clientName) {
+    if (clientIsContractor(clientName)) {
+        return {
+            estimates: 'Estimates given', estimatesShort: 'Estimates', est: 'est',
+            closedWord: 'Closed', closedLower: 'closed',
+            jobsHead: 'Jobs', jobsLong: 'Jobs closed', noun: ['job', 'jobs'],
+            sourcesHead: 'Jobs closed and revenue, by where the customer came from',
+            blank: 'Leave blank if nothing closed. A zero week is fine, just enter 0.',
+            googleJobs: 'Jobs closed from Google', googleToldUs: 'Jobs they told us they closed from Google',
+            outcomes: 'estimates sent, jobs closed, revenue'
+        };
+    }
+    return {
+        estimates: 'Appointments held', estimatesShort: 'Appointments', est: 'appts',
+        closedWord: 'New customers', closedLower: 'new',
+        jobsHead: 'Customers', jobsLong: 'New customers', noun: ['new customer', 'new customers'],
+        sourcesHead: 'New customers and revenue, by where they came from',
+        blank: 'Leave blank if nobody new signed up. A zero week is fine, just enter 0.',
+        googleJobs: 'New customers from Google', googleToldUs: 'New customers they told us they got from Google',
+        outcomes: 'appointments held, new customers, revenue'
+    };
+}
+
 const CHECKIN_SOURCES = [
     { key: 'google',   label: 'Google search / your website', hint: 'Found you on Google, Google Maps or your website' },
     { key: 'ads',      label: 'Facebook / Instagram ads',     hint: '' },
@@ -3090,9 +3149,10 @@ window.updateCheckinSourceTotal = function(suffix) {
         if (j) { jobs += Number(j) || 0; anyJobs = true; }
         if (r) { rev += Number(r) || 0; anyRev = true; }
     });
+    const T = checkinTerms(el.dataset.client);
     el.innerText = anyJobs || anyRev
-        ? `Total: ${jobs} job${jobs === 1 ? '' : 's'} · ${money0(rev)}`
-        : 'Leave blank if nothing closed. A zero week is fine, just enter 0.';
+        ? `Total: ${jobs} ${T.noun[jobs === 1 ? 0 : 1]} · ${money0(rev)}`
+        : T.blank;
 };
 
 // opts lets the Roster reuse the form for a VA's entry: its own row to prefill, its own save
@@ -3101,6 +3161,9 @@ function weeklyCheckinFormHtml(suffix, opts = {}) {
     const submitCall = opts.submitCall || `submitWeeklyCheckin('${suffix}')`;
     const submitLabel = opts.submitLabel || (existing ? 'Update this week' : 'Submit');
     const v = f => existing?.[f] ?? '';
+    // opts.client lets the Roster show a VA the right words for the client they are logging for
+    const checkinClient = opts.client || currentActiveClient;
+    const T = checkinTerms(checkinClient);
 
     // Prefill each source row from a saved breakdown. A check-in saved before sources existed
     // has only totals, so those go under "Other / not sure": they aren't lost, and they aren't
@@ -3118,7 +3181,7 @@ function weeklyCheckinFormHtml(suffix, opts = {}) {
                         ${s.hint ? `<span class="block text-[11px] leading-tight" style="color:var(--t3);">${s.hint}</span>` : ''}
                     </div>
                     <input type="number" min="0" step="1" inputmode="numeric" id="wc-src-${s.key}-jobs-${suffix}" class="glass-input" placeholder="0"
-                        aria-label="${s.label}: jobs closed" value="${escapeAttr(cellVal(s.key, 'closes'))}" oninput="updateCheckinSourceTotal('${suffix}')">
+                        aria-label="${s.label}: ${T.jobsLong.toLowerCase()}" value="${escapeAttr(cellVal(s.key, 'closes'))}" oninput="updateCheckinSourceTotal('${suffix}')">
                     <input type="number" min="0" step="0.01" inputmode="decimal" id="wc-src-${s.key}-rev-${suffix}" class="glass-input" placeholder="$0"
                         aria-label="${s.label}: revenue" value="${escapeAttr(cellVal(s.key, 'revenue'))}" oninput="updateCheckinSourceTotal('${suffix}')">
                 </div>`).join('');
@@ -3126,17 +3189,17 @@ function weeklyCheckinFormHtml(suffix, opts = {}) {
     return `
         <div class="space-y-4">
             <div>
-                <label class="modal-label">Estimates given</label>
+                <label class="modal-label">${T.estimates}</label>
                 <input type="number" min="0" step="1" id="wc-estimates-${suffix}" class="glass-input" placeholder="0" value="${escapeAttr(v('estimates_count'))}">
             </div>
             <div>
-                <label class="modal-label">Jobs closed and revenue, by where the customer came from</label>
+                <label class="modal-label">${T.sourcesHead}</label>
                 <div class="space-y-2 mt-1">
                     <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_6.5rem] gap-2 ge-label">
-                        <span>Came from</span><span>Jobs</span><span>Revenue</span>
+                        <span>Came from</span><span>${T.jobsHead}</span><span>Revenue</span>
                     </div>
                     ${sourceRows}
-                    <p id="wc-src-total-${suffix}" class="text-xs pt-1" style="color:var(--t2);"></p>
+                    <p id="wc-src-total-${suffix}" class="text-xs pt-1" style="color:var(--t2);" data-client="${escapeAttr(checkinClient || '')}"></p>
                 </div>
             </div>
             <div>
@@ -3277,6 +3340,7 @@ window.renderWeeklyCheckin = function() {
 
     const num = v => v !== null && v !== undefined;
 
+    const T = checkinTerms(currentActiveClient);
     history.innerHTML = weeks.map(w => {
         const indirect = w.contributors.reduce((n, c) => n + (parseInt(c.indirect_leads) || 0), 0);
         const anyIndirect = w.contributors.some(c => num(c.indirect_leads));
@@ -3289,8 +3353,8 @@ window.renderWeeklyCheckin = function() {
                     <div class="flex flex-wrap justify-between gap-x-4 text-[11px]" style="color:var(--t3);">
                         <span>${escapeAttr(stripSlashEscapes(c.contact_name || c.contact_phone || 'Unknown'))}${c.source === 'portal' ? '' : ' <span style="opacity:0.6;">(text)</span>'}</span>
                         <span>
-                            ${num(c.estimates_count) ? c.estimates_count + ' est' : ''}
-                            ${num(c.closes_count) ? ' &middot; ' + c.closes_count + ' closed' : ''}
+                            ${num(c.estimates_count) ? c.estimates_count + ' ' + T.est : ''}
+                            ${num(c.closes_count) ? ' &middot; ' + c.closes_count + ' ' + T.closedLower : ''}
                             ${num(c.revenue_total) ? ' &middot; ' + money0(c.revenue_total) : ''}
                             ${num(c.indirect_leads) ? ' &middot; ' + c.indirect_leads + ' ad-attributed' : ''}
                         </span>
@@ -3300,8 +3364,8 @@ window.renderWeeklyCheckin = function() {
         return `<div class="glass px-4 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm">
             <span class="ge-num whitespace-nowrap" style="color:var(--t2);">${weekRangeLabel(w.week_start)}</span>
             <div class="flex flex-wrap gap-x-6 gap-y-1">
-                <span style="color:var(--t3);">Estimates ${cell(w.reportedEstimates, w.estimates_count)}</span>
-                <span style="color:var(--t3);">Closed ${cell(w.reportedCloses, w.closes_count)}</span>
+                <span style="color:var(--t3);">${T.estimatesShort} ${cell(w.reportedEstimates, w.estimates_count)}</span>
+                <span style="color:var(--t3);">${T.closedWord} ${cell(w.reportedCloses, w.closes_count)}</span>
                 <span style="color:var(--t3);">Revenue ${cell(w.reportedRevenue, money0(w.revenue_total))}</span>
                 ${w.reportedSources ? `<span style="color:var(--t3);">From Google ${cell(true, `${w.google_closes} · ${money0(w.google_revenue)}`)}</span>` : ''}
                 <span style="color:var(--t3);">Ad-attributed ${cell(anyIndirect, indirect)}</span>
@@ -3582,6 +3646,10 @@ updateAgencyPowerTicker();
         // was recorded. Replaces the old manually-logged job history.
         function renderPortalHistory() {
             const body = document.getElementById('job-history-body');
+            const histT = checkinTerms(currentActiveClient);
+            const thEst = document.getElementById('job-history-th-est'), thClosed = document.getElementById('job-history-th-closed');
+            if (thEst) thEst.innerText = histT.estimatesShort;
+            if (thClosed) thClosed.innerText = histT.closedWord;
             if (!body) return;
             body.innerHTML = '';
 
@@ -5946,10 +6014,11 @@ async function fetchHealthData() {
             }
 
             const expected = activeContactCount(cSelectedAccount);
+            const histT = checkinTerms(cSelectedAccount);
 
             let html = `<table class="w-full text-left text-sm">
                 <thead class="text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10">
-                    <tr><th class="py-2">Week of</th><th>Estimates</th><th>Closed</th><th>Revenue</th><th>Reported</th><th></th></tr>
+                    <tr><th class="py-2">Week of</th><th>${histT.estimatesShort}</th><th>${histT.closedWord}</th><th>Revenue</th><th>Reported</th><th></th></tr>
                 </thead><tbody class="divide-y divide-white/5">`;
 
             weeks.forEach((w, i) => {
@@ -5978,8 +6047,8 @@ async function fetchHealthData() {
                     w.contributors.forEach(c => {
                         html += `<tr>
                             <td class="py-1 pr-4">${escapeHTML(c.contact_name || c.contact_phone || 'Unknown')}</td>
-                            <td class="pr-4">${c.estimates_count ?? '&mdash;'} est</td>
-                            <td class="pr-4">${c.closes_count ?? '&mdash;'} closed</td>
+                            <td class="pr-4">${c.estimates_count ?? '&mdash;'} ${histT.est}</td>
+                            <td class="pr-4">${c.closes_count ?? '&mdash;'} ${histT.closedLower}</td>
                             <td class="pr-4">${c.revenue_total ? '$' + Number(c.revenue_total).toLocaleString() : '&mdash;'}</td>
                             <td class="italic opacity-70">${c.parse_confidence === 'low' && c.raw_reply ? '&ldquo;' + escapeHTML(c.raw_reply) + '&rdquo;' : ''}</td>
                         </tr>`;
@@ -7544,7 +7613,7 @@ async function buildReportSeoBlock(clientName, s, e) {
                     ? delta(wl.cur, wl.prior, 'leads')
                     : `${wl.cur.toLocaleString()} — tracking started ${wl.start}, so there is nothing to compare with yet`}`);
             }
-            if (num(ov.google_closes)) lines.push(`- Jobs they told us they closed from Google: ${num(ov.google_closes)}${num(ov.google_revenue) ? ` worth $${Math.round(num(ov.google_revenue)).toLocaleString()}` : ''} (from their own check-ins)`);
+            if (num(ov.google_closes)) lines.push(`- ${checkinTerms(clientName).googleToldUs}: ${num(ov.google_closes)}${num(ov.google_revenue) ? ` worth $${Math.round(num(ov.google_revenue)).toLocaleString()}` : ''} (from their own check-ins)`);
             // Only when it's genuinely positive, the same rule as their SEO tab
             if (num(ov.roi_multiple) > 1) lines.push(`- Return on their SEO fee for this period: ${num(ov.roi_multiple).toFixed(1)}x`);
             if (num(ov.keywords_tracked)) {
@@ -9349,7 +9418,7 @@ async function buildChatSeoBriefing(clientName) {
                  ${anyGa4 ? seoCaseStudyRow('Website sessions (all sources)', ga4Cols) : ''}
                  ${anyRank ? seoCaseStudyRow('Keywords on page 1', kwCols) : ''}
                  ${anyRank ? seoCaseStudyRow('Keywords in the map pack', mapCols) : ''}
-                 ${anyRev ? seoCaseStudyRow('Jobs closed from Google', jobCols) : ''}
+                 ${anyRev ? seoCaseStudyRow(checkinTerms(clientObj?.name).googleJobs, jobCols) : ''}
                  ${anyRev ? seoCaseStudyRow('Revenue from Google', revCols, v => '$' + seoNum(v)) : ''}
              </tbody>
          </table>
@@ -10644,11 +10713,11 @@ async function buildChatSeoBriefing(clientName) {
      cpSeoDelta($('cp-seo-visits-delta'), ov.clicks, ov.prior_clicks, 50, 'visits');
 
      $('cp-seo-jobs').innerHTML = n(ov.checkins_with_sources) > 0
-         ? `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Jobs closed from Google</p>
+         ? `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">${checkinTerms(currentActiveClient).googleJobs}</p>
             <p class="text-4xl md:text-5xl font-bold text-white tracking-tight">${(n(ov.google_closes) || 0).toLocaleString()}<span class="text-lg font-bold text-gray-400 ml-2">${money0(ov.google_revenue || 0)}</span></p>
             <p class="text-xs font-bold text-gray-400">From your weekly check-ins</p>
             <p class="text-xs text-gray-500">Jobs you told us came from Google search or your website</p>`
-         : `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Jobs closed from Google</p>
+         : `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">${checkinTerms(currentActiveClient).googleJobs}</p>
             <p class="text-base font-bold text-gray-300 pt-2">None reported yet</p>
             <p class="text-xs text-gray-500">When a lead from Google becomes a job, add it to your weekly check-in under "Google search / your website".</p>`;
 
@@ -10883,7 +10952,7 @@ async function buildChatSeoBriefing(clientName) {
                 - Current Relationship Health Score: ${clientHealth}/100
                 - All Tasks: ${JSON.stringify(clientTasks)}
                 - Ad Performance: ${JSON.stringify(clientAds)}
-                - Weekly outcomes reported by the client (estimates sent, jobs closed, revenue): ${JSON.stringify(clientOutcomes)}
+                - Weekly outcomes reported by the client (${checkinTerms(cSelectedAccount).outcomes}): ${JSON.stringify(clientOutcomes)}
 
                 ORGANIC SEARCH (SEO) — every figure below was computed by Golden Eye from Search Console, SE Ranking and the client's website leads:
                 ${clientSeo}
@@ -12704,7 +12773,10 @@ const FACT_LABELS = {
     crm_choice: { label: 'CRM', values: { no: 'No CRM', yes: 'Wants leads sent to one' } },
     // seo_only_package.sql. Set by an admin in Add / Edit Client, never by a question. Unset = Base.
     // Tag a step "Base" when it's GHL, texting or the free website, so SEO-only clients skip it.
-    base_package: { label: 'Package', values: { yes: 'Base', no: 'No Base' } }
+    base_package: { label: 'Package', values: { yes: 'Base', no: 'No Base' } },
+    // contractor_fact.sql. Set by an admin in Add / Edit Client. Unset = Contractor. Tag a step "Not a contractor" to
+    // show it only to businesses that don't go to the customer and quote jobs.
+    contractor: { label: 'Business', values: { yes: 'Contractor', no: 'Not a contractor' } }
 };
 // False until onboarding_facts.sql has run, so the editor does not offer tags it could not save
 function factsSupported() {
@@ -12922,6 +12994,8 @@ window.runOnboardingPreview = async function() {
     if (crm) pickedFacts.crm_choice = crm;
     const pkgPick = document.getElementById('ob-preview-package')?.value;
     if (pkgPick) pickedFacts.base_package = pkgPick;
+    const contractorPick = document.getElementById('ob-preview-contractor')?.value;
+    if (contractorPick) pickedFacts.contractor = contractorPick;
     const seq = ++obPreviewSeq;
     out.innerHTML = '<span class="text-gray-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading…</span>';
 
@@ -13555,8 +13629,11 @@ function obQuestionRowHtml(q) {
     const webs = q.website_statuses || [];
     const svcs = q.service_keys || [];
     const showIf = q.show_if || {};
+    // Kept whole on the row so a key this editor has no chips for (a future fact) survives a save
+    const qFacts = q.fact_conditions && typeof q.fact_conditions === 'object' ? q.fact_conditions : {};
+    const qContractor = Array.isArray(qFacts.contractor) ? qFacts.contractor : [];
     return `
-        <div class="ob-q-row bg-black/20 border border-white/5 rounded-lg p-2 space-y-2" data-qid="${escapeAttr(id)}">
+        <div class="ob-q-row bg-black/20 border border-white/5 rounded-lg p-2 space-y-2" data-qid="${escapeAttr(id)}" data-qfacts="${escapeAttr(JSON.stringify(qFacts))}">
             <div class="flex gap-2 items-center">
                 <input type="text" class="glass-input !py-1.5 flex-1 ob-q-label" placeholder="Question" value="${escapeAttr(q.label || '')}">
                 <select class="glass-input !py-1.5 !w-36 ob-q-type" onchange="obQuestionTypeChanged(this)">
@@ -13594,6 +13671,13 @@ function obQuestionRowHtml(q) {
                 ${globalServices.filter(sv => sv.active !== false || svcs.includes(sv.key)).map(sv => `
                     <button type="button" class="ob-chip ob-q-svc" data-key="${escapeAttr(sv.key)}" aria-pressed="${svcs.includes(sv.key)}"
                         onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true')">${escapeAttr(sv.name)}</button>`).join('')}
+                <span class="text-[10px] text-gray-500">(none picked = everyone)</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[10px] uppercase tracking-widest text-gray-500 mr-1">Only ask if the business is</span>
+                ${[['yes', 'Contractor'], ['no', 'Not a contractor']].map(([k, label]) => `
+                    <button type="button" class="ob-chip ob-q-contractor" data-key="${k}" aria-pressed="${qContractor.includes(k)}"
+                        onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true')">${label}</button>`).join('')}
                 <span class="text-[10px] text-gray-500">(none picked = everyone)</span>
             </div>
             <div class="flex flex-wrap items-center gap-2">
@@ -13668,6 +13752,12 @@ function readObQuestions(stepRow) {
         // Only clients with one of these add-ons are asked (none = everyone). Left off when empty, as before.
         const qSvcs = [...r.querySelectorAll('.ob-q-svc[aria-pressed="true"]')].map(b => b.dataset.key);
         if (qSvcs.length) q.service_keys = qSvcs;
+        // Client-fact tags: start from what the row was loaded with, then apply the contractor chips
+        let qFacts = {};
+        try { qFacts = JSON.parse(r.dataset.qfacts || '{}') || {}; } catch (e) { qFacts = {}; }
+        const qContractor = [...r.querySelectorAll('.ob-q-contractor[aria-pressed="true"]')].map(b => b.dataset.key);
+        if (qContractor.length) qFacts.contractor = qContractor; else delete qFacts.contractor;
+        if (Object.keys(qFacts).length) q.fact_conditions = qFacts;
         if (showQ) q.show_if = { q: showQ, any: showAny };
         if (type === 'style') {
             q.styles = [...r.querySelectorAll('.ob-style-row')].map(sr => ({
@@ -14482,6 +14572,8 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-website-status').value = c.website_status || '';
     const editPkgSel = document.getElementById('edit-client-base-package');
     if (editPkgSel) editPkgSel.value = c.base_package === 'no' ? 'no' : '';
+    const editContractorSel = document.getElementById('edit-client-contractor');
+    if (editContractorSel) editContractorSel.value = c.contractor === 'no' ? 'no' : '';
     renderEditClientPeopleSummary(c.name);
     document.getElementById('edit-client-ad-account').value   = c.ad_account_id || '';
     document.getElementById('edit-client-business-id').value  = c.business_id || '';
@@ -15174,6 +15266,7 @@ function rosterBusinessView(c, prof) {
         ['Address', prof?.address ? rosterEsc(prof.address).replace(/\n/g, '<br>') : '—'],
         ['Industry', rosterEsc(c.industry || '—')],
         ['Package', c.base_package === 'no' ? 'No Base (no GHL)' : 'Base + add-ons'],
+        ['Business', c.contractor === 'no' ? 'Not a contractor' : 'Contractor'],
         ['Website setup', siteStatus],
         ['Client since', rosterDate(c.client_since || c.created_at)],
     ]) + (clientProfilesReady ? '' : `<p class="text-[11px] mt-3" style="color:var(--t3);">Phone, website, address and notes can be saved once supabase/sql/client_directory.sql has been run.</p>`);
@@ -15312,7 +15405,7 @@ function rosterCheckinForm(c) {
         </div>
         ${warn}
         ${existing ? `<p class="text-xs mb-3" style="color:var(--t2);">You're editing what was logged for ${rosterEsc(who.name)} this week.</p>` : ''}
-        ${weeklyCheckinFormHtml('staff', { existing, submitCall: 'rosterSaveCheckin()', submitLabel: existing ? 'Save changes' : 'Log check-in',
+        ${weeklyCheckinFormHtml('staff', { client: c.name, existing, submitCall: 'rosterSaveCheckin()', submitLabel: existing ? 'Save changes' : 'Log check-in',
             beforeSubmit: `<div><label class="modal-label">What they said <span style="color:var(--t3);">(optional, the client can see this)</span></label>
                 <textarea id="rd-ck-reply" class="glass-input" rows="2" placeholder="Paste their text">${rosterEsc(existing?.raw_reply)}</textarea></div>` })}
         <button type="button" onclick="rosterEdit(null)" class="btn-secondary btn text-sm w-full mt-3">Cancel</button>`;
@@ -15668,6 +15761,8 @@ window.saveClientEdits = async function(e) {
             website_status: document.getElementById('edit-client-website-status').value || null,
             // null = Base + add-ons, 'no' = SEO only (seo_only_package.sql)
             base_package: basePackage,
+            // null = a contractor, 'no' = any other business (contractor_fact.sql)
+            contractor: document.getElementById('edit-client-contractor')?.value === 'no' ? 'no' : null,
             ad_account_id: adAccountId || null,
             business_id: document.getElementById('edit-client-business-id').value.trim() || null,
             // Blank means no target, so the audit falls back to their own baseline. Zero or a
@@ -15703,6 +15798,12 @@ window.saveClientEdits = async function(e) {
         if (error && /base_package/.test(`${error.message || ''} ${error.details || ''}`)) {
             if (payload.base_package === 'no') throw new Error("No Base can't be saved until supabase/sql/seo_only_package.sql has been run.");
             delete payload.base_package;
+            ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
+        }
+        // Before contractor_fact.sql: save the rest, but never quietly drop a "not a contractor" choice
+        if (error && /contractor/.test(`${error.message || ''} ${error.details || ''}`)) {
+            if (payload.contractor === 'no') throw new Error("Not a contractor can't be saved until supabase/sql/contractor_fact.sql has been run.");
+            delete payload.contractor;
             ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
         }
         if (error && /seranking_local_id/.test(`${error.message || ''} ${error.details || ''}`)) {
@@ -15990,6 +16091,8 @@ window.saveNewClient = async function(e) {
         // null = Base + add-ons, 'no' = SEO only (seo_only_package.sql). Left off when Base, so adding a client works
         // before that SQL has run.
         ...(document.getElementById('new-client-base-package')?.value === 'no' ? { base_package: 'no' } : {}),
+        // Left off when a contractor, so adding a client works before contractor_fact.sql has run
+        ...(document.getElementById('new-client-contractor')?.value === 'no' ? { contractor: 'no' } : {}),
         status: 'active'
     };
 
@@ -16013,6 +16116,9 @@ window.saveNewClient = async function(e) {
         const { data, error } = await supabaseClient.from('clients').insert([payload]).select();
         if (error && /base_package/.test(`${error.message || ''} ${error.details || ''}`)) {
             throw new Error("No Base can't be saved until supabase/sql/seo_only_package.sql has been run. The client wasn't created.");
+        }
+        if (error && /contractor/.test(`${error.message || ''} ${error.details || ''}`)) {
+            throw new Error("Not a contractor can't be saved until supabase/sql/contractor_fact.sql has been run. The client wasn't created.");
         }
         if (error) throw error;
 
