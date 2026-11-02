@@ -3117,7 +3117,10 @@ function checkinTerms(clientName) {
             sourcesHead: 'Jobs closed and revenue, by where the customer came from',
             blank: 'Leave blank if nothing closed. A zero week is fine, just enter 0.',
             googleJobs: 'Jobs closed from Google', googleToldUs: 'Jobs they told us they closed from Google',
-            outcomes: 'estimates sent, jobs closed, revenue'
+            outcomes: 'estimates sent, jobs closed, revenue',
+            // The client dashboard's revenue tile, chart and ROI caption
+            dashTile: 'Closed Revenue', dashChart: 'Ad spend vs. revenue', dashBar: 'Revenue',
+            dashRoi: 'Revenue back for every dollar spent on ads this period.'
         };
     }
     return {
@@ -3127,7 +3130,9 @@ function checkinTerms(clientName) {
         sourcesHead: 'New customers and revenue, by where they came from',
         blank: 'Leave blank if nobody new signed up. A zero week is fine, just enter 0.',
         googleJobs: 'New customers from Google', googleToldUs: 'New customers they told us they got from Google',
-        outcomes: 'appointments held, new customers, revenue'
+        outcomes: 'appointments held, new customers, revenue',
+        dashTile: 'Results', dashChart: 'Ad spend vs. results', dashBar: 'Results',
+        dashRoi: 'Results back for every dollar spent on ads this period.'
     };
 }
 
@@ -3628,6 +3633,12 @@ window.maybeShowWeeklyCheckin = function() {
             document.getElementById('stat-leads').innerText = leads.toLocaleString();
             document.getElementById('stat-revenue').innerText = '$' + revenue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
             document.getElementById('stat-roi').innerText = (spend > 0 ? (revenue / spend).toFixed(1) : "0.0") + 'x';
+            // Contractor or not: a business that isn't a contractor sees "Results" where a contractor sees closed revenue
+            const dashT = checkinTerms(currentActiveClient);
+            const setText = (id, t) => { const el = document.getElementById(id); if (el) el.innerText = t; };
+            setText('stat-revenue-label', dashT.dashTile);
+            setText('roi-caption', dashT.dashRoi);
+            setText('roi-chart-title', dashT.dashChart);
             document.getElementById('stat-cpl').innerText = (leads > 0 ? '$' + (spend / leads).toFixed(0) : '$0');
 
             renderPortalHistory(); renderPortalTasks(); renderPortalCharts(dailySummary);
@@ -3879,7 +3890,7 @@ window.submitClientRequest = async function() {
             if (leadChart) leadChart.destroy(); if (roiChart) roiChart.destroy();
             const labels = Object.keys(dailyLeads).sort();
             leadChart = new Chart(document.getElementById('leadsChart'), { type: 'line', data: { labels: labels, datasets: [{ data: labels.map(l => dailyLeads[l]), borderColor: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.1)', fill: true, tension: 0.4 }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } } } });
-            roiChart = new Chart(document.getElementById('roiChart'), { type: 'bar', data: { labels: ['Ad Spend', 'Revenue'], datasets: [{ data: [finalStats.spend, finalStats.revenue], backgroundColor: [isLight ? '#cbd5e1' : 'rgba(255,255,255,0.1)', '#fbbf24'], borderRadius: 8 }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } } } });
+            roiChart = new Chart(document.getElementById('roiChart'), { type: 'bar', data: { labels: ['Ad Spend', checkinTerms(currentActiveClient).dashBar], datasets: [{ data: [finalStats.spend, finalStats.revenue], backgroundColor: [isLight ? '#cbd5e1' : 'rgba(255,255,255,0.1)', '#fbbf24'], borderRadius: 8 }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } } } });
         }
 
         // triggerPortalAI() used to live here — a manual "Run Analysis" button that sent

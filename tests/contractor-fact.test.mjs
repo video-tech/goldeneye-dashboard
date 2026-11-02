@@ -167,5 +167,21 @@ const ids = (w, c) => w.obQuestionsFor(STEP, c).map((q) => q.id).join(',');
     ok(w.obStepDescription({ step_type: 'video', description: 'quotes or closes jobs' }, 'Tattoo Ink Utah') === 'quotes or closes jobs', 'other step types are never reworded');
 }
 
+// ---- the client dashboard ----
+{
+    const w = world(CLIENTS);
+    const c = w.checkinTerms('Roofer Co'), n = w.checkinTerms('Tattoo Ink Utah');
+    ok(c.dashTile === 'Closed Revenue' && c.dashChart === 'Ad spend vs. revenue' && c.dashBar === 'Revenue' && /^Revenue back/.test(c.dashRoi), 'a contractor keeps the dashboard words it had');
+    ok(n.dashTile === 'Results' && n.dashChart === 'Ad spend vs. results' && n.dashBar === 'Results' && /^Results back/.test(n.dashRoi), 'a non-contractor sees Results');
+    ok(!/revenue|closed/i.test([n.dashTile, n.dashChart, n.dashBar, n.dashRoi].join(' ')), 'and none of the revenue / closed wording');
+    // The markup carries the ids the code writes to, with the contractor words as the default
+    const body = fs.readFileSync(path.join(root, 'body.html'), 'utf8');
+    ok(/id="stat-revenue-label">Closed Revenue</.test(body) && /id="roi-caption"[^>]*>Revenue back for every dollar/.test(body) && /id="roi-chart-title">Ad spend vs\. revenue</.test(body),
+        'the dashboard markup has the three ids, defaulting to the contractor words');
+    ok(app.includes("setText('stat-revenue-label', dashT.dashTile)") && app.includes("setText('roi-caption', dashT.dashRoi)") && app.includes("setText('roi-chart-title', dashT.dashChart)"),
+        'the dashboard render writes all three');
+    ok(app.includes("labels: ['Ad Spend', checkinTerms(currentActiveClient).dashBar]"), 'the chart bar uses the same word');
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

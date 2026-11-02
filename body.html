@@ -2399,13 +2399,13 @@
                     <div class="glass" style="padding:28px; display:flex; flex-direction:column; justify-content:center; background:var(--goldWash); border-color:var(--goldLine);">
                         <div class="ge-label" style="color:var(--gold);">Marketing ROI</div>
                         <div class="ge-num" style="font-family:'Archivo',sans-serif; font-weight:800; font-size:56px; line-height:1.05; color:var(--t1); margin-top:6px;" id="stat-roi">0.0<span style="font-size:28px; font-weight:600; color:var(--t2);">x</span></div>
-                        <p style="color:var(--t2); font-size:13px; margin-top:8px;">Revenue back for every dollar spent on ads this period.</p>
+                        <p id="roi-caption" style="color:var(--t2); font-size:13px; margin-top:8px;">Revenue back for every dollar spent on ads this period.</p>
                     </div>
                     <div class="cp-kpi-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                         <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label">New Leads</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--pos); margin-top:6px;" id="stat-leads">0</h4></div>
                         <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label">Cost Per Lead</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--t1); margin-top:6px;" id="stat-cpl">$0</h4></div>
                         <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label">Ad Spend</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--t1); margin-top:6px;" id="stat-spend">$0</h4></div>
-                        <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label">Closed Revenue</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--gold); margin-top:6px;" id="stat-revenue">$0</h4></div>
+                        <div class="glass cp-kpi" style="padding:18px;"><p class="ge-label" id="stat-revenue-label">Closed Revenue</p><h4 class="ge-num" style="font-size:26px; font-weight:700; color:var(--gold); margin-top:6px;" id="stat-revenue">$0</h4></div>
                         <span class="hidden" id="stat-est-count"></span>
                         <span class="hidden" id="stat-deals-count"></span>
                     </div>
@@ -2417,7 +2417,7 @@
                         <div class="flex-1 relative"><canvas id="leadsChart"></canvas></div>
                     </div>
                     <div class="cp-order-spend glass p-6 min-h-[380px] flex flex-col">
-                        <h3 class="ge-label mb-4 shrink-0">Ad spend vs. revenue</h3>
+                        <h3 class="ge-label mb-4 shrink-0" id="roi-chart-title">Ad spend vs. revenue</h3>
                         <div class="flex-1 relative"><canvas id="roiChart"></canvas></div>
                     </div>
                 </div>

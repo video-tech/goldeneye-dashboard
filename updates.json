@@ -4,6 +4,12 @@
     {
       "date": "2026-11-02",
       "area": "Onboarding",
+      "title": "Client dashboard says Results for businesses that aren't contractors",
+      "what": "On the client's dashboard, a client marked Not a contractor now sees Results where a contractor sees Closed Revenue: the tile, the Ad spend vs. results chart and the line under Marketing ROI. Contractors see exactly what they saw before."
+    },
+    {
+      "date": "2026-11-02",
+      "area": "Onboarding",
       "title": "Onboarding for businesses that aren't contractors",
       "what": "Add Client and Edit Client have a new Business type: Contractor (the default, nothing changes) or Not a contractor. A shop, clinic, studio, agency or real-estate team now skips the questions about travelling to jobs, job value, estimates, financing and 3D renderings. They are asked whether customers come to them or they go to customers, what a new customer is worth, and how people book, and their website questions and the team step read the same way. Their weekly check-in says appointments and new customers instead of estimates and jobs closed (the numbers are saved the same, so reports and the SEO tab still add up). In Templates, steps and questions can be tagged Contractor or Not a contractor, and Preview a Client has a matching picker. Anxiety Solutions, Astra Real Estate, FreeBird Recruiting, PureAirK9 and Tattoo Ink Utah are marked Not a contractor.",
       "note": "The four website style looks are still ones drawn from contractor sites; add your own in Templates. The GHL Master pipeline (Estimate scheduled, Estimate sent) is still adjusted by hand in 'Turn on automations and add their team'.",

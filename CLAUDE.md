@@ -605,7 +605,8 @@ studio, agency, real estate); null or `yes` is a contractor, so every existing c
 - **Check-in words only** (`checkinTerms(client)`): appointments held / new customers instead of estimates / jobs closed, in the form
   (the Roster passes `opts.client` for a VA), the history, the health tab, the case study and SEO tile, and the chat and report prompts.
   The columns (`estimates_count`, `closes_count`, `closes_by_source`) are unchanged, so every total and SEO function still adds up.
-  The all-clients dashboard tiles still say Estimates.
+  The client dashboard also says Results (tile, chart, ROI caption) instead of Closed Revenue / revenue for them.
+  The all-clients admin dashboard tiles still say Estimates.
 - **Also:** Quick start's CRM list gains Mindbody, Vagaro, Square, Calendly (for everyone); the team step's "quotes or closes jobs"
   reads "books or signs up customers" (`obStepDescription`). Set to `no` on 2026-11-02: Anxiety Solutions, Astra Real Estate,
   FreeBird Recruiting, PureAirK9, Tattoo Ink Utah.
