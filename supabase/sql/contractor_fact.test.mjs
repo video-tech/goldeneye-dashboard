@@ -198,6 +198,32 @@ let refused = false;
 try { await db.exec(`update clients set contractor = 'maybe' where name = 'Roofer Co'`); } catch { refused = true; }
 ok(refused, 'contractor accepts only yes or no');
 
+// ---- two answers stay in Golden Eye, not GHL (contractor_fact_keep_answers_in_ge.sql) ----
+{
+    const dests = async () => (await db.query(`select st.title, q ->> 'id' id, q ->> 'dest' dest from onboarding_steps st, jsonb_array_elements(st.questions) q
+                                                where q ->> 'id' in ('c_visit', 'n_book') order by 1, 2`)).rows;
+    const fresh = await dests();
+    ok(fresh.length === 3 && fresh.every((r) => r.dest === (r.id === 'c_visit' ? 'admin:service_mode' : 'admin:booking_method')),
+        'a fresh run keeps both answers in Golden Eye (admin:), in every step that has them: ' + JSON.stringify(fresh));
+    ok(!JSON.stringify(await db.query(`select questions from onboarding_steps`)).includes('custom_value:service_mode')
+        && !JSON.stringify(await db.query(`select questions from onboarding_steps`)).includes('custom_value:booking_method'), 'neither GHL custom value is named anywhere');
+
+    // A database that ran the first version of the file: both still point at GHL
+    const before = JSON.stringify((await db.query(`select title, questions from onboarding_steps order by title`)).rows);
+    await db.exec(`update onboarding_steps st set questions = (
+            select jsonb_agg(case when q ->> 'id' = 'c_visit' then jsonb_set(q, '{dest}', '"custom_value:service_mode"')
+                                  when q ->> 'id' = 'n_book' then jsonb_set(q, '{dest}', '"custom_value:booking_method"') else q end order by o)
+              from jsonb_array_elements(st.questions) with ordinality e (q, o))
+        where jsonb_typeof(st.questions) = 'array' and st.questions is not null`);
+    ok((await dests()).every((r) => r.dest.startsWith('custom_value:')), 'setup: the old version pointed both at GHL');
+    const keep = read('contractor_fact_keep_answers_in_ge.sql');
+    await db.exec(keep);
+    ok(JSON.stringify((await db.query(`select title, questions from onboarding_steps order by title`)).rows) === before,
+        'the migration restores exactly the fresh result: dests change, no other question, order or tag does');
+    await db.exec(keep);
+    ok(JSON.stringify((await db.query(`select title, questions from onboarding_steps order by title`)).rows) === before, 'and re-running it changes nothing');
+}
+
 // ---- re-runnable ----
 const snap = async () => JSON.stringify((await db.query(`select title, fact_conditions, questions from onboarding_steps order by title`)).rows);
 const s1 = await snap();

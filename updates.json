@@ -4,6 +4,13 @@
     {
       "date": "2026-11-02",
       "area": "Onboarding",
+      "title": "Non-contractor answers about service and booking stay in Golden Eye",
+      "what": "The answers to 'Do your customers come to you, or do you go to them?' and 'How do people usually start with you?' are no longer sent to the client's GHL account. They stay in Golden Eye and show on the client's Roster profile under onboarding answers.",
+      "action": "Run supabase/sql/contractor_fact_keep_answers_in_ge.sql in the SQL Editor. Until then those two answers are still named for GHL, which has no field for them, so the account fill lists them as missing."
+    },
+    {
+      "date": "2026-11-02",
+      "area": "Onboarding",
       "title": "Client dashboard says Results for businesses that aren't contractors",
       "what": "On the client's dashboard, a client marked Not a contractor now sees Results where a contractor sees Closed Revenue: the tile, the Ad spend vs. results chart and the line under Marketing ROI. Contractors see exactly what they saw before."
     },

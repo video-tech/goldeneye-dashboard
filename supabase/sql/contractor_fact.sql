@@ -22,6 +22,8 @@
 --   * Your new website: a neutral feature list, page list and content question.
 --   * Quick start's CRM list also offers Mindbody, Vagaro, Square and Calendly (everyone sees it; harmless).
 --   Contractors see exactly what they saw before.
+--   The two new answers (c_visit, n_book) are kept in Golden Eye (destination admin:), not sent to GHL; they show on the
+--   Roster profile under onboarding answers.
 --
 -- ORDER (matters):
 --   1. The app.js that knows the "Contractor" tag and per-question tags must be served first. The Templates editor
@@ -92,7 +94,7 @@ select 'Your customers and offers',
           "type": "short", "required": false, "options": [], "website_statuses": [], "private": true, "dest": "admin:close_rate"},
          {"id": "n_book", "label": "How do people usually start with you?",
           "type": "choice", "required": false, "options": ["They call", "They book online", "They walk in", "They fill out a form or apply", "A mix"],
-          "website_statuses": [], "dest": "custom_value:booking_method"},
+          "website_statuses": [], "dest": "admin:booking_method"},
          {"id": "n_promo", "label": "Any current promotion or offer for new leads? (optional)",
           "type": "long", "required": false, "options": [], "website_statuses": [], "dest": "custom_value:current_offer"},
          {"id": "n_ad_cities", "label": "Which cities should we name in your ads? (leave blank if you serve everywhere)",
@@ -137,7 +139,7 @@ end $$;
 select pg_temp.ct_split_step('Texting and your service area', array['c_radius', 'c_exclude'], 'c_area', $q$[
   {"id": "c_visit", "label": "Do your customers come to you, or do you go to them?", "type": "choice", "required": false,
    "options": ["They come to us", "We go to them", "Both", "Online or nationwide"], "website_statuses": [],
-   "fact_conditions": {"contractor": ["no"]}, "dest": "custom_value:service_mode"},
+   "fact_conditions": {"contractor": ["no"]}, "dest": "admin:service_mode"},
   {"id": "c_radius_nc", "label": "How far will you travel to a customer?", "type": "short", "required": false, "options": [],
    "website_statuses": [], "fact_conditions": {"contractor": ["no"]},
    "show_if": {"q": "c_visit", "any": ["We go to them", "Both"]}, "dest": "custom_value:service_radius"},
@@ -149,7 +151,7 @@ select pg_temp.ct_split_step('Texting and your service area', array['c_radius', 
 select pg_temp.ct_split_step('Your service area', array['c_radius', 'c_exclude'], 'c_area', $q$[
   {"id": "c_visit", "label": "Do your customers come to you, or do you go to them?", "type": "choice", "required": false,
    "options": ["They come to us", "We go to them", "Both", "Online or nationwide"], "website_statuses": [],
-   "fact_conditions": {"contractor": ["no"]}, "dest": "custom_value:service_mode"},
+   "fact_conditions": {"contractor": ["no"]}, "dest": "admin:service_mode"},
   {"id": "c_radius_nc", "label": "How far will you travel to a customer?", "type": "short", "required": false, "options": [],
    "website_statuses": [], "fact_conditions": {"contractor": ["no"]},
    "show_if": {"q": "c_visit", "any": ["We go to them", "Both"]}, "dest": "custom_value:service_radius"},

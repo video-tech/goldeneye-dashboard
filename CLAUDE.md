@@ -607,6 +607,9 @@ studio, agency, real estate); null or `yes` is a contractor, so every existing c
   The columns (`estimates_count`, `closes_count`, `closes_by_source`) are unchanged, so every total and SEO function still adds up.
   The client dashboard also says Results (tile, chart, ROI caption) instead of Closed Revenue / revenue for them.
   The all-clients admin dashboard tiles still say Estimates.
+- **Kept in Golden Eye, not GHL:** the two new answers (`c_visit`, `n_book`) have destination `admin:` (`service_mode`, `booking_method`), which
+  `ghl-account` ignores (it sends only `ghl:` and `custom_value:`). They show on the Roster profile under onboarding answers.
+  `contractor_fact_keep_answers_in_ge.sql` moves a database that ran the first version of `contractor_fact.sql`.
 - **Also:** Quick start's CRM list gains Mindbody, Vagaro, Square, Calendly (for everyone); the team step's "quotes or closes jobs"
   reads "books or signs up customers" (`obStepDescription`). Set to `no` on 2026-11-02: Anxiety Solutions, Astra Real Estate,
   FreeBird Recruiting, PureAirK9, Tattoo Ink Utah.
