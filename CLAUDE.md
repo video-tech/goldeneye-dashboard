@@ -647,6 +647,25 @@ embedded GHL form, for forms nothing in GHL uses. The SEO intake is one. Schema 
   steps, 6 with auto-checks.
 - **Tests:** 13 PGlite checks, 20 jsdom checks.
 
+**Ticking and unticking steps by hand (built 2026-11-05, app.js `obSetStepDone` and friends, after `obCompleteStep`).**
+- **Clients** can mark any of their own steps done or not done (`obClientCanToggle`), except a form that ticks itself (no
+  `requires_confirm`) and a Questions step: we need what's in them, so only submitting completes them. A booking form with
+  `requires_confirm` keeps its confirm button. A form that didn't tick itself offers "Let us know" (`obRequestHelp(id, 'form')`),
+  a Client Request "Form submitted but not ticked off — <step>", instead of the old manual tick.
+- **Admins** can mark any step done or not done: on the Relationship tab's Onboarding list (`adminToggleClientStep`) and while
+  previewing the portal (`obManualToggle`; preview no longer blocks this one write, and its popup says it changes the client's
+  real progress). Automatic ticks (video end, form webhook, Questions submit, team save) are still blocked in preview.
+- **Every manual change asks first.** Unticking sets `completed_at` to null (an update, never a delete). It never texts: the
+  handoff trigger acts only on not-done to done, and a handoff task already existing stops a second text.
+- **An admin ticking a client's last step** (Onboarding, active, no handoff task yet: `obWouldFinishOnboarding`) is asked whether
+  to text them. OK saves the admin's email as `completed_by` and the trigger runs as usual; Cancel saves `backfilled`, which it skips.
+- **RLS (`supabase/sql/onboarding_progress_rls.sql`):** the old `Auth manage onboarding progress` was `for all using (true)`, so any
+  signed-in user could change or delete any client's progress. Now admins do everything; others select, insert and update their
+  own client's rows through `client_row_visible`; only admins delete. Make #3 and the edge functions skip RLS.
+- **Tests:** `onboarding_progress_rls.test.mjs` (PGlite) 19 checks, with the old policy as the control, 2 of 3 breakages caught (the
+  third, an open WITH CHECK on update, is still blocked by the select policy). `tests/step-toggle.test.mjs` (jsdom) 31 checks on the
+  real code, 5 of 5 caught.
+
 Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5× default
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of
 those. Encode H.264 (**not HEVC** — Chrome/Firefox won't reliably play it), `+faststart`.

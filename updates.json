@@ -2,6 +2,14 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-11-05",
+      "area": "Onboarding",
+      "title": "Onboarding steps can be marked done, or not done, by hand",
+      "what": "In their portal, clients can now mark any of their own steps done or not done, except forms and question steps, which only tick when they're submitted (we need what's in them). A client whose form didn't tick itself off can let us know, which puts a request on our board. Admins can mark any step done or not done from the client's Relationship tab, or while previewing their portal. Every change asks first. When an admin ticks a client's last step, Golden Eye asks whether to send them the 'onboarding complete' text.",
+      "note": "Also closes a gap: anyone signed in could change any client's step progress. Now clients can change only their own, and only admins can delete it.",
+      "action": "Run supabase/sql/onboarding_progress_rls.sql in the SQL Editor."
+    },
+    {
       "date": "2026-11-02",
       "area": "Onboarding",
       "title": "Non-contractor answers about service and booking stay in Golden Eye",

@@ -2106,25 +2106,35 @@ window.renderGetStarted = function() {
                                 // and a Questions step its own Submit
                                 || s.step_type === 'questions';
 
+            // Ticking and unticking by hand (obManualToggle): any step but a form or Questions step for the client,
+            // any step at all for an admin previewing the portal.
+            const canToggle = obCanToggleHere(s);
             inner += complete
-                ? `<p class="text-[11px] text-emerald-400/80"><i class="fa-solid fa-circle-check mr-1"></i>Completed ${prog.completed_at ? new Date(prog.completed_at).toLocaleDateString() : ''} &mdash; here for reference.</p>`
+                ? `<p class="text-[11px] text-emerald-400/80"><i class="fa-solid fa-circle-check mr-1"></i>Completed ${prog.completed_at ? new Date(prog.completed_at).toLocaleDateString() : ''} &mdash; here for reference.${canToggle
+                    ? ` <button type="button" onclick="obManualToggle('${s.id}', false)" class="ob-undo ml-2 text-gray-400 hover:text-white underline underline-offset-2">Mark as not done</button>` : ''}</p>`
                 : '';
 
             inner += `<div class="flex flex-wrap items-center gap-3 ${complete ? 'hidden' : ''}">`;
-            if (!selfCompleting) {
+            if (!selfCompleting && canToggle) {
                 const label = s.confirm_label || "Mark as done";
-                inner += `<button onclick="obCompleteStep('${s.id}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
+                inner += `<button onclick="obManualToggle('${s.id}', true)" class="ob-mark bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-lg transition">
                               <i class="fa-solid fa-check mr-2"></i>${escapeAttr(stripSlashEscapes(label))}
+                          </button>`;
+            } else if (canToggle) {
+                // A step that normally ticks itself (a video, the team step) can still be marked done by hand
+                inner += `<button type="button" onclick="obManualToggle('${s.id}', true)" class="ob-mark text-xs text-gray-400 hover:text-white underline underline-offset-2 transition">
+                              Mark as done
                           </button>`;
             }
 
-            // Fallback for a form, revealed only after the automatic path has had time to
-            // work. Present from the start it just invites a click, which is what the
-            // webhook exists to avoid — but a client whose submission didn't register
-            // still needs a way forward.
-            if (s.step_type === 'form' && !s.requires_confirm) {
-                inner += `<button id="ob-manual-${s.id}" onclick="obCompleteStep('${s.id}')" class="hidden text-xs text-gray-400 hover:text-white underline underline-offset-2 transition">
-                              Submitted it but nothing happened? Mark it done
+            // A form ticks itself when the submission reaches us; the client can't tick it by hand, because we need
+            // what's in it. Revealed after the automatic path has had time to work: one whose submission didn't
+            // register tells us instead, which raises a request on our board.
+            if (s.step_type === 'form' && !s.requires_confirm && !canToggle) {
+                inner += obHelpAlreadyRequested(s.id, 'form')
+                    ? `<span class="text-xs text-blue-400"><i class="fa-solid fa-circle-check mr-1"></i>Thanks, we'll check it and tick it off.</span>`
+                    : `<button id="ob-manual-${s.id}" onclick="obRequestHelp('${s.id}', 'form')" class="hidden text-xs text-gray-400 hover:text-white underline underline-offset-2 transition">
+                              Submitted it but nothing happened? Let us know
                           </button>`;
             }
 
@@ -2725,36 +2735,41 @@ async function saveOnboardingProgress(stepId, fields) {
 // A help request is an open Client Request task naming this step. Tracking it that way
 // means it shows on the Golden Eye dashboard's inbound requests without extra plumbing,
 // and clears itself once the task is worked.
-function obHelpRequestTitle(stepId) {
+// kind 'form': a client who submitted a form that didn't tick itself off (they can't tick a form by hand).
+function obHelpRequestTitle(stepId, kind) {
     const step = globalOnboardingSteps.find(s => s.id === stepId);
-    return `Tech access call requested — ${step?.title || 'onboarding'}`;
+    return kind === 'form'
+        ? `Form submitted but not ticked off — ${step?.title || 'onboarding'}`
+        : `Tech access call requested — ${step?.title || 'onboarding'}`;
 }
 
-function obHelpAlreadyRequested(stepId) {
-    const title = obHelpRequestTitle(stepId).trim().toLowerCase();
+function obHelpAlreadyRequested(stepId, kind) {
+    const title = obHelpRequestTitle(stepId, kind).trim().toLowerCase();
     return globalTasksData.some(t =>
         normalize(t.client || '') === normalize(currentActiveClient) &&
         String(t.title || '').trim().toLowerCase() === title &&
         t.status !== 'Complete');
 }
 
-window.obRequestHelp = async function(stepId) {
-    if (previewBlocksWrite('booking a call')) return;
-    if (obHelpAlreadyRequested(stepId)) return;
+window.obRequestHelp = async function(stepId, kind) {
+    if (previewBlocksWrite(kind === 'form' ? 'sending that' : 'booking a call')) return;
+    if (obHelpAlreadyRequested(stepId, kind)) return;
 
     const due = new Date();
     due.setDate(due.getDate() + 1);   // someone stuck shouldn't wait
 
     const row = {
         client: currentActiveClient,
-        title: obHelpRequestTitle(stepId),
+        title: obHelpRequestTitle(stepId, kind),
         type: 'Client Request',
         stage: 'Onboarding',
         status: 'Not Started',
         assignee: 'Account Manager',
         p: 5, u: 5, e: 2, score: 96,
         due: due.toISOString().split('T')[0],
-        notes: `${currentActiveClient} asked for help with this onboarding step via their portal.`,
+        notes: kind === 'form'
+            ? `${currentActiveClient} says they submitted this form but it didn't tick itself off. Check the submission reached us (GHL, then Make), and tick the step on their Relationship tab.`
+            : `${currentActiveClient} asked for help with this onboarding step via their portal.`,
         updated_at: new Date().toISOString()
     };
 
@@ -2783,6 +2798,84 @@ window.obCompleteStep = async function(stepId) {
     renderGetStarted();
     updateGetStartedTabVisibility();
     await obNotifyOnboardingComplete();
+};
+
+// ---- Ticking and unticking a step by hand (2026-11-05) ----
+// A client can tick or untick any of their own steps except a form that ticks itself when submitted and a Questions
+// step: those carry answers we need, so only submitting completes them. An admin can tick or untick any step, on the
+// client's Relationship tab or while previewing their portal. Every one asks first.
+// Unticking sets completed_at back to null. That never texts anyone: trg_onboarding_handoff acts only when a step goes
+// from not done to done, and "already announced" is the handoff task, so ticking it again doesn't text them twice.
+function obClientCanToggle(step) {
+    if (!step) return false;
+    if (step.step_type === 'questions') return false;
+    if (step.step_type === 'form' && !step.requires_confirm) return false;
+    return true;
+}
+
+function obCanToggleHere(step) {
+    return (window.isClientPreview && currentUserRole === 'admin') || obClientCanToggle(step);
+}
+
+// Would ticking this step finish the client's onboarding, the moment the database texts them "onboarding complete"?
+function obWouldFinishOnboarding(clientName, stepId) {
+    const key = normalize(clientName || '');
+    const row = globalClientsData.find(c => normalize(c.name) === key) || portalClientRows.find(c => normalize(c.name) === key);
+    if ((row?.status || 'active') !== 'active' || (row?.current_stage || 'Onboarding') !== 'Onboarding') return false;
+    if (onboardingHandoffRaised(clientName)) return false;
+    const steps = activeOnboardingSteps(clientName);
+    if (!steps.some(s => s.id === stepId)) return false;
+    return steps.every(s => s.id === stepId || onboardingProgressFor(clientName, s.id)?.completed_at);
+}
+
+// Asks, saves, and updates the local copy. Returns true when it saved.
+// asAdmin: an admin on the Relationship tab or previewing. Ticking a client's last step then asks whether to text
+// them: no text saves completed_by 'backfilled', which the trigger skips (the same as "Mark client steps done").
+async function obSetStepDone(clientName, stepId, done, { asAdmin = false } = {}) {
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    if (!step || !clientName) return false;
+    const prog = onboardingProgressFor(clientName, stepId);
+    if (!!prog?.completed_at === done) return false;
+
+    const title = stripSlashEscapes(step.title || 'this step');
+    const forWhom = asAdmin ? ` for ${clientName}` : '';
+    let question = done ? `Mark "${title}" as done${forWhom}?` : `Mark "${title}" as not done${forWhom}?`;
+    if (!done && !asAdmin) question += '\n\nIt goes back on your list.';
+    if (window.isClientPreview) question = `You're previewing ${clientName}'s portal. This changes their real progress.\n\n` + question;
+    if (!confirm(question)) return false;
+
+    let silent = false;
+    if (done && asAdmin && obWouldFinishOnboarding(clientName, stepId)) {
+        silent = !confirm(`This is ${clientName}'s last onboarding step.\n\nOK: send them the "onboarding complete" text, the same as if they had finished it themselves.\nCancel: tick it without a text.`);
+    }
+
+    const fields = { client_name: clientName, step_id: stepId, completed_at: done ? new Date().toISOString() : null };
+    if (done) fields.completed_by = silent ? 'backfilled' : (clientEmail || null);
+    if (done && step.step_type === 'video') fields.watch_percent = 100;
+
+    const { error } = await supabaseClient.from('client_onboarding_progress').upsert(fields, { onConflict: 'client_name,step_id' });
+    if (error) { alert("Couldn't save that: " + error.message); return false; }
+    if (prog) Object.assign(prog, fields);
+    else globalOnboardingProgress.push(fields);
+    return true;
+}
+
+// The portal's buttons. An admin previewing may change any step; a client only the ones obClientCanToggle allows.
+window.obManualToggle = async function(stepId, done) {
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    if (!step || !obCanToggleHere(step)) return;
+    const asAdmin = !!window.isClientPreview && currentUserRole === 'admin';
+    if (!await obSetStepDone(currentActiveClient, stepId, done, { asAdmin })) return;
+    renderGetStarted();
+    updateGetStartedTabVisibility();
+    if (done) await obNotifyOnboardingComplete();
+};
+
+// The admin Relationship tab's buttons, for the client picked at the top
+window.adminToggleClientStep = async function(stepId, done) {
+    if (currentUserRole !== 'admin' || cSelectedAccount === 'ALL') return;
+    if (!await obSetStepDone(cSelectedAccount, stepId, done, { asAdmin: true })) return;
+    renderClientOnboarding();
 };
 
 // Finishing the last step is the agency's cue to take over, but nothing on this side
@@ -6293,7 +6386,8 @@ window.markOnboardingComplete = async function() {
                         ${mine && item.auto_check ? '<i class="fa-solid fa-bolt text-emerald-400/70 text-[10px] shrink-0" title="Golden Eye ticks this off itself when it sees it done"></i>' : ''}
                     </div>
                     <div class="flex items-center gap-3 text-[11px] whitespace-nowrap">${mine && currentUserRole === 'admin' && setupGroupsFor(cSelectedAccount).some(g => g.stage === 'Onboarding' && String(g.group).trim().toLowerCase() === String(item.title || '').trim().toLowerCase())
-                        ? `<button type="button" onclick="openSetupChecklist()" class="${isBlocker ? 'btn-primary' : ''} btn text-xs" style="padding:3px 10px;${isBlocker ? '' : ' background:transparent; border:1px solid var(--line); color:var(--t2);'}"><i class="fa-solid fa-list-check mr-1.5"></i>Our checklist</button>` : ''}<span>${state}</span></div>
+                        ? `<button type="button" onclick="openSetupChecklist()" class="${isBlocker ? 'btn-primary' : ''} btn text-xs" style="padding:3px 10px;${isBlocker ? '' : ' background:transparent; border:1px solid var(--line); color:var(--t2);'}"><i class="fa-solid fa-list-check mr-1.5"></i>Our checklist</button>` : ''}<span>${state}</span>${!mine && currentUserRole === 'admin'
+                        ? `<button type="button" class="ob-admin-toggle text-gray-400 hover:text-white underline underline-offset-2" onclick="adminToggleClientStep('${escapeAttr(item.id)}', ${complete ? 'false' : 'true'})" title="${complete ? 'Mark this step as not done' : 'Mark this step as done'}">${complete ? 'Mark not done' : 'Mark done'}</button>` : ''}</div>
                 </div>`;
             };
             list.innerHTML = sectionHead('Onboarding · what they do', theirs) + theirs.map(itemRow).join('')
