@@ -1,6 +1,6 @@
 -- One A2P task: "Texting number and website (A2P)" (2026-11-06).
 --
--- A2P approval takes days to weeks, and the carriers check the client's website, so the website and the registration are one
+-- A2P approval takes days to weeks and the carriers check the client's website, so the website and the registration are one
 -- job and it is the one that must start first. Until now they were two tasks ("Register their texting number" and "Build
 -- their website"), with the A2P Business Profile step buried in "Connect their GHL to Golden Eye".
 --
@@ -16,6 +16,8 @@
 -- Clients already part-way through (their tasks exist): the "Register" task is renamed and raised in priority, the website
 -- steps and the Business Profile step move into it, and the old "Build their website" task is archived. No new tasks, no texts.
 --
+-- This file is plain ASCII on purpose. The step titles contain a long dash, and copying a file with one through a Windows
+-- clipboard can turn it into garbage, so the dash is written as chr(8212) (the "~" in a title below stands for it).
 -- Works whether or not show_setup_tasks_to_clients.sql has been run (it accepts both the old and the client-friendly names).
 -- Safe to re-run.
 
@@ -53,22 +55,25 @@ update public.stage_templates
    set checklist_group = 'Texting number and website (A2P)'
  where stage = 'Onboarding' and task_type = 'Setup step'
    and (checklist_group in ('Register their texting number', 'Register your texting number', 'Build their website', 'Build your website')
-        or task_title = 'Review — Paste the A2P details into their Business Profile');
+        or task_title = replace('Review ~ Paste the A2P details into their Business Profile', '~', chr(8212)));
 
 create temporary table a2p_order (task_title text, sort_order int, due_days int) on commit drop;
-insert into a2p_order values
-    ('A2P — Check the legal name, address and EIN match exactly', 1, 2),
-    ('Review — Paste the A2P details into their Business Profile', 2, 3),
-    ('A2P — Buy a local number', 3, 3),
-    ('Website — Check the logo and photos are usable', 4, 3),
-    ('Website — Read their style picks and design answers', 5, 4),
-    ('Website — Build the site from their first-choice look', 6, 7),
-    ('Website — Connect the domain and publish', 7, 8),
-    ('Website — Test the contact form lands in GHL', 8, 8),
-    ('Website — Connect their site''s contact form to GHL', 9, 6),
-    ('A2P — Make their website and host it on their GHL account', 10, 8),
-    ('A2P — Submit the brand and the campaign', 11, 9),
-    ('A2P — When approved, attach the number to the campaign and make it the default', 12, 21);
+insert into a2p_order
+select replace(v.t, '~', chr(8212)), v.s, v.d
+from (values
+    ('A2P ~ Check the legal name, address and EIN match exactly', 1, 2),
+    ('Review ~ Paste the A2P details into their Business Profile', 2, 3),
+    ('A2P ~ Buy a local number', 3, 3),
+    ('Website ~ Check the logo and photos are usable', 4, 3),
+    ('Website ~ Read their style picks and design answers', 5, 4),
+    ('Website ~ Build the site from their first-choice look', 6, 7),
+    ('Website ~ Connect the domain and publish', 7, 8),
+    ('Website ~ Test the contact form lands in GHL', 8, 8),
+    ('Website ~ Connect their site''s contact form to GHL', 9, 6),
+    ('A2P ~ Make their website and host it on their GHL account', 10, 8),
+    ('A2P ~ Submit the brand and the campaign', 11, 9),
+    ('A2P ~ When approved, attach the number to the campaign and make it the default', 12, 21)
+) as v(t, s, d);
 
 update public.stage_templates t
    set sort_order = o.sort_order, due_days = o.due_days
@@ -86,7 +91,7 @@ update public.tasks
    set checklist_group = 'Texting number and website (A2P)', updated_at = now()
  where stage = 'Onboarding' and type = 'Setup step'
    and (checklist_group in ('Register their texting number', 'Register your texting number', 'Build their website', 'Build your website')
-        or title = 'Review — Paste the A2P details into their Business Profile');
+        or title = replace('Review ~ Paste the A2P details into their Business Profile', '~', chr(8212)));
 
 -- Their old "Build their website" task: its steps now live above, so archive it (kept, not deleted, so it is never raised again)
 update public.tasks
@@ -98,9 +103,6 @@ commit;
 
 notify pgrst, 'reload schema';
 
--- Check:
---   select title, active, priority, urgency, effort, sort_order from onboarding_steps where owner = 'agency' order by active desc, sort_order;
---   select sort_order, task_title, due_days, website_statuses from stage_templates
+-- Check (run after): 12 steps in the group, in order, with the Business Profile step second
+--   select sort_order, due_days, task_title from stage_templates
 --    where checklist_group = 'Texting number and website (A2P)' order by sort_order;
---   select client, title, score, status, archived_at from tasks where stage = 'Onboarding' and type <> 'Setup step'
---    and (title like 'Texting number%' or title in ('Build their website', 'Build your website')) order by client;

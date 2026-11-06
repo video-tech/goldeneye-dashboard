@@ -2214,6 +2214,10 @@ it is the one that has to start first.
 - **Ad account steps needed nothing:** "Connect Meta" already has save the ad account and business IDs, assign the account to Golden
   Eye Sync (for accounts we own, that is the only access step), and set the target CPL.
 - **Tests:** `a2p_task.test.mjs` 52 PGlite checks, in both naming states, 6 of 6 breakages caught; `tests/stage-tasks.test.mjs` +2.
+- **The file is plain ASCII on purpose (2026-11-06).** The step titles hold a long dash (U+2014). Copying the file with `clip < file` in
+  Git Bash turned each into garbage (the console code page), so the first run changed only what matched ASCII names and left the
+  Business Profile step, the order and the due dates untouched. The dash is now `chr(8212)` (`~` in the titles), so it can't be mangled. **Any
+  SQL that matches a title with a long dash should do the same, and clipboard copies should use PowerShell `Set-Clipboard`, never `clip`.**
 
 ## "Set up": a label, not a stage (2026-10-19)
 
