@@ -5,8 +5,8 @@
 -- setup_checklist_a2p_profile.sql. Safe to re-run.
 --
 --   Connect their GHL to Golden Eye          -> Set up your CRM
---   Register their texting number            -> Register your texting number
---   Build their website                      -> Build your website
+--   Register their texting number            -> Texting number and website (A2P)   (one task with the website steps: a2p_task.sql)
+--   Build their website                      -> no longer a task of its own; a2p_task.sql folds it into the A2P task
 --   Turn on automations and add their team   -> Turn on your automations and add your team
 --   Set up Cuppa                             -> Set up your blog articles
 --   Connect Meta, Build the funnel and survey, Final check and test, Set up SEO tracking, Launch ads: unchanged.
@@ -17,8 +17,7 @@ create temporary table renames (old text, new text, about text) on commit drop;
 insert into renames values
     ('Connect Meta', 'Connect Meta', 'We connect your Facebook ad account to Golden Eye so we can track your ads.'),
     ('Connect their GHL to Golden Eye', 'Set up your CRM', 'We set up your CRM, where your new leads, texts and calls come in.'),
-    ('Register their texting number', 'Register your texting number', 'We register your business texting number with the phone carriers. Approval usually takes 1 to 3 weeks.'),
-    ('Build their website', 'Build your website', 'We build your website from the look you picked, or connect your current site so its leads get followed up too.'),
+    ('Register their texting number', 'Texting number and website (A2P)', 'We build or connect your website and register your business texting number with the phone carriers. Approval usually takes 1 to 3 weeks.'),
     ('Build the funnel and survey', 'Build the funnel and survey', 'We build the page your ads send people to, and the short survey they fill in.'),
     ('Turn on automations and add their team', 'Turn on your automations and add your team', 'We turn on your lead follow-up and add your team to the CRM.'),
     ('Final check and test', 'Final check and test', 'We test everything from start to finish before your ads go live.'),

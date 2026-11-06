@@ -23,7 +23,7 @@ await db.exec(`
         assignee text, due_days int, checklist_group text, task_type text, sort_order int, service_keys text[] not null default '{}',
         website_statuses text[] not null default '{}', auto_check text, fact_conditions jsonb not null default '{}'::jsonb);
     create table public.tasks (id serial primary key, client text, title text, type text, stage text, status text, checklist_group text,
-        client_visible boolean default true, notes text, due date, p int, u int, e int, score int, updated_at timestamptz, archived_at timestamptz);
+        client_visible boolean default true, notes text, due date, p int, u int, e int, score int, updated_at timestamptz, archived_at timestamptz, archived_by text);
     insert into onboarding_steps (title, owner, sort_order, service_keys, auto_check) values
         ('Add their Meta ad account ID to Golden Eye', 'agency', 13, '{ads}', null), ('Set up GHL sub-account & assets', 'agency', 14, '{}', null),
         ('Build and launch ads', 'agency', 15, '{ads}', null),
@@ -37,6 +37,7 @@ await db.exec(read('setup_checklist.sql'));
 await db.exec(read('setup_checklist_v2.sql'));
 await db.exec(read('setup_checklist_v3.sql'));
 await db.exec(read('setup_checklist_a2p_profile.sql'));
+await db.exec(read('a2p_task.sql'));   // the website and texting number are one task by now
 // A client part-way through, with tasks raised under the old names (group tasks hidden, as app.js used to raise them)
 await db.exec(`
     insert into tasks (client, title, type, stage, status, checklist_group, client_visible) values
@@ -52,7 +53,7 @@ await db.exec(sql);
 await db.exec(sql); // re-runnable
 
 const agency = Object.fromEntries((await q(`select title, active, description from onboarding_steps where owner = 'agency' and active`)).map((r) => [r.title, r]));
-const want = ['Connect Meta', 'Set up your CRM', 'Register your texting number', 'Build your website', 'Build the funnel and survey',
+const want = ['Connect Meta', 'Set up your CRM', 'Texting number and website (A2P)', 'Build the funnel and survey',
     'Turn on your automations and add your team', 'Final check and test', 'Set up SEO tracking', 'Set up your blog articles'];
 ok(want.every((t) => agency[t]) && Object.keys(agency).length === want.length, 'the nine tasks carry the client-friendly names: ' + Object.keys(agency).join(' | '));
 ok(Object.values(agency).every((a) => /^We /.test(a.description)), 'every task description is written for the client');
@@ -60,13 +61,13 @@ ok(!Object.values(agency).some((a) => /checklist|meta-sync|Conversions API|their
 
 const groups = (await q(`select distinct checklist_group g from stage_templates where task_type = 'Setup step'`)).map((r) => r.g).sort();
 ok(groups.join('|') === [...want, 'Launch ads'].sort().join('|'), 'every step points at its renamed task: ' + groups.join(' | '));
-ok((await q(`select count(*)::int n from stage_templates where checklist_group in ('Connect their GHL to Golden Eye','Set up Cuppa','Register their texting number')`))[0].n === 0, 'no step is left under an old name');
+ok((await q(`select count(*)::int n from stage_templates where checklist_group in ('Connect their GHL to Golden Eye','Set up Cuppa','Register their texting number','Build their website')`))[0].n === 0, 'no step is left under an old name');
 ok((await q(`select default_notes n from stage_templates where task_title = 'Launch ads' and task_type = 'Checklist'`))[0].n.startsWith('We build your ads'), 'Launch ads reads well to the client');
 
 const t = Object.fromEntries((await q(`select title, type, checklist_group, client_visible from tasks`)).map((r) => [r.title, r]));
-ok(t['Register your texting number']?.client_visible === true && t['Set up your blog articles']?.client_visible === true && t['Launch ads'].client_visible === true,
+ok(t['Texting number and website (A2P)']?.client_visible === true && t['Set up your blog articles']?.client_visible === true && t['Launch ads'].client_visible === true,
     'raised tasks are renamed and shown to the client');
-ok(t['A2P — Buy a local number'].client_visible === false && t['A2P — Buy a local number'].checklist_group === 'Register your texting number'
+ok(t['A2P — Buy a local number'].client_visible === false && t['A2P — Buy a local number'].checklist_group === 'Texting number and website (A2P)'
     && t['Cuppa — Connect it to their site'].checklist_group === 'Set up your blog articles', 'their steps stay hidden and follow the new name');
 ok(t['Call the owner'].client_visible === false, 'unrelated hidden tasks stay hidden');
 ok((await q(`select count(*)::int n from onboarding_steps where title = 'Set up Cuppa' and active`))[0].n === 0

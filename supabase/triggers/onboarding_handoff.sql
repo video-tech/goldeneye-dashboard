@@ -136,11 +136,12 @@ begin
         where lower(btrim(coalesce(t.title, ''))) = lower(v_addon_title)
           and lower(regexp_replace(coalesce(t.client, ''), '[^a-zA-Z0-9]', '', 'g')) = v_key
       ) then
+        -- Archived and Complete from the start (handoff_task_archived.sql): the "already announced" marker, never shown
         insert into tasks (client, title, type, stage, status, assignee,
-                           p, u, e, score, due, notes, updated_at)
-        values (v_client, v_addon_title, 'Client Request', 'Onboarding', 'Not Started', 'Account Manager',
+                           p, u, e, score, due, notes, updated_at, archived_at, archived_by)
+        values (v_client, v_addon_title, 'Client Request', 'Onboarding', 'Complete', 'Account Manager',
                 5, 4, 1, 92, current_date + 1,
-                v_client || ' finished their ' || v_addon.name || ' onboarding steps in their portal.', now());
+                v_client || ' finished their ' || v_addon.name || ' onboarding steps in their portal.', now(), now(), 'Golden Eye');
       end if;
     end loop;
     return NEW;
@@ -169,11 +170,13 @@ begin
     return NEW;
   end if;
 
+  -- Archived and Complete from the start (handoff_task_archived.sql): the "already announced" marker, never shown.
+  -- The INSERT still fires trg_notify_client_request, which texts the admins.
   insert into tasks (client, title, type, stage, status, assignee,
-                     p, u, e, score, due, notes, updated_at)
-  values (v_client, v_title, 'Client Request', 'Onboarding', 'Not Started', 'Account Manager',
+                     p, u, e, score, due, notes, updated_at, archived_at, archived_by)
+  values (v_client, v_title, 'Client Request', 'Onboarding', 'Complete', 'Account Manager',
           5, 4, 1, 92, current_date + 1,
-          v_client || ' finished every onboarding step in their portal.', now());
+          v_client || ' finished every onboarding step in their portal.', now(), now(), 'Golden Eye');
 
   -- The text goes through the GHL contact check. GHL's contact search is fuzzy, and on 2026-09-14 one completion with no
   -- email tagged and texted 10 leads; the function sends Make's webhook only on one EXACT email match in our Midas GHL,

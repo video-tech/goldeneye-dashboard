@@ -2889,6 +2889,8 @@ const obCompletionRaised = new Set();
 
 // Built in one place because two sides raise it: the portal at the moment the client
 // finishes, and the dashboard catching up on anyone the portal missed.
+// It is raised already archived and Complete (handoff_task_archived.sql): never on the board, but its existence is how
+// everything knows this client was already announced, and the insert still texts the admins.
 function buildOnboardingHandoffTask(clientName) {
     const due = new Date();
     due.setDate(due.getDate() + 1);
@@ -2897,14 +2899,22 @@ function buildOnboardingHandoffTask(clientName) {
         client: clientName,
         title: OB_COMPLETE_TASK_TITLE,
         type: 'Client Request',
+        archived_at: new Date().toISOString(),
+        archived_by: 'Golden Eye',
         stage: 'Onboarding',
-        status: 'Not Started',
+        status: 'Complete',
         assignee: 'Account Manager',
         p: 5, u: 4, e: 1, score: 92,
         due: due.toISOString().split('T')[0],
         notes: `${clientName} finished every onboarding step in their portal.`,
         updated_at: new Date().toISOString()
     };
+}
+
+// Rows just read from or written to the tasks table, filed where the rest of the app looks for them: an archived one
+// (the handoff markers) belongs with the archived tasks, so it never shows on a board.
+function rememberTaskRows(rows) {
+    (rows || []).forEach(r => (r.archived_at ? globalArchivedTasks : globalTasksData).push(r));
 }
 
 // The agency's own onboarding work, raised when the client finishes rather than when
@@ -2987,7 +2997,7 @@ async function obNotifyOnboardingComplete() {
     if (!onboardingHandoffRaised(client)) {
         const { data: existing } = await supabaseClient.from('tasks').select('*')
             .eq('client', client).eq('title', OB_COMPLETE_TASK_TITLE).limit(1);
-        if (existing?.length) globalTasksData.push(...existing);
+        rememberTaskRows(existing);
     }
 
     // Worked or not, an existing copy means this already announced itself — but our own
@@ -3007,7 +3017,7 @@ async function obNotifyOnboardingComplete() {
         console.error('Could not raise the onboarding-complete task:', error);
         return;
     }
-    globalTasksData.push(row);
+    rememberTaskRows([row]);
 
     // Their side is done, so ours begins
     await raiseOnboardingAgencyTasks(client);
@@ -12813,7 +12823,8 @@ const displayStages = ['Onboarding', SETUP_PHASE, ...lifecycleStages.slice(1)];
 // text), or every client step that applies to them is done. No steps known yet counts as not finished.
 function clientFinishedOwnSteps(clientName) {
     const key = normalize(clientName || '');
-    if ((globalTasksData || []).some(t => normalize(t.client || '') === key
+    // The handoff task is archived from the moment it's raised, so look there too
+    if (tasksIncludingArchived().some(t => normalize(t.client || '') === key
         && String(t.title || '').trim().toLowerCase() === OB_COMPLETE_TASK_TITLE.toLowerCase())) return true;
     const steps = activeOnboardingSteps(clientName);
     return steps.length > 0 && steps.every(s => onboardingProgressFor(clientName, s.id)?.completed_at);
@@ -14141,7 +14152,8 @@ async function generateStageTasks(clientName, stage, opts = {}) {
                 task_type: 'Checklist',
                 default_notes: s.description,
                 checklist_group: null,
-                priority: 3, urgency: 3, effort: 3
+                // Set per task on onboarding_steps (a2p_task.sql gives the A2P task 5/5/1, the highest score); empty counts as 3
+                priority: s.priority ?? 3, urgency: s.urgency ?? 3, effort: s.effort ?? 3
             }))
         : stageItems;
 
@@ -14238,7 +14250,7 @@ async function reconcileOnboardingHandoffTasks() {
             if (error) {
                 console.error(`[LIFECYCLE ENGINE] No handoff task for ${c.name}:`, error);
             } else {
-                if (data?.length) globalTasksData.push(...data);
+                rememberTaskRows(data);
                 console.log(`[LIFECYCLE ENGINE] ${c.name} finished onboarding — handoff task raised.`);
             }
         }
@@ -14561,7 +14573,7 @@ async function reconcileAddonOnboarding(c) {
                 notes: `${c.name} finished their ${serviceName(s.service_key)} onboarding steps in their portal.` };
             const { data, error } = await supabaseClient.from('tasks').insert([row]).select();
             if (error) { console.error(`[LIFECYCLE ENGINE] No ${s.service_key} handoff task for ${c.name}:`, error); continue; }
-            if (data?.length) globalTasksData.push(...data);
+            rememberTaskRows(data);
         }
         const { error } = await supabaseClient.from('client_services')
             .update({ status: 'active', onboarded_at: new Date().toISOString() })

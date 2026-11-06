@@ -28,6 +28,7 @@ w.eval(`
     var globalTasksData = [];
     function allOnboardingItems() { return [
         { id: 'g1', owner: 'agency', title: 'Register your texting number', description: 'We register your number.', due_days: 10 },
+        { id: 'g2', owner: 'agency', title: 'Texting number and website (A2P)', description: 'A2P.', due_days: 10, priority: 5, urgency: 5, effort: 1 },
         { id: 'c1', owner: 'client', title: 'About your business' },
     ]; }
     function obFor() { return null; }
@@ -50,6 +51,12 @@ const by = Object.fromEntries(w.__inserted.map((r) => [r.title, r]));
 ok(by['Register your texting number']?.client_visible === true && by['Launch ads']?.client_visible === true, 'our tasks are raised visible to the client');
 ok(by['A2P — Buy a local number']?.client_visible === false && by['Ads — Build the creatives']?.client_visible === false, 'their steps are raised hidden');
 ok(!by['About your business'], "the client's own steps never become our tasks");
+
+// Priority comes from the task's definition (a2p_task.sql); a task with none counts as 3, which is what every task used
+ok(by['Texting number and website (A2P)']?.p === 5 && by['Texting number and website (A2P)'].u === 5 && by['Texting number and website (A2P)'].e === 1
+    && by['Texting number and website (A2P)'].score === 100, 'the A2P task is raised at priority 5, urgency 5, effort 1: score 100');
+ok(by['Register your texting number']?.p === 3 && by['Register your texting number'].u === 3 && by['Register your texting number'].e === 3
+    && by['Register your texting number'].score === 60, 'a task with no priority is raised at 3 / 3 / 3: score 60');
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

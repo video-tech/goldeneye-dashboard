@@ -23,14 +23,14 @@ const code = [
     cut('        function stageProgressFor(client) {', '        // What the client answered on built-in Questions steps'),
 ].join('\n');
 
-function world({ progress = [], tasks = [], stage = 'Onboarding' } = {}) {
+function world({ progress = [], tasks = [], archived = [], stage = 'Onboarding' } = {}) {
     const dom = new JSDOM(`<!doctype html><body>
         <div id="c-stage-box"><div id="c-stage-steps"></div><button id="c-stage-checklist"><span id="c-stage-checklist-label"></span></button>
         <div id="c-stage-bar-track"><div id="c-stage-bar"></div></div><p id="c-stage-summary"></p><p id="c-stage-detail"></p></div>
         <div id="c-onboarding-box"><span id="c-onboarding-summary"></span><button id="c-onboarding-backfill"></button><div id="c-onboarding-ghl"></div><div id="c-onboarding-list"></div></div>
     </body>`, { runScripts: 'dangerously' });
     const w = dom.window;
-    w.__in = { progress, tasks, stage };
+    w.__in = { progress, tasks, archived, stage };
     w.eval(`
         const normalize = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         const escapeAttr = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
@@ -39,7 +39,8 @@ function world({ progress = [], tasks = [], stage = 'Onboarding' } = {}) {
         const lifecycleStages = ['Onboarding', 'Campaign Building', 'Campaign Learning', 'Optimizing', 'Offboarding'];
         var currentActiveClient = 'Acme', currentUserRole = 'admin', cSelectedAccount = 'Acme';
         var globalClientsData = [{ name: 'Acme', current_stage: __in.stage }];
-        var globalTasksData = __in.tasks;
+        var globalTasksData = __in.tasks, globalArchivedTasks = __in.archived;
+        const tasksIncludingArchived = () => globalTasksData.concat(globalArchivedTasks);
         var globalOnboardingProgress = __in.progress;
         var globalOnboardingSteps = [
             { id: 'v1', title: 'Welcome video', owner: 'client', sort_order: 1 },
@@ -68,6 +69,8 @@ w = world({ progress: [done('v1'), done('q1')] });
 ok(phase(w) === 'Set up', 'all their steps done: Set up');
 w = world({ tasks: [{ client: 'Acme', title: 'Onboarding complete — ready for campaign build', stage: 'Onboarding' }] });
 ok(phase(w) === 'Set up', 'the onboarding-complete task alone also means Set up');
+w = world({ archived: [{ client: 'Acme', title: 'Onboarding complete — ready for campaign build', stage: 'Onboarding', archived_at: '2026-11-06T00:00:00Z' }] });
+ok(phase(w) === 'Set up', 'the archived onboarding-complete task (how it is raised now) also means Set up');
 w = world({ progress: [done('v1'), done('q1')], stage: 'Campaign Building' });
 ok(phase(w) === 'Campaign Building', 'later stages show as themselves');
 ok(w.eval(`globalClientsData[0].current_stage`) === 'Campaign Building' && world({ progress: [done('v1'), done('q1')] }).eval(`globalClientsData[0].current_stage`) === 'Onboarding',

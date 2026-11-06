@@ -2,6 +2,21 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-11-06",
+      "area": "Onboarding",
+      "title": "The texting number and the website are one A2P task, and it comes first",
+      "what": "Registering the texting number (A2P) and building the website are now a single task, 'Texting number and website (A2P)', because the carriers check the website and approval takes weeks. It has the highest priority of any task, sits first in our list, and its checklist runs in order: legal name and EIN, Business Profile, the number, the website, host it, submit, attach once approved. 'Build their website' is no longer a separate task. Clients already part-way through were moved over without any new tasks.",
+      "note": "Clients see this task's name in their portal.",
+      "action": "Run supabase/sql/a2p_task.sql in the SQL Editor."
+    },
+    {
+      "date": "2026-11-06",
+      "area": "Onboarding",
+      "title": "The 'onboarding complete' task no longer clutters the board",
+      "what": "When a client finishes their steps, Golden Eye still texts them and texts you and Aidan, but it no longer adds an 'Onboarding complete' task to the board. A client now moves on when our own onboarding tasks are done, instead of also waiting for that one to be ticked. The ones already there were archived.",
+      "action": "Run supabase/sql/handoff_task_archived.sql in the SQL Editor."
+    },
+    {
       "date": "2026-11-05",
       "area": "Onboarding",
       "title": "Onboarding steps can be marked done, or not done, by hand",

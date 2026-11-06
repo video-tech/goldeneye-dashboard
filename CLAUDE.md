@@ -209,6 +209,15 @@ and `morning-audit` share a hook, so the filter went in only after that function
   - **Live since 2026-09-11.** All four tests passed first (one text on a real completion,
     none on a rename, a post-onboarding client, or a backfill); the trigger was then attached
     and confirmed in `pg_trigger`.
+  - **The task is raised already archived and Complete (2026-11-06, `supabase/sql/handoff_task_archived.sql`).** It never reaches a
+    board, count, report or the portal, but everything that needs "already announced" still finds it, because they all look it up by
+    title without filtering archived: this trigger's own check, ghl-account, the add-on path, `clientFinishedOwnSteps` (now reads
+    `tasksIncludingArchived()`), and `trg_notify_client_request`, which fires on the INSERT, so the admins are still texted. The
+    add-on version ("<Add-on> onboarding complete — ready to start") is raised the same way. app.js builds the same archived row
+    (`buildOnboardingHandoffTask`) and files rows through `rememberTaskRows`. **The stage move no longer waits on it**:
+    `autoAdvanceCompletedOnboarding` ignores archived tasks, so a client advances when our real tasks are complete. The ones that
+    existed were archived by the SQL (an UPDATE, so no text). Deleting one still re-arms the text. 18 PGlite checks (3 of 4
+    breakages caught, the fourth is equivalent), `tests/handoff-hidden.test.mjs` 8 (4 of 4 caught).
 - `notify_admins_client_request()` + `trg_notify_client_request` on `tasks` — classifies
   `Client Request` inserts into onboarding_complete / help_request / task_request, builds
   the SMS text, POSTs to Make with the recipient list.
@@ -2176,6 +2185,27 @@ the work into these tasks (agency rows in `onboarding_steps`, steps in `stage_te
   draws the same rows (`setupStepRowsHtml`).
 - **Tests:** `supabase/sql/setup_checklist_v3.test.mjs` runs v1, v2 and v3 twice, 42 checks, 3 of 3 breakages caught;
   `tests/task-steps.test.mjs` runs the real board, list and checklist code in jsdom, 22 checks, 5 of 5 breakages caught.
+
+## One A2P task (built 2026-11-06, `supabase/sql/a2p_task.sql`)
+
+A2P approval takes days to weeks and the carriers check the client's website, so the website and the registration are one job, and
+it is the one that has to start first.
+- **"Texting number and website (A2P)"** (Base only, as before) replaces "Register their texting number" and "Build their website".
+  One task, twelve steps in order: check the legal name and EIN, the Business Profile step (moved from "Connect their GHL";
+  `A2P_PROFILE_STEP` in app.js still finds it by title), buy the number, the website steps (five for a new site, one to connect an
+  existing one, still tagged by `website_statuses`), host the site on their GHL, submit, attach once approved. Golden Eye tasks
+  don't nest, so the two sub-tasks are the "Website —" and "A2P —" prefixes, drawn as labels in the one checklist. Dues: site 8,
+  submit 9, attach 21 (carriers take 1 to 3 weeks).
+- **Top priority:** `onboarding_steps` gained `priority` / `urgency` / `effort` (empty = 3, which every task used). `generateStageTasks`
+  reads them. The A2P task is 5 / 5 / 1, score 100; every other task is 60. It is also first among our tasks by `sort_order`.
+  Templates doesn't edit these yet: they are set in SQL (the editor's save leaves them alone).
+- **"Build their website" is switched off**, not deleted. Clients part-way through were moved by the SQL: the Register task renamed and
+  raised in priority, their website and Business Profile steps moved in, the old website task archived, no new tasks.
+- **Names:** the SQL accepts both the live internal names and the client-friendly ones from `show_setup_tasks_to_clients.sql`. That
+  file (not run as of 2026-11-06) now renames Register to the A2P title and no longer renames Build. Clients can see the title.
+- **Ad account steps needed nothing:** "Connect Meta" already has save the ad account and business IDs, assign the account to Golden
+  Eye Sync (for accounts we own, that is the only access step), and set the target CPL.
+- **Tests:** `a2p_task.test.mjs` 52 PGlite checks, in both naming states, 6 of 6 breakages caught; `tests/stage-tasks.test.mjs` +2.
 
 ## "Set up": a label, not a stage (2026-10-19)
 
