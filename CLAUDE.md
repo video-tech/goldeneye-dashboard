@@ -671,12 +671,17 @@ embedded GHL form, for forms nothing in GHL uses. The SEO intake is one. Schema 
   handoff trigger acts only on not-done to done, and a handoff task already existing stops a second text.
 - **An admin ticking a client's last step** (Onboarding, active, no handoff task yet: `obWouldFinishOnboarding`) is asked whether
   to text them. OK saves the admin's email as `completed_by` and the trigger runs as usual; Cancel saves `backfilled`, which it skips.
+- **Ticking a Questions or team step nobody has filled in warns first** (`obStepNeedsAnswers`; Relationship tab only, not preview, where
+  private answers aren't loaded). Ticking fills in nothing, and the GHL account (`ghl-account` needs the About-your-business `a_name`
+  answer), the A2P registration and the team logins are all built from answers. Found 2026-11-06: Optimum Health had every step ticked
+  within a minute and no answers, so no GHL account was made. The fix for a client in that state is **Mark not done** on those steps so
+  they fill them in; the handoff task already exists, so nothing is texted twice.
 - **RLS (`supabase/sql/onboarding_progress_rls.sql`):** the old `Auth manage onboarding progress` was `for all using (true)`, so any
   signed-in user could change or delete any client's progress. Now admins do everything; others select, insert and update their
   own client's rows through `client_row_visible`; only admins delete. Make #3 and the edge functions skip RLS.
 - **Tests:** `onboarding_progress_rls.test.mjs` (PGlite) 19 checks, with the old policy as the control, 2 of 3 breakages caught (the
-  third, an open WITH CHECK on update, is still blocked by the select policy). `tests/step-toggle.test.mjs` (jsdom) 31 checks on the
-  real code, 5 of 5 caught.
+  third, an open WITH CHECK on update, is still blocked by the select policy). `tests/step-toggle.test.mjs` (jsdom) 42 checks on the
+  real code, 11 of 11 breakages caught.
 
 Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5× default
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of

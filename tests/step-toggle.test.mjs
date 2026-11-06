@@ -37,7 +37,7 @@ const STEPS = [
     { id: 'c1', title: 'Book your setup call', step_type: 'form', embed_url: 'https://cal/x', requires_confirm: true, owner: 'client' },
 ];
 
-function world({ done = [], preview = false, role = 'client', stage = 'Onboarding', handoff = false, confirms = [] } = {}) {
+function world({ done = [], preview = false, role = 'client', stage = 'Onboarding', handoff = false, confirms = [], answers = [], priv = [], secrets = [], contacts = [] } = {}) {
     const dom = new JSDOM('<!doctype html><body><div id="ob-steps-list"></div><div id="c-onboarding-box"><div id="c-onboarding-list"></div></div></body>', { runScripts: 'dangerously' });
     const w = dom.window;
     w.__saves = []; w.__asked = []; w.__answers = [...confirms]; w.__notified = 0;
@@ -50,6 +50,7 @@ function world({ done = [], preview = false, role = 'client', stage = 'Onboardin
         var globalOnboardingProgress = ${JSON.stringify(done.map((id) => ({ client_name: 'Acme', step_id: id, completed_at: '2026-11-01T00:00:00Z', completed_by: 'pat@acme.com' })))};
         var globalClientsData = [{ name: 'Acme', status: 'active', current_stage: ${JSON.stringify(stage)} }], portalClientRows = [];
         var globalTasksData = ${JSON.stringify(handoff ? [{ client: 'Acme', title: 'Onboarding complete — ready for campaign build', status: 'Not Started' }] : [])}, globalServices = [];
+        var globalOnboardingAnswers = ${JSON.stringify(answers)}, globalPrivateAnswers = ${JSON.stringify(priv)}, globalSecretsMeta = ${JSON.stringify(secrets)}, globalContactsData = ${JSON.stringify(contacts)};
         var obManualOpen = new Proxy({}, { has: () => true, get: () => true });   // every card open
         var obManualRevealTimer;
         function onboardingProgressFor(c, id) { return globalOnboardingProgress.find(p => normalize(p.client_name) === normalize(c) && p.step_id === id) || null; }
@@ -197,6 +198,53 @@ const allBut = (id) => STEPS.map((s) => s.id).filter((x) => x !== id);
     const { w } = world({ done: allBut('a1') });
     await w.obManualToggle('a1', true);
     ok(w.__asked.length === 1 && w.__saves[0].row.completed_by === 'pat@acme.com', 'a client finishing their own last step is never asked: they get the text as always');
+}
+
+// ---- Ticking a Questions or team step nobody has filled in (Optimum Health, 2026-11-06) ----
+{
+    const { w } = world({ role: 'admin' });
+    await w.adminToggleClientStep('q1', true);
+    ok(/^Heads up: Acme hasn't given any answers for "About your business"/.test(w.__asked[0]) && /Mark "About your business" as done for Acme\?$/.test(w.__asked[0]),
+        'an admin ticking a Questions step with no answers is warned first: ' + w.__asked[0]);
+    ok(w.__saves.length === 1, 'and can still go ahead');
+}
+{
+    const { w } = world({ role: 'admin' });
+    await w.adminToggleClientStep('t1', true);
+    ok(/Heads up: Acme hasn't given any answers for "Your team"/.test(w.__asked[0]), 'the team step warns when nobody is saved');
+}
+{
+    const mine = { client_name: 'Acme', step_id: 'q1', answers: { a_name: { value: 'Acme Decks' } } };
+    let r = world({ role: 'admin', answers: [mine] });
+    await r.w.adminToggleClientStep('q1', true);
+    ok(!/Heads up/.test(r.w.__asked[0]), 'no warning once they have answered');
+    r = world({ role: 'admin', priv: [{ client_name: 'Acme', step_id: 'q1', answers: { b_ein: { value: '12-3456789' } } }] });
+    await r.w.adminToggleClientStep('q1', true);
+    ok(!/Heads up/.test(r.w.__asked[0]), 'private-only answers count (the texting-number step is all private)');
+    r = world({ role: 'admin', secrets: [{ client_name: 'Acme', step_id: 'q1', question_id: 'pw' }] });
+    await r.w.adminToggleClientStep('q1', true);
+    ok(!/Heads up/.test(r.w.__asked[0]), 'a stored login counts too');
+    r = world({ role: 'admin', contacts: [{ client_name: 'Acme', name: 'Sam', phone: '8015550100' }] });
+    await r.w.adminToggleClientStep('t1', true);
+    ok(!/Heads up/.test(r.w.__asked[0]), 'a saved team member means the team step is filled in');
+    r = world({ role: 'admin', answers: [{ client_name: 'Other', step_id: 'q1', answers: { a_name: { value: 'x' } } }, { client_name: 'Acme', step_id: 'q1', answers: {} }] });
+    await r.w.adminToggleClientStep('q1', true);
+    ok(/Heads up/.test(r.w.__asked[0]), "another client's answers, or an empty row, don't count");
+}
+{
+    const { w } = world({ role: 'admin' });
+    await w.adminToggleClientStep('f1', true); await w.adminToggleClientStep('a1', true); await w.adminToggleClientStep('v1', true);
+    ok(w.__asked.every((q) => !/Heads up/.test(q)), 'a form, an action and a video never warn');
+}
+{
+    const { w } = world({ role: 'admin', done: ['q1'] });
+    await w.adminToggleClientStep('q1', false);
+    ok(!/Heads up/.test(w.__asked[0]), 'unticking never warns');
+}
+{
+    const { w } = world({ preview: true, role: 'admin' });
+    await w.obManualToggle('q1', true);
+    ok(!/Heads up/.test(w.__asked[0]) && /previewing/.test(w.__asked[0]), "in preview the private answers aren't loaded, so it doesn't guess");
 }
 
 // ---- A form that didn't tick: tell us, never a tick ----

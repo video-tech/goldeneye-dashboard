@@ -4,6 +4,12 @@
     {
       "date": "2026-11-06",
       "area": "Onboarding",
+      "title": "A warning before you mark an unanswered questionnaire step done",
+      "what": "On a client's Relationship tab, marking a questions step or the team step as done now warns you first if the client hasn't given any answers or added anyone. Marking it done doesn't fill anything in, and their GHL account, A2P registration and team logins are built from those answers. To fix a client who was marked done without answering, use Mark not done so they can fill it in."
+    },
+    {
+      "date": "2026-11-06",
+      "area": "Onboarding",
       "title": "The packages pop-up opens again",
       "what": "Clicking the packages button next to the stage chip on the Accounts page, or Edit on a Roster profile's services section, did nothing. It opens now, so you can set a client's add-ons to Active, Onboarding or Paused from there."
     },

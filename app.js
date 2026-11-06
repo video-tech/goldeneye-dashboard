@@ -2828,6 +2828,20 @@ function obWouldFinishOnboarding(clientName, stepId) {
     return steps.every(s => s.id === stepId || onboardingProgressFor(clientName, s.id)?.completed_at);
 }
 
+// A Questions or team step an admin is about to tick for a client who hasn't given anything yet. Ticking it by hand fills in
+// nothing, and the GHL account, the A2P registration and the check-in people are all built from those answers
+// (found 2026-11-06: Optimum Health had every step ticked and no answers, so no GHL account was made).
+function obStepNeedsAnswers(clientName, step) {
+    if (!step || !['questions', 'team'].includes(step.step_type)) return false;
+    const want = normalize(clientName || '');
+    const has = list => (list || []).some(r => normalize(r.client_name || '') === want && r.step_id === step.id
+        && Object.keys(r.answers || {}).length);
+    if (step.step_type === 'team') return !(typeof globalContactsData !== 'undefined' && (globalContactsData || []).some(c => normalize(c.client_name || '') === want));
+    return !(has(typeof globalOnboardingAnswers !== 'undefined' ? globalOnboardingAnswers : [])
+        || has(typeof globalPrivateAnswers !== 'undefined' ? globalPrivateAnswers : [])
+        || (typeof globalSecretsMeta !== 'undefined' ? globalSecretsMeta : []).some(r => normalize(r.client_name || '') === want && r.step_id === step.id));
+}
+
 // Asks, saves, and updates the local copy. Returns true when it saved.
 // asAdmin: an admin on the Relationship tab or previewing. Ticking a client's last step then asks whether to text
 // them: no text saves completed_by 'backfilled', which the trigger skips (the same as "Mark client steps done").
@@ -2842,6 +2856,10 @@ async function obSetStepDone(clientName, stepId, done, { asAdmin = false } = {})
     let question = done ? `Mark "${title}" as done${forWhom}?` : `Mark "${title}" as not done${forWhom}?`;
     if (!done && !asAdmin) question += '\n\nIt goes back on your list.';
     if (window.isClientPreview) question = `You're previewing ${clientName}'s portal. This changes their real progress.\n\n` + question;
+    // Only on the Relationship tab: in preview the private answers aren't loaded, so "no answers" could be wrong there
+    if (done && asAdmin && !window.isClientPreview && obStepNeedsAnswers(clientName, step)) {
+        question = `Heads up: ${clientName} hasn't given any answers for "${title}".\n\nTicking it by hand doesn't fill them in, and their GHL account and A2P registration are built from those answers. It's better to leave it open until they've filled it in.\n\n` + question;
+    }
     if (!confirm(question)) return false;
 
     let silent = false;
