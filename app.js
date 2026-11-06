@@ -13331,6 +13331,10 @@ window.openPackagesModal = function(clientName) {
     if (currentUserRole !== 'admin' || !clientName || clientName === 'ALL') return;
     const modal = document.getElementById('packages-modal');
     if (!modal) return;
+    // In the markup this modal sits inside the hidden client-portal container, so on the admin dashboard it inherited
+    // display:none and Edit / the packages button did nothing (found 2026-11-06). Lift it out on open, like Add Client.
+    const wrapper = document.getElementById('theme-wrapper');
+    if (wrapper && modal.parentElement !== wrapper) wrapper.appendChild(modal);
     packagesModalClient = clientName;
     document.getElementById('packages-modal-client').textContent = clientName;
     document.getElementById('packages-modal-msg').classList.add('hidden');

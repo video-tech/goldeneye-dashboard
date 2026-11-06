@@ -524,8 +524,11 @@ missed-call text-back, review automation, lead follow-up, portal access). Add-on
     **Already running** (saved `active`, no onboarding), with **New** (saved `onboarding`) as the choice that starts its steps; an
     add-on they have gets an Active / Onboarding / Paused select; unticking ends it after a confirm. Add Client keeps the plain
     checkboxes (a new client's add-ons start onboarding). Writes `client_services` only, which has no trigger, so nothing is sent.
-    Nothing about packages is in the client portal. `tests/packages-modal.test.mjs`, 24 jsdom checks,
-    3 of 3 breakages caught.
+    Nothing about packages is in the client portal. `tests/packages-modal.test.mjs`, 25 jsdom checks,
+    3 of 3 breakages caught. **The pop-up did nothing on the admin dashboard until 2026-11-06:** `#packages-modal` sits inside the
+    hidden client-portal container in the markup and, unlike Add Client, never lifted itself out on open. `openPackagesModal` does now,
+    and the test builds the page the real way (modal inside a hidden container) so it would have caught it. Any new modal placed after
+    `#client-portal-container` in body.html needs the same lift (see the Gotchas entry on drawers and modals).
 - **Switched over 2026-09-15:** Get Started, agency tasks, stage checklists and `trg_onboarding_handoff`
   all use the tags now.
   - **One source:** app.js loads `onboarding_steps_for_clients` and `service_onboarding_status_for_clients`

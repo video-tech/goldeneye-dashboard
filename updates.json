@@ -4,6 +4,12 @@
     {
       "date": "2026-11-06",
       "area": "Onboarding",
+      "title": "The packages pop-up opens again",
+      "what": "Clicking the packages button next to the stage chip on the Accounts page, or Edit on a Roster profile's services section, did nothing. It opens now, so you can set a client's add-ons to Active, Onboarding or Paused from there."
+    },
+    {
+      "date": "2026-11-06",
+      "area": "Onboarding",
       "title": "The texting number and the website are one A2P task, and it comes first",
       "what": "Registering the texting number (A2P) and building the website are now a single task, 'Texting number and website (A2P)', because the carriers check the website and approval takes weeks. It has the highest priority of any task, sits first in our list, and its checklist runs in order: legal name and EIN, Business Profile, the number, the website, host it, submit, attach once approved. 'Build their website' is no longer a separate task. Clients already part-way through were moved over without any new tasks.",
       "note": "Clients see this task's name in their portal.",

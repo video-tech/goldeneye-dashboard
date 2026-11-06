@@ -22,7 +22,7 @@ const modal = body.slice(ma, mb);
 const btnLine = body.slice(body.indexOf('<button type="button" id="c-packages-btn"'), body.indexOf('</button>', body.indexOf('id="c-packages-btn"')) + 9);
 
 function world({ role = 'admin', confirmAnswer = true, rows } = {}) {
-    const dom = new JSDOM(`<!doctype html><body><style>.hidden{display:none}</style>${modal}${btnLine}<div id="edit-client-services"></div><div id="roster-detail"></div></body>`, { runScripts: 'dangerously' });
+    const dom = new JSDOM(`<!doctype html><body><style>.hidden{display:none}</style><div id="theme-wrapper"><div id="client-portal-container" class="hidden">${modal}</div>${btnLine}<div id="edit-client-services"></div><div id="roster-detail"></div></div></body>`, { runScripts: 'dangerously' });
     const w = dom.window;
     w.__calls = []; w.__redraws = []; w.__confirmAnswer = confirmAnswer;
     w.__rows = rows || [
@@ -63,6 +63,9 @@ let w = world();
 w.openPackagesModal('Acme');
 const d = w.document;
 ok(d.getElementById('packages-modal').style.display === 'flex' && d.getElementById('packages-modal-client').textContent === 'Acme', 'opens for the client');
+// The real page keeps the modal inside the hidden client-portal container: it has to be visible, not just display:flex
+const seen = (el) => { for (let e = el; e && e.nodeType === 1; e = e.parentElement) if (w.getComputedStyle(e).display === 'none') return false; return true; };
+ok(seen(d.getElementById('packages-modal')) && d.getElementById('packages-modal').parentElement.id === 'theme-wrapper', 'and is actually visible: it is lifted out of the hidden client-portal container');
 ok([...d.querySelectorAll('.pkg-row')].map(r => r.dataset.key).join('|') === 'ads|seo|gbp', 'offered add-ons only (a retired one the client never had stays out)');
 ok(rowOf(w, 'ads').querySelector('.pkg-box').checked && rowOf(w, 'ads').querySelector('.pkg-status-select').value === 'active', 'Ads shows ticked, Active');
 ok(rowOf(w, 'seo').querySelector('.pkg-status-select').value === 'onboarding', 'SEO shows Onboarding');
