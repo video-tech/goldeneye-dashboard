@@ -7333,7 +7333,9 @@ function adFactsShortDate(ymd) {
 const adFactsMoney = (n) => '$' + (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const adFactsQuote = (s) => `"${stripSlashEscapes(String(s || 'unnamed')).replace(/"/g, "'")}"`;
 
-const AD_FACTS_LEVEL = { AD: 'ad', ADGROUP: 'ad set', AD_SET: 'ad set', ADSET: 'ad set', CAMPAIGN: 'campaign', CAMPAIGN_GROUP: 'campaign', ACCOUNT: 'account', AD_ACCOUNT: 'account' };
+// Meta's change log uses its legacy names: ADGROUP is an AD, CAMPAIGN is an AD SET and CAMPAIGN_GROUP is the CAMPAIGN (checked against Alta Vista's log, 2026-11-09:
+// ADGROUP rows were named like ads, CAMPAIGN rows like ad sets). The report once said "new ad sets" for new ads because this mapped them the other way.
+const AD_FACTS_LEVEL = { AD: 'ad', ADGROUP: 'ad', AD_SET: 'ad set', ADSET: 'ad set', CAMPAIGN: 'ad set', CAMPAIGN_GROUP: 'campaign', ACCOUNT: 'account', AD_ACCOUNT: 'account' };
 
 // Budget amounts come in the currency's minor unit (cents). Shown only when the change says it's
 // money; otherwise the sentence just says the budget changed rather than print a wrong figure.

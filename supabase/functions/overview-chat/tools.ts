@@ -210,7 +210,7 @@ async function ad_changes(ctx: Ctx, args: any) {
     if (error) throw new Error(error.message);
     return {
         range: r, client: f.client.name,
-        note: "Significant changes in Meta's change history, newest first. Times are UTC. object_type ADGROUP is an ad set.",
+        note: "Significant changes in Meta's change history, newest first. Times are UTC. Meta uses legacy names: object_type ADGROUP is an AD, CAMPAIGN is an AD SET, CAMPAIGN_GROUP is the CAMPAIGN.",
         changes: (data ?? []).map((a: any) => ({
             when: a.event_time, kind: a.category, what: a.event_label, object_type: a.object_type, object: a.object_name,
             who: a.actor_is_meta ? "Meta's system" : a.actor_name,

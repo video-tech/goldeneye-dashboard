@@ -4,6 +4,13 @@
     {
       "date": "2026-11-09",
       "area": "Reports",
+      "title": "Reports no longer call new ads \"new ad sets\"",
+      "what": "Meta calls an ad an ADGROUP and an ad set a CAMPAIGN in its change log, and Golden Eye had them the other way round. A report for Alta Vista said we created several new ad sets on November 7, when we added new ads (images and a video) inside an existing ad set. Reports, the Ads tab activity list and the Overview chat now say ad, ad set and campaign correctly.",
+      "note": "Reports already generated keep their old wording; generate them again to fix it."
+    },
+    {
+      "date": "2026-11-09",
+      "area": "Reports",
       "title": "Leads check before you generate a report",
       "what": "The report pop-up now shows the period's leads three ways: Golden Eye (the daily pull the report uses), Meta, and the client's own GHL (contacts with their lead tags). A count that's off gets a check mark, and a By day table shows which day it went wrong. If a client has no lead tags yet, it lists the tags on their recent contacts so you can click the ones that mean a lead. Set tags any time in Edit Client.",
       "note": "Only counts leave GHL, never names or numbers.",
