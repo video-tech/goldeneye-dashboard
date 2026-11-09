@@ -2070,6 +2070,36 @@ account totals and the morning audit; this adds what it can't say: which ad, and
 - **Tests:** 37 parser checks (real SimpliBlinds extra_data), 14 PGlite checks (schema, RLS,
   rename), 22 jsdom checks on the report block (5 mutations, all caught), strict `tsc`.
 
+## Leads check in Generate Report (built 2026-11-09, NOT live until set up)
+
+The report pop-up shows the period's leads three ways before the report is written, replacing the weekly hand check of
+Golden Eye, Meta and each client's GHL: **Golden Eye** (`daily_reports`, the report's headline), **Meta** (`meta_ad_daily`,
+meta-sync) and **GHL** (contacts added in the client's own GHL carrying one of their lead tags). `renderLeadsCheck()` in
+app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins only.
+- **`supabase/functions/ghl-leads/`** (admin JWT only): `POST /contacts/search` on the client's sub-account, filtered by
+  date added (Mountain days, `denverMidnight`), paged with `searchAfter`, capped at 2,000 contacts (reported as truncated).
+  **Returns counts only** (added, tagged, per tag, per day, top other tags and sources): contacts are cut down to date, tags and
+  source as they arrive, and no name, email, phone or id leaves the function. Nothing is stored.
+- **The search is a POST but a read:** `ghlReadPost` in `_shared/ghl-write.ts` allows only `READ_POST_ALLOW`
+  (`/contacts/search`), so a "read" can't be a disguised write. Writes still go only through `ghlWrite`.
+- **Access:** the Golden Eye app's location token, which needs the **View Contacts** scope (`contacts.readonly`, added for
+  this; nothing else) and the app installed on each client's sub-account. Our own Midas sub-account (shared with Sunset) uses
+  `GHL_MIDAS_TOKEN`. Without access the box says why (no location id, app not installed, missing scope).
+- **`clients.lead_tags`** (`supabase/sql/lead_check.sql`), lower-case, set in Edit Client ("GHL lead tags") or by clicking a
+  tag the check offers. A contact with two lead tags counts once.
+- **Gap rule** (`leadsCheckGap`): flagged when two counts are more than 2 apart and more than 15% of the larger. The by-day
+  table marks days 2+ apart.
+- **The model gets one line** (`buildLeadsCheckBlock`), only when the check is for the same client and dates: the GHL count
+  next to the daily pull's, with the daily pull as the headline and the CRM count not mentioned unless the notes ask.
+- **GHL's AI is not used:** counting by tag and date is exact through the API.
+- **Coverage on 2026-11-09:** only 3Sixty, Caliber, PANDEN, Optimum and PureAirK9 had `ghl_location_id`. Alta Vista, Anxiety
+  Solutions, Astra, KLH, Red Valley and Tattoo Ink need theirs; Sunset needs our Midas location id.
+- **Order:** push app.js (the box shows "not set up" states), run the SQL, deploy `ghl-leads`, add View Contacts to the app and
+  reinstall it ticking each client account, then location ids and tags.
+- **Tests:** `ghl-leads.test.mjs` (node `--experimental-strip-types`), 43 checks against a fake GHL (Mountain-time bounds, paging,
+  the cap, tag counting, Midas routing, every setup state, no personal fields, refusals, the read gate), 3 of 5 breakages caught
+  (the other 2 are equivalent); `tests/leads-check.test.mjs` (jsdom), 29 checks on the real code, 5 of 5 caught.
+
 ## Text the assignee (built 2026-10-13)
 
 "Text the assignee" in the task drawer (existing tasks only) texts whoever a task is assigned to.

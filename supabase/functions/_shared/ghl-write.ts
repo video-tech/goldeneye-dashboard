@@ -50,6 +50,16 @@ export async function ghlRead(deps: GhlDeps, path: string, token: string, scrub:
     return await send(deps, "GET", path, token, undefined, scrub);
 }
 
+// GHL does some reads as a POST (a search with a body). They change nothing, so they aren't logged like writes, but
+// they're still allow-listed here so a "read" can never be a disguised write.
+export const READ_POST_ALLOW: RegExp[] = [/^\/contacts\/search$/];
+
+export async function ghlReadPost(deps: GhlDeps, path: string, token: string, body: unknown, scrub: string[] = []) {
+    const p = path.split("?")[0];
+    if (!READ_POST_ALLOW.some((r) => r.test(p))) throw new Error(`Refused: "POST ${p}" is not one of the read-only searches Golden Eye makes.`);
+    return await send(deps, "POST", path, token, body, scrub);
+}
+
 export type WriteLog = { by: string; client: string | null; location: string | null; summary: string };
 
 export async function ghlWrite(deps: GhlDeps, method: string, path: string, token: string, body: unknown, log: WriteLog, scrub: string[] = []) {

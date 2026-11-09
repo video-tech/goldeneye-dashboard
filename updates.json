@@ -2,6 +2,14 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-11-09",
+      "area": "Reports",
+      "title": "Leads check before you generate a report",
+      "what": "The report pop-up now shows the period's leads three ways: Golden Eye (the daily pull the report uses), Meta, and the client's own GHL (contacts with their lead tags). A count that's off gets a check mark, and a By day table shows which day it went wrong. If a client has no lead tags yet, it lists the tags on their recent contacts so you can click the ones that mean a lead. Set tags any time in Edit Client.",
+      "note": "Only counts leave GHL, never names or numbers.",
+      "action": "Run supabase/sql/lead_check.sql, deploy ghl-leads, add View Contacts to the Golden Eye GHL app and reinstall it on each client's account, then fill in GHL location IDs."
+    },
+    {
       "date": "2026-11-06",
       "area": "Onboarding",
       "title": "A warning before you mark an unanswered questionnaire step done",

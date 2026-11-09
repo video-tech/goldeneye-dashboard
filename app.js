@@ -6690,6 +6690,7 @@ window.renderClientReports = async function() {
     
     // Show the modal
     modal.style.display = 'flex';
+    renderLeadsCheck();
 }
 
 // Stock sentences the report model kept ending on ("Let's keep an eye on those changes moving forward"), however the
@@ -6937,6 +6938,7 @@ Treat this period as a fresh starting point. State every number plainly as where
             // What changed in the ad account this period and what it did, from meta-sync. Empty
             // until that's set up for this client, and the report reads as it always has.
             const adActivityBlock = await buildReportAdActivityBlock(cSelectedAccount, s, e);
+            const leadsCheckBlock = buildLeadsCheckBlock(cSelectedAccount, s, e);
 
             // SEO gets its own required section whenever there's anything to say, decided here
             // rather than left to the model. On 2026-09-14 a report dropped SEO entirely even
@@ -6964,7 +6966,7 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             ${trendBlock}
 
-            ${workBlock}${seoBlock}${adActivityBlock}
+            ${workBlock}${seoBlock}${adActivityBlock}${leadsCheckBlock}
 
             MEDIA BUYER'S NOTES:
             "${n || 'No manual notes provided this week. Draw the highlights and action plan from the data above rather than waiting for more.'}"
@@ -7509,6 +7511,138 @@ async function buildReportAdActivityBlock(clientName, s, e) {
         return '';
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Leads check (2026-11-09): the report modal shows the period's leads three ways before the report is written, so the
+// weekly cross-check of Golden Eye, Meta and the client's GHL takes seconds. Golden Eye = daily_reports (the report's
+// headline figure), Meta = meta_ad_daily (meta-sync), GHL = contacts added in the client's own GHL carrying one of their
+// lead tags (clients.lead_tags), counted by the ghl-leads edge function, which returns counts only. Admins only.
+const GHL_LEADS_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ghl-leads";
+async function callGhlLeads(client, start, end) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
+    const res = await fetch(GHL_LEADS_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ client, start, end })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `the GHL lead check returned ${res.status}`);
+    return data;
+}
+
+// A gap worth a look: more than 2 leads apart AND more than 15% of the larger figure. Small accounts swing by one or
+// two leads between systems for timing reasons alone.
+function leadsCheckGap(a, b) {
+    if (a == null || b == null) return false;
+    const diff = Math.abs(a - b);
+    return diff > 2 && diff / Math.max(a, b, 1) > 0.15;
+}
+
+let leadsCheckToken = 0;
+// The last check's result, used by generateReport only when it is for the same client and dates
+let leadsCheckFacts = null;
+
+async function renderLeadsCheck() {
+    const box = document.getElementById('rpt-leads-check');
+    if (!box) return;
+    const my = ++leadsCheckToken;
+    leadsCheckFacts = null;
+    if (currentUserRole !== 'admin' || cSelectedAccount === 'ALL') { box.style.display = 'none'; return; }
+    const client = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+    if (!client) { box.style.display = 'none'; return; }
+    const { s, e } = dateRangeFor(cDateRange, cCustomStart, cCustomEnd);
+    const start = adFactsYmd(s), end = adFactsYmd(e);
+    box.style.display = '';
+    box.innerHTML = `<div class="ge-label mb-1">Leads check</div><div style="font-size:12px; color:var(--t3);"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Counting leads in Golden Eye, Meta and GHL…</div>`;
+
+    // Golden Eye: the same rows the report's Leads tile sums
+    const days = [];
+    for (let d = new Date(start + 'T12:00:00'); adFactsYmd(d) <= end; d.setDate(d.getDate() + 1)) days.push(adFactsYmd(d));
+    const ge = Object.fromEntries(days.map(d => [d, 0]));
+    reportsForClient(cSelectedAccount).forEach(r => {
+        const d = String(r.date || '').split('T')[0];
+        if (d in ge) ge[d] += parseInt(r.leads || 0) || 0;
+    });
+    const geTotal = Object.values(ge).reduce((a, b) => a + b, 0);
+
+    const metaP = (async () => {
+        if (!normalizeAccountId(client.ad_account_id)) return null;
+        const byDay = {};
+        for (let at = 0; at < 20000; at += 1000) {
+            const { data, error } = await supabaseClient.from('meta_ad_daily').select('date, leads')
+                .eq('client_name', client.name).gte('date', start).lte('date', end).order('date').range(at, at + 999);
+            if (error) return null;
+            (data || []).forEach(r => { byDay[r.date] = (byDay[r.date] || 0) + (parseInt(r.leads || 0) || 0); });
+            if (!data || data.length < 1000) break;
+        }
+        return Object.keys(byDay).length ? byDay : null;
+    })().catch(() => null);
+    const ghlP = callGhlLeads(client.name, start, end).catch(err => ({ status: 'error', error: err.message }));
+    const [meta, ghl] = await Promise.all([metaP, ghlP]);
+    if (my !== leadsCheckToken) return;
+
+    const metaTotal = meta ? Object.values(meta).reduce((a, b) => a + b, 0) : null;
+    const ghlOk = ghl && (ghl.status === 'ok');
+    const ghlTotal = ghlOk ? ghl.tagged : null;
+    if (ghlOk) leadsCheckFacts = { client: client.name, start, end, ghl: ghlTotal, ge: geTotal, meta: metaTotal, tags: ghl.lead_tags || [] };
+
+    const gapGhl = leadsCheckGap(geTotal, ghlTotal), gapMeta = leadsCheckGap(geTotal, metaTotal);
+    const flag = (gap) => gap ? ` <span style="color:var(--warn); font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> check</span>` : '';
+    const row = (label, value, note, gap) => `<div style="display:flex; justify-content:space-between; gap:12px; padding:5px 0; border-top:1px solid var(--line);">
+        <span style="color:var(--t2); font-size:12.5px;">${label}${note ? ` <span style="color:var(--t3); font-size:11px;">${note}</span>` : ''}</span>
+        <span class="ge-num" style="font-size:13px; font-weight:600; color:var(--t1); white-space:nowrap;">${value}${flag(gap)}</span></div>`;
+
+    let ghlCell, ghlNote = '';
+    if (ghlOk) { ghlCell = String(ghlTotal); ghlNote = `tagged ${escapeAttr(ghl.lead_tags.join(', '))}${ghl.truncated ? ' · first 2,000 contacts only' : ''}`; }
+    else if (ghl?.status === 'no_tags') { ghlCell = '—'; ghlNote = `${ghl.added} contacts added, no lead tags set`; }
+    else { ghlCell = '—'; ghlNote = escapeAttr(ghl?.error || 'not available'); }
+
+    let html = `<div class="ge-label mb-1">Leads check · ${escapeAttr(start)} to ${escapeAttr(end)}</div>`;
+    html += row('Golden Eye (daily pull)', String(geTotal), 'what the report uses', false);
+    html += row('Meta (meta-sync)', metaTotal == null ? '—' : String(metaTotal), metaTotal == null ? 'not synced for this client' : '', gapMeta);
+    html += row('GHL (tagged leads)', ghlCell, ghlNote, gapGhl);
+
+    // Tags to pick from, when none are set yet (or to add another)
+    if (ghl && (ghl.status === 'ok' || ghl.status === 'no_tags') && ghl.other_tags?.length && ghl.tags_column) {
+        html += `<div style="margin-top:8px; font-size:11.5px; color:var(--t3);">${ghl.status === 'no_tags' ? 'Which of these tags mark a lead? Click to add:' : 'Other tags on these contacts:'}</div><div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">`
+            + ghl.other_tags.map(t => `<button type="button" class="btn-secondary btn text-xs" style="padding:2px 8px;" onclick="addLeadTag(${escapeAttr(JSON.stringify(t.name))})">${escapeAttr(t.name)} <span style="color:var(--t3);">${t.count}</span></button>`).join('')
+            + `</div>`;
+    } else if (ghl?.status === 'no_tags' && !ghl.tags_column) {
+        html += `<div style="margin-top:8px; font-size:11.5px; color:var(--t3);">Run supabase/sql/lead_check.sql to save lead tags.</div>`;
+    }
+
+    // By day, so the day that went wrong is visible
+    const dayRows = days.map(d => {
+        const g = ghlOk ? (ghl.by_day.find(x => x.date === d)?.tagged ?? 0) : null;
+        const m = meta ? (meta[d] || 0) : null;
+        const off = leadsCheckGap(ge[d], g) || (g != null && Math.abs(ge[d] - g) >= 2);
+        return `<tr style="${off ? 'color:var(--warn);' : ''}"><td style="padding:2px 8px 2px 0;">${escapeAttr(d)}</td><td style="text-align:right; padding:2px 8px;">${ge[d]}</td><td style="text-align:right; padding:2px 8px;">${m == null ? '—' : m}</td><td style="text-align:right; padding:2px 0 2px 8px;">${g == null ? '—' : g}</td></tr>`;
+    }).join('');
+    html += `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:11.5px; color:var(--t3);">By day</summary>
+        <table class="ge-num" style="font-size:11.5px; margin-top:6px; color:var(--t2);"><tr style="color:var(--t3);"><th style="text-align:left; padding-right:8px;">Day</th><th style="padding:0 8px;">GE</th><th style="padding:0 8px;">Meta</th><th style="padding-left:8px;">GHL</th></tr>${dayRows}</table></details>`;
+    box.innerHTML = html;
+}
+
+// Add a tag (picked from the check) to the client's lead tags, then recount
+async function addLeadTag(tag) {
+    if (currentUserRole !== 'admin') return;
+    const client = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
+    if (!client) return;
+    const tags = [...new Set([...(Array.isArray(client.lead_tags) ? client.lead_tags : []), String(tag).trim().toLowerCase()].filter(Boolean))];
+    const { error } = await supabaseClient.from('clients').update({ lead_tags: tags }).eq('id', client.id);
+    if (error) { alert(`Couldn't save the lead tag: ${error.message}`); return; }
+    client.lead_tags = tags;
+    renderLeadsCheck();
+}
+
+// One fact for the report prompt, only when the check is for this client and these dates
+function buildLeadsCheckBlock(clientName, s, e) {
+    const f = leadsCheckFacts;
+    if (!f || normalize(f.client) !== normalize(clientName) || f.start !== adFactsYmd(s) || f.end !== adFactsYmd(e)) return '';
+    return `\n\nLEADS CROSS-CHECK (for accuracy, not a headline): the client's own CRM (GHL) shows ${f.ghl} contacts tagged as leads for these dates; the daily pull above shows ${f.ge}. The daily pull's figure is the report's lead count. Do not mention the CRM count unless the notes ask about it.`;
+}
+window.addLeadTag = addLeadTag;
 
 // ---------------------------------------------------------------------------------------------
 // Activity panel on a client's Ads tab (admin only): what changed in the account, who did it and
@@ -14722,6 +14856,8 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-ga4-property').value = c.ga4_property_id || '';
     document.getElementById('edit-client-gbp-location').value = c.gbp_location_id || '';
     document.getElementById('edit-client-ghl-location').value = c.ghl_location_id || '';
+    const leadTagsBox = document.getElementById('edit-client-lead-tags');
+    if (leadTagsBox) leadTagsBox.value = Array.isArray(c.lead_tags) ? c.lead_tags.join(', ') : '';
     document.getElementById('edit-client-seranking-site').value = c.seranking_site_id || '';
     document.getElementById('edit-client-seo-start').value = c.seo_start_date || '';
     document.getElementById('edit-client-seo-fee').value = c.seo_monthly_fee ?? '';
@@ -15922,6 +16058,8 @@ window.saveClientEdits = async function(e) {
             gbp_location_id: document.getElementById('edit-client-gbp-location').value.replace(/\D/g, '') || null,
             // GHL ids are alphanumeric, so this one is trimmed only.
             ghl_location_id: document.getElementById('edit-client-ghl-location').value.trim() || null,
+            // The tags that mark a lead in their GHL, for the report's Leads check. Lower-cased, like GHL's own tags.
+            lead_tags: [...new Set((document.getElementById('edit-client-lead-tags')?.value || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean))],
             // SE Ranking's project id is purely numeric — parseInt over Number so a stray
             // trailing character (a pasted URL fragment) doesn't turn the whole value NaN.
             seranking_site_id: parseInt(document.getElementById('edit-client-seranking-site').value, 10) || null,
@@ -15943,6 +16081,12 @@ window.saveClientEdits = async function(e) {
         if (error && /contractor/.test(`${error.message || ''} ${error.details || ''}`)) {
             if (payload.contractor === 'no') throw new Error("Not a contractor can't be saved until supabase/sql/contractor_fact.sql has been run.");
             delete payload.contractor;
+            ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
+        }
+        // Before lead_check.sql: save the rest, but never quietly drop typed lead tags
+        if (error && /lead_tags/.test(`${error.message || ''} ${error.details || ''}`)) {
+            if (payload.lead_tags.length) throw new Error("GHL lead tags can't be saved until supabase/sql/lead_check.sql has been run.");
+            delete payload.lead_tags;
             ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
         }
         if (error && /seranking_local_id/.test(`${error.message || ''} ${error.details || ''}`)) {
