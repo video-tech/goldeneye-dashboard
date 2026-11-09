@@ -13,8 +13,8 @@
       "area": "Reports",
       "title": "Leads check before you generate a report",
       "what": "The report pop-up now shows the period's leads three ways: Golden Eye (the daily pull the report uses), Meta, and the client's own GHL (contacts with their lead tags). A count that's off gets a check mark, and a By day table shows which day it went wrong. If a client has no lead tags yet, it lists the tags on their recent contacts so you can click the ones that mean a lead. Set tags any time in Edit Client.",
-      "note": "Only counts leave GHL, never names or numbers.",
-      "action": "Run supabase/sql/lead_check.sql, deploy ghl-leads, add View Contacts to the Golden Eye GHL app and reinstall it on each client's account, then fill in GHL location IDs."
+      "note": "Their GHL sends each contact's tags and date to Golden Eye, never names or numbers. Counts start from the day the workflow is set up.",
+      "action": "Run supabase/sql/ghl_contacts.sql and re-run supabase/sql/rename_client.sql, deploy ghl-lead-webhook, then in each client's GHL add a Contact Tag Added trigger to the Golden Eye leads workflow and turn on Allow re-entry. Fill in missing GHL location IDs."
     },
     {
       "date": "2026-11-06",

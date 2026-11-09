@@ -1,6 +1,7 @@
 // GHL lead webhook: classifies every new website lead by where it came from.
 //
-// A GHL workflow (Contact Created → Webhook) posts each new contact here. This function
+// A GHL workflow (Contact Created, and Contact Tag added → Webhook) posts each contact here. Every contact is also
+// recorded in ghl_contacts (ids, created date, tags, source label) for the report's Leads check. This function
 // works out which client the lead belongs to and whether it came from organic search, paid
 // ads, social, another site, or directly. It stores ONE row per contact in lead_sources:
 // ids and attribution only, never a name, email, phone number or IP address.
@@ -356,6 +357,53 @@ export async function decide(payload: any): Promise<Decision> {
 }
 
 // ---------------------------------------------------------------------------
+// Every contact, for the report's Leads check (2026-11-09, supabase/sql/ghl_contacts.sql)
+// ---------------------------------------------------------------------------
+
+// GHL sends tags as one comma-separated string, sometimes as an array, on the payload or under contact.
+export function contactTags(payload: any): string[] {
+    const out: string[] = [];
+    const add = (v: unknown) => {
+        if (Array.isArray(v)) v.forEach(add);
+        else if (typeof v === "string") v.split(",").forEach((t) => { const x = t.trim().toLowerCase(); if (x) out.push(x); });
+    };
+    add(payload?.tags);
+    add(payload?.contact?.tags);
+    return [...new Set(out)];
+}
+
+// Records the contact (id, client, created date, tags, GHL's source label: nothing personal) for every client linked to
+// its sub-account, whether or not it is a website lead. Called on Contact Created and on Contact Tag added; the database
+// merges tags across events. Returns how many clients it was recorded for.
+export async function recordContact(payload: any): Promise<number> {
+    if (!payload || typeof payload !== "object") return 0;
+    const contactId = str(payload.contact_id) ?? str(payload.contact?.id);
+    const locationId = str(payload.location?.id);
+    if (!contactId || !locationId) return 0;
+    const candidates = await clientsForLocation(locationId);
+    if (!candidates.length) return 0;
+    const { base, headers } = service();
+    for (const c of candidates) {
+        const res = await fetch(`${base}/rest/v1/rpc/record_ghl_contact`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+                p_contact: contactId,
+                p_client: c.name,
+                p_location: locationId,
+                p_created: isoOrNow(payload.date_created),
+                p_tags: contactTags(payload),
+                p_source: str(payload.contact_source),
+            }),
+        });
+        // ghl_contacts.sql not run yet: say so, but never stop the website-lead decision below
+        if (res.status === 404) { console.warn("ghl-lead-webhook: record_ghl_contact missing, run supabase/sql/ghl_contacts.sql"); return 0; }
+        if (!res.ok) throw new Error(`record_ghl_contact failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    }
+    return candidates.length;
+}
+
+// ---------------------------------------------------------------------------
 // Debug capture (GHL_CAPTURE=1 only): a redacted copy of the payload and the decision
 // ---------------------------------------------------------------------------
 
@@ -509,7 +557,9 @@ Deno.serve(async (req: Request) => {
     });
 
     let decision: Decision;
+    let recorded = 0;
     try {
+        recorded = await recordContact(format === "json" ? body : null);
         decision = await decide(format === "json" ? body : null);
     } catch (err) {
         // The database, not the lead, is the problem. 500 lets GHL retry, and the insert is
@@ -525,6 +575,7 @@ Deno.serve(async (req: Request) => {
         stored: decision.stored,
         reason: decision.reason,
         client: decision.client,
+        contact_recorded: recorded,
         // The GHL sub-account id, so a lead that isn't stored can still be traced to the
         // account it came from. An id, never a name, phone or email.
         location: format === "json" ? str(body?.location?.id) : null,

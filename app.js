@@ -7518,19 +7518,72 @@ async function buildReportAdActivityBlock(clientName, s, e) {
 // Leads check (2026-11-09): the report modal shows the period's leads three ways before the report is written, so the
 // weekly cross-check of Golden Eye, Meta and the client's GHL takes seconds. Golden Eye = daily_reports (the report's
 // headline figure), Meta = meta_ad_daily (meta-sync), GHL = contacts added in the client's own GHL carrying one of their
-// lead tags (clients.lead_tags), counted by the ghl-leads edge function, which returns counts only. Admins only.
-const GHL_LEADS_FN = "https://hugnttsqucetldllfgoi.supabase.co/functions/v1/ghl-leads";
-async function callGhlLeads(client, start, end) {
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    if (!session?.access_token) throw new Error('Your session has expired — sign in again.');
-    const res = await fetch(GHL_LEADS_FN, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ client, start, end })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `the GHL lead check returned ${res.status}`);
-    return data;
+// lead tags (clients.lead_tags). GHL's app couldn't be given contacts access, so each client's GHL sends its contacts to
+// ghl-lead-webhook (Contact Created and Contact Tag added), which records them in ghl_contacts: id, created date, tags and
+// source label only. This counts them here. Admins only (ghl_contacts is admin-read).
+const GHL_TZ_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+function ghlTzParts(d) { const o = {}; for (const p of GHL_TZ_FMT.formatToParts(d)) o[p.type] = p.value; return o; }
+// The Mountain-time day an instant falls on, YYYY-MM-DD
+function denverDayOf(iso) { const o = ghlTzParts(new Date(iso)); return `${o.year}-${o.month}-${o.day}`; }
+// Midnight Mountain time at the start of a day, as a UTC instant (MST is UTC-7, MDT UTC-6)
+function denverMidnightUtc(ymd) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    for (const h of [6, 7]) {
+        const t = new Date(Date.UTC(y, m - 1, d, h));
+        const o = ghlTzParts(t);
+        if (`${o.year}-${o.month}-${o.day}` === ymd && o.hour === '00' && o.minute === '00') return t;
+    }
+    return new Date(ymd + 'T07:00:00Z');
+}
+function nextYmd(ymd) { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
+
+// Counts only: contacts added per Mountain day, how many carry a lead tag (once each, however many tags), per tag, and the
+// other tags seen (to pick lead tags from)
+function countGhlContacts(rows, leadTags, start, end) {
+    const wanted = new Set(leadTags);
+    const perTag = Object.fromEntries(leadTags.map(t => [t, 0]));
+    const other = {};
+    const days = {};
+    for (let d = start; d <= end; d = nextYmd(d)) days[d] = { added: 0, tagged: 0 };
+    let added = 0, tagged = 0;
+    for (const r of rows) {
+        const day = denverDayOf(r.created_at);
+        if (!(day in days)) continue;
+        added++; days[day].added++;
+        const tags = [...new Set((r.tags || []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
+        const hits = tags.filter(t => wanted.has(t));
+        hits.forEach(t => perTag[t]++);
+        tags.filter(t => !wanted.has(t)).forEach(t => { other[t] = (other[t] || 0) + 1; });
+        if (hits.length) { tagged++; days[day].tagged++; }
+    }
+    const otherTags = Object.entries(other).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 10).map(([name, count]) => ({ name, count }));
+    return { added, tagged, per_tag: perTag, by_day: Object.entries(days).map(([date, v]) => ({ date, ...v })), other_tags: otherTags };
+}
+
+const GHL_CONTACTS_CAP = 5000;
+async function loadGhlLeads(client, start, end) {
+    const leadTags = [...new Set((Array.isArray(client.lead_tags) ? client.lead_tags : []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
+    const base = { lead_tags: leadTags, tags_column: 'lead_tags' in client };
+    if (!String(client.ghl_location_id || '').trim()) return { ...base, status: 'no_location', error: 'No GHL location ID is saved for this client. Add it in Edit Client.' };
+    const from = denverMidnightUtc(start).toISOString(), until = denverMidnightUtc(nextYmd(end)).toISOString();
+    const rows = [];
+    let truncated = false;
+    for (let at = 0; ; at += 1000) {
+        if (at >= GHL_CONTACTS_CAP) { truncated = true; break; }
+        const { data, error } = await supabaseClient.from('ghl_contacts').select('created_at, tags')
+            .eq('client_name', client.name).gte('created_at', from).lt('created_at', until).order('created_at').range(at, at + 999);
+        if (error) {
+            const missing = /ghl_contacts/.test(error.message || '') || error.code === '42P01' || error.code === 'PGRST205';
+            return { ...base, status: 'error', error: missing ? 'Run supabase/sql/ghl_contacts.sql first.' : `Couldn't read GHL contacts: ${error.message}` };
+        }
+        rows.push(...(data || []));
+        if (!data || data.length < 1000) break;
+    }
+    if (!rows.length) {
+        const { data: any } = await supabaseClient.from('ghl_contacts').select('ghl_contact_id').eq('client_name', client.name).limit(1);
+        if (!any?.length) return { ...base, status: 'not_connected', error: "No contacts have come in from their GHL yet. Add the Golden Eye webhook to a workflow in their GHL (Contact Created and Contact Tag Added)." };
+    }
+    return { ...base, status: leadTags.length ? 'ok' : 'no_tags', truncated, ...countGhlContacts(rows, leadTags, start, end) };
 }
 
 // A gap worth a look: more than 2 leads apart AND more than 15% of the larger figure. Small accounts swing by one or
@@ -7580,7 +7633,7 @@ async function renderLeadsCheck() {
         }
         return Object.keys(byDay).length ? byDay : null;
     })().catch(() => null);
-    const ghlP = callGhlLeads(client.name, start, end).catch(err => ({ status: 'error', error: err.message }));
+    const ghlP = loadGhlLeads(client, start, end).catch(err => ({ status: 'error', error: err.message }));
     const [meta, ghl] = await Promise.all([metaP, ghlP]);
     if (my !== leadsCheckToken) return;
 
@@ -7596,7 +7649,7 @@ async function renderLeadsCheck() {
         <span class="ge-num" style="font-size:13px; font-weight:600; color:var(--t1); white-space:nowrap;">${value}${flag(gap)}</span></div>`;
 
     let ghlCell, ghlNote = '';
-    if (ghlOk) { ghlCell = String(ghlTotal); ghlNote = `tagged ${escapeAttr(ghl.lead_tags.join(', '))}${ghl.truncated ? ' · first 2,000 contacts only' : ''}`; }
+    if (ghlOk) { ghlCell = String(ghlTotal); ghlNote = `tagged ${escapeAttr(ghl.lead_tags.join(', '))}${ghl.truncated ? ' · first 5,000 contacts only' : ''}`; }
     else if (ghl?.status === 'no_tags') { ghlCell = '—'; ghlNote = `${ghl.added} contacts added, no lead tags set`; }
     else { ghlCell = '—'; ghlNote = escapeAttr(ghl?.error || 'not available'); }
 

@@ -158,6 +158,7 @@ begin
     update ghl_write_log              set client_name = new_name where client_name = old_name;
     -- Added 2026-10-16 with the GHL contact check (supabase/sql/ghl_contact_check.sql). Run that first.
     update client_ghl_contacts        set client_name = new_name where client_name = old_name;
+    update ghl_contacts               set client_name = new_name where client_name = old_name;
 
     -- client_access is a jsonb array of names, so it needs rewriting element-wise.
     update pre_approved_users
