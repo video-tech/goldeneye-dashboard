@@ -138,7 +138,10 @@ begin
     -- Added 2026-10-01 with QuickBooks estimates (supabase/sql/deck_estimates.sql). Also update
     -- the client's key in the deck-estimate function's DECK_ESTIMATE_HOOKS secret, or the
     -- renamed client's Create button reports "not set up" until it is.
-    update deck_estimates             set client_name = new_name where client_name = old_name;
+    -- Skipped while deck_estimates.sql hasn't been run (it wasn't live on 2026-11-10), so a rename doesn't fail on it.
+    if to_regclass('public.deck_estimates') is not null then
+        update deck_estimates         set client_name = new_name where client_name = old_name;
+    end if;
     -- Added 2026-10-27 with homeowner estimate links (supabase/sql/shared_estimates.sql). Run that first.
     update shared_estimates           set client_name = new_name where client_name = old_name;
     -- Added 2026-10-28 with PDFs saved to GHL contacts (supabase/sql/contact_estimate_files.sql). Run that first.
