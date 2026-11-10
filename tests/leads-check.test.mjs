@@ -32,9 +32,9 @@ ok(/modal\.style\.display = 'flex';\n    renderLeadsCheck\(\);/.test(app), 'open
 ok(!/ghl-leads/.test(app), 'no call to the retired ghl-leads function');
 
 const CLIENT = { id: 1, name: 'Acme', ad_account_id: 'act_123', ghl_location_id: 'Loc123', lead_tags: ['fb lead'] };
-function world({ role = 'admin', client = CLIENT, reports = [], meta = [], contacts = [], metaError = false, contactsError = null } = {}) {
+function world({ role = 'admin', client = CLIENT, reports = [], meta = [], contacts = [], metaError = false, contactsError = null, siteCount = 0 } = {}) {
     const w = new JSDOM('<!doctype html><body><div id="rpt-leads-check" style="display:none"></div></body>', { runScripts: 'dangerously' }).window;
-    w.__db = { meta, contacts, metaError, contactsError, updates: [], asked: [] };
+    w.__db = { meta, contacts, metaError, contactsError, siteCount, updates: [], asked: [] };
     w.eval(`
         var currentUserRole = ${JSON.stringify(role)}, cSelectedAccount = 'Acme', cDateRange = 'custom', cCustomStart = '2026-11-02', cCustomEnd = '2026-11-08';
         var globalClientsData = [${JSON.stringify(client)}];
@@ -45,7 +45,8 @@ function world({ role = 'admin', client = CLIENT, reports = [], meta = [], conta
                 const db = window.__db; db.asked.push(table);
                 const f = {};
                 const q = {
-                    select() { return q; }, order() { return q; },
+                    select() { return q; }, order() { return q; }, neq(c, v) { f['neq_' + c] = v; return q; },
+                    ...(table === 'lead_sources' ? { then(res) { window.__site = f; return Promise.resolve({ count: db.siteCount, error: null }).then(res); } } : {}),
                     eq(c, v) { f[c] = v; return q; }, gte(c, v) { f.gte = v; return q; }, lte(c, v) { f.lte = v; return q; }, lt(c, v) { f.lt = v; return q; },
                     limit() { return Promise.resolve(table === 'ghl_contacts' ? { data: db.contacts.filter(r => r.client_name === f.client_name).slice(0, 1), error: null } : { data: [], error: null }); },
                     range(a, b) {
@@ -114,6 +115,40 @@ const ct = (id, created_at, tags) => ({ ghl_contact_id: id, client_name: 'Acme',
     const fact = w.eval("buildLeadsCheckBlock('Acme', new Date('2026-11-02T00:00:00'), new Date('2026-11-08T23:59:59'))");
     ok(/14 contacts tagged as leads/.test(fact) && /shows 10/.test(fact) && /Do not mention the CRM count/.test(fact), 'report gets the fact, with the daily pull as headline');
     ok(w.eval("buildLeadsCheckBlock('Acme', new Date('2026-11-01T00:00:00'), new Date('2026-11-08T23:59:59'))") === '', 'no fact for different dates');
+}
+
+// ---- website leads counted apart (2026-11-10) ----
+{
+    const contacts = [
+        ct('a', '2026-11-02T15:00:00Z', ['quiz ads']),
+        ct('b', '2026-11-03T16:00:00Z', ['quiz ads']),
+        ct('c', '2026-11-03T17:00:00Z', ['website lead']),
+        ct('d', '2026-11-04T17:00:00Z', ['Website Lead']),
+        ct('e', '2026-11-04T18:00:00Z', ['website lead']),
+        ct('f', '2026-11-05T18:00:00Z', ['other']),
+    ];
+    const w = world({ client: { ...CLIENT, lead_tags: ['quiz ads'], website_lead_tags: ['website lead'] }, reports: [rep('2026-11-02', 1), rep('2026-11-03', 1)], contacts, siteCount: 3 });
+    await w.eval('renderLeadsCheck()');
+    const r = rows(w);
+    ok(/GHL \(ad leads\).*2$/.test(r[2]), 'ad leads count only the ad tag (2), not website leads');
+    ok(!/check/.test(r[2]), 'so no false gap against the daily pull');
+    ok(r.length === 5 && /Golden Eye \(SEO tab\).*3$/.test(r[3]) && /GHL \(website leads\).*tagged website lead.*3$/.test(r[4]), 'website leads on their own lines (3 and 3)');
+    ok(w.__site.neq_source === 'paid' && w.__site.gte === '2026-11-02T07:00:00.000Z', 'site count: every source except paid, Mountain days');
+    ok(/GHL web/.test(box(w).querySelector('details').textContent), 'by-day table has a website column');
+    ok(![...box(w).querySelectorAll('button')].some(b => b.textContent.includes('website lead')), 'website tags are not offered as ad tags');
+    ok(/2 contacts tagged/.test(w.eval("buildLeadsCheckBlock('Acme', new Date('2026-11-02T00:00:00'), new Date('2026-11-08T23:59:59'))")), 'the report fact counts ad leads only');
+
+    const w2 = world({ client: { ...CLIENT, lead_tags: ['quiz ads'], website_lead_tags: ['website lead'] }, contacts, siteCount: 9 });
+    await w2.eval('renderLeadsCheck()');
+    ok(/GHL \(website leads\).*3.*check/.test(rows(w2)[4]), 'a website gap is flagged against the SEO tab count');
+
+    const w3 = world({ client: { ...CLIENT, lead_tags: [], website_lead_tags: ['website lead'] }, contacts });
+    await w3.eval('renderLeadsCheck()');
+    ok(/GHL \(ad leads\).*no ad lead tags set.*—$/.test(rows(w3)[2]) && rows(w3).length === 5, 'website tags only: ad row says so, website rows still shown');
+
+    const w4 = world({ client: { ...CLIENT, lead_tags: ['quiz ads'] }, contacts });
+    await w4.eval('renderLeadsCheck()');
+    ok(rows(w4).length === 3 && !/GHL web/.test(box(w4).textContent), 'no website tags: no website section');
 }
 
 // ---- setup states ----

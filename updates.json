@@ -2,6 +2,19 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-11-10",
+      "area": "Reports",
+      "title": "Website leads have their own line in the Leads check",
+      "what": "The Leads check used to add website leads into the GHL count and compare it with Golden Eye's, which only counts ad leads, so any client with website leads looked off. Edit Client now has two fields: GHL ad lead tags (compared with the daily pull and Meta) and GHL website lead tags (compared with the SEO tab's website leads). 3Sixty's \"website lead\" tag is moved across for you.",
+      "action": "Run supabase/sql/lead_check_website_tags.sql"
+    },
+    {
+      "date": "2026-11-10",
+      "area": "Tasks",
+      "title": "A checklist for every new opt-in funnel",
+      "what": "Our checklist has an Add an opt-in funnel button. Name the funnel, quiz, survey or website form and it adds a task with six steps: tag its leads, set the Facebook event, add it to the Conversions API workflow, add it to the lead follow-up workflow, make sure the tag reaches Golden Eye, and check the first real lead. Use it every time a client gets a new way to opt in."
+    },
+    {
       "date": "2026-11-09",
       "area": "Reports",
       "title": "Reports no longer call new ads \"new ad sets\"",

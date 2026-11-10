@@ -2087,8 +2087,15 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
   `record_ghl_contact` merges tags across events (never replaces) and keeps the first created date and source.
 - **Linked by `clients.ghl_location_id`**, like website leads. A sub-account linked to two clients records under each; lead
   tags tell them apart. Website-lead storage is unchanged (first write wins, so the extra tag events add nothing there).
-- **`clients.lead_tags`** (`supabase/sql/lead_check.sql`), lower-case, set in Edit Client ("GHL lead tags") or by clicking a
-  tag the check offers. A contact with two lead tags counts once. Days are Mountain (`denverMidnightUtc`, `denverDayOf`).
+- **`clients.lead_tags`** (`supabase/sql/lead_check.sql`) are the **ad** lead tags, lower-case, set in Edit Client ("GHL ad lead tags") or
+  by clicking a tag the check offers. A contact with two lead tags counts once. Days are Mountain (`denverMidnightUtc`, `denverDayOf`).
+- **Website leads are counted apart (2026-11-10, `supabase/sql/lead_check_website_tags.sql`).** `clients.website_lead_tags` (Edit Client,
+  "GHL website lead tags") get their own two lines: GHL's website-tagged contacts against the SEO tab's website leads (`lead_sources`,
+  every source but paid, Mountain days). Adding them into the ad count made GHL read high by every website lead and flagged a false gap
+  against the daily pull, which is Meta ads only. The SQL moved any saved tag containing "website" (3Sixty's) across. The report fact
+  counts ad leads only. Tests: 10 more in `tests/leads-check.test.mjs`.
+- **The workflow is the same for every client:** Contact Created (no filter: it also feeds website leads) plus Contact Tag Added filtered
+  to all their lead tags, ad and website, with re-entry on. Standard tag names everywhere: `quiz ads` and `website lead`.
 - **States the box explains:** no location ID, nothing ever received ("add the webhook"), table missing (the SQL), no lead tags
   (contacts counted, tags offered). A connected client with no contacts that week reads a real 0.
 - **Gap rule** (`leadsCheckGap`): flagged when two counts are more than 2 apart and more than 15% of the larger. The by-day
@@ -2104,7 +2111,13 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
   Solutions, Astra, KLH, Red Valley and Tattoo Ink need theirs, and the workflow in their GHL.
 - **Order:** `ghl_contacts.sql`, re-run `rename_client.sql`, deploy `ghl-lead-webhook`, then the workflow trigger in each GHL.
   If the RPC is missing, the webhook logs a warning and carries on with website leads.
-- **Tests:** `tests/leads-check.test.mjs` (jsdom) 35 checks on the real code; `ghl-lead-webhook/contacts.test.mjs` 14;
+- **New opt-in funnels (2026-11-10):** **Add an opt-in funnel** on Our checklist (`addOptinFunnel`, `OPTIN_FUNNEL_STEPS` in app.js) raises
+  "New opt-in funnel: <name>" in the client's current stage with six hidden steps under it (`checklist_group` = that title, so the
+  board arrow and self-ticking work): standard tag, Facebook event never Lead, add to the Conversions API workflow, add to the lead
+  follow-up workflow, make sure the tag reaches Golden Eye, check the first real lead. No SQL: the steps are in app.js. Raised in the
+  Onboarding stage it holds up the move to Campaign Building until done, like any of our tasks. `tests/optin-funnel.test.mjs`, 11
+  checks, 2 of 2 breakages caught.
+- **Tests:** `tests/leads-check.test.mjs` (jsdom) 45 checks on the real code; `ghl-lead-webhook/contacts.test.mjs` 14;
   `supabase/sql/ghl_contacts.test.mjs` (PGlite) 10.
 
 ## Text the assignee (built 2026-10-13)

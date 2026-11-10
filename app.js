@@ -7539,13 +7539,14 @@ function nextYmd(ymd) { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.g
 
 // Counts only: contacts added per Mountain day, how many carry a lead tag (once each, however many tags), per tag, and the
 // other tags seen (to pick lead tags from)
-function countGhlContacts(rows, leadTags, start, end) {
+function countGhlContacts(rows, leadTags, start, end, webTags = []) {
     const wanted = new Set(leadTags);
+    const webWanted = new Set(webTags);
     const perTag = Object.fromEntries(leadTags.map(t => [t, 0]));
     const other = {};
     const days = {};
-    for (let d = start; d <= end; d = nextYmd(d)) days[d] = { added: 0, tagged: 0 };
-    let added = 0, tagged = 0;
+    for (let d = start; d <= end; d = nextYmd(d)) days[d] = { added: 0, tagged: 0, web: 0 };
+    let added = 0, tagged = 0, web = 0;
     for (const r of rows) {
         const day = denverDayOf(r.created_at);
         if (!(day in days)) continue;
@@ -7553,17 +7554,19 @@ function countGhlContacts(rows, leadTags, start, end) {
         const tags = [...new Set((r.tags || []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
         const hits = tags.filter(t => wanted.has(t));
         hits.forEach(t => perTag[t]++);
-        tags.filter(t => !wanted.has(t)).forEach(t => { other[t] = (other[t] || 0) + 1; });
+        tags.filter(t => !wanted.has(t) && !webWanted.has(t)).forEach(t => { other[t] = (other[t] || 0) + 1; });
         if (hits.length) { tagged++; days[day].tagged++; }
+        if (tags.some(t => webWanted.has(t))) { web++; days[day].web++; }
     }
     const otherTags = Object.entries(other).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 10).map(([name, count]) => ({ name, count }));
-    return { added, tagged, per_tag: perTag, by_day: Object.entries(days).map(([date, v]) => ({ date, ...v })), other_tags: otherTags };
+    return { added, tagged, web, per_tag: perTag, by_day: Object.entries(days).map(([date, v]) => ({ date, ...v })), other_tags: otherTags };
 }
 
 const GHL_CONTACTS_CAP = 5000;
 async function loadGhlLeads(client, start, end) {
     const leadTags = [...new Set((Array.isArray(client.lead_tags) ? client.lead_tags : []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
-    const base = { lead_tags: leadTags, tags_column: 'lead_tags' in client };
+    const webTags = [...new Set((Array.isArray(client.website_lead_tags) ? client.website_lead_tags : []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
+    const base = { lead_tags: leadTags, website_lead_tags: webTags, tags_column: 'lead_tags' in client };
     if (!String(client.ghl_location_id || '').trim()) return { ...base, status: 'no_location', error: 'No GHL location ID is saved for this client. Add it in Edit Client.' };
     const from = denverMidnightUtc(start).toISOString(), until = denverMidnightUtc(nextYmd(end)).toISOString();
     const rows = [];
@@ -7583,7 +7586,7 @@ async function loadGhlLeads(client, start, end) {
         const { data: any } = await supabaseClient.from('ghl_contacts').select('ghl_contact_id').eq('client_name', client.name).limit(1);
         if (!any?.length) return { ...base, status: 'not_connected', error: "No contacts have come in from their GHL yet. Add the Golden Eye webhook to a workflow in their GHL (Contact Created and Contact Tag Added)." };
     }
-    return { ...base, status: leadTags.length ? 'ok' : 'no_tags', truncated, ...countGhlContacts(rows, leadTags, start, end) };
+    return { ...base, status: leadTags.length || webTags.length ? 'ok' : 'no_tags', truncated, ...countGhlContacts(rows, leadTags, start, end, webTags) };
 }
 
 // A gap worth a look: more than 2 leads apart AND more than 15% of the larger figure. Small accounts swing by one or
@@ -7634,13 +7637,21 @@ async function renderLeadsCheck() {
         return Object.keys(byDay).length ? byDay : null;
     })().catch(() => null);
     const ghlP = loadGhlLeads(client, start, end).catch(err => ({ status: 'error', error: err.message }));
-    const [meta, ghl] = await Promise.all([metaP, ghlP]);
+    const siteP = (async () => {
+        const { count, error } = await supabaseClient.from('lead_sources').select('ghl_contact_id', { count: 'exact', head: true })
+            .eq('client_name', client.name).neq('source', 'paid')
+            .gte('created_at', denverMidnightUtc(start).toISOString()).lt('created_at', denverMidnightUtc(nextYmd(end)).toISOString());
+        return error ? null : (count ?? 0);
+    })().catch(() => null);
+    const [meta, ghl, siteLeads] = await Promise.all([metaP, ghlP, siteP]);
     if (my !== leadsCheckToken) return;
 
     const metaTotal = meta ? Object.values(meta).reduce((a, b) => a + b, 0) : null;
     const ghlOk = ghl && (ghl.status === 'ok');
-    const ghlTotal = ghlOk ? ghl.tagged : null;
-    if (ghlOk) leadsCheckFacts = { client: client.name, start, end, ghl: ghlTotal, ge: geTotal, meta: metaTotal, tags: ghl.lead_tags || [] };
+    const hasAdTags = ghlOk && ghl.lead_tags.length > 0;
+    const hasWebTags = ghlOk && ghl.website_lead_tags.length > 0;
+    const ghlTotal = hasAdTags ? ghl.tagged : null;
+    if (hasAdTags) leadsCheckFacts = { client: client.name, start, end, ghl: ghlTotal, ge: geTotal, meta: metaTotal, tags: ghl.lead_tags || [] };
 
     const gapGhl = leadsCheckGap(geTotal, ghlTotal), gapMeta = leadsCheckGap(geTotal, metaTotal);
     const flag = (gap) => gap ? ` <span style="color:var(--warn); font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> check</span>` : '';
@@ -7649,18 +7660,27 @@ async function renderLeadsCheck() {
         <span class="ge-num" style="font-size:13px; font-weight:600; color:var(--t1); white-space:nowrap;">${value}${flag(gap)}</span></div>`;
 
     let ghlCell, ghlNote = '';
-    if (ghlOk) { ghlCell = String(ghlTotal); ghlNote = `tagged ${escapeAttr(ghl.lead_tags.join(', '))}${ghl.truncated ? ' · first 5,000 contacts only' : ''}`; }
+    if (hasAdTags) { ghlCell = String(ghlTotal); ghlNote = `tagged ${escapeAttr(ghl.lead_tags.join(', '))}${ghl.truncated ? ' · first 5,000 contacts only' : ''}`; }
+    else if (ghlOk) { ghlCell = '—'; ghlNote = 'no ad lead tags set'; }
     else if (ghl?.status === 'no_tags') { ghlCell = '—'; ghlNote = `${ghl.added} contacts added, no lead tags set`; }
     else { ghlCell = '—'; ghlNote = escapeAttr(ghl?.error || 'not available'); }
 
     let html = `<div class="ge-label mb-1">Leads check · ${escapeAttr(start)} to ${escapeAttr(end)}</div>`;
     html += row('Golden Eye (daily pull)', String(geTotal), 'what the report uses', false);
     html += row('Meta (meta-sync)', metaTotal == null ? '—' : String(metaTotal), metaTotal == null ? 'not synced for this client' : '', gapMeta);
-    html += row('GHL (tagged leads)', ghlCell, ghlNote, gapGhl);
+    html += row('GHL (ad leads)', ghlCell, ghlNote, gapGhl);
+
+    // Website leads are not ad leads, so they are compared with what Golden Eye recorded from the site (the SEO tab's
+    // Website leads), never with the daily pull
+    if (hasWebTags) {
+        html += '<div class="ge-label" style="margin-top:10px;">Website leads</div>';
+        html += row('Golden Eye (SEO tab)', siteLeads == null ? '—' : String(siteLeads), 'from their site, not paid', false);
+        html += row('GHL (website leads)', String(ghl.web), 'tagged ' + escapeAttr(ghl.website_lead_tags.join(', ')), leadsCheckGap(siteLeads, ghl.web));
+    }
 
     // Tags to pick from, when none are set yet (or to add another)
     if (ghl && (ghl.status === 'ok' || ghl.status === 'no_tags') && ghl.other_tags?.length && ghl.tags_column) {
-        html += `<div style="margin-top:8px; font-size:11.5px; color:var(--t3);">${ghl.status === 'no_tags' ? 'Which of these tags mark a lead? Click to add:' : 'Other tags on these contacts:'}</div><div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">`
+        html += `<div style="margin-top:8px; font-size:11.5px; color:var(--t3);">${hasAdTags ? 'Other tags on these contacts (click to count as an ad lead):' : 'Which of these tags mark an ad lead? Click to add:'}</div><div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">`
             + ghl.other_tags.map(t => `<button type="button" class="btn-secondary btn text-xs" style="padding:2px 8px;" onclick="addLeadTag(${escapeAttr(JSON.stringify(t.name))})">${escapeAttr(t.name)} <span style="color:var(--t3);">${t.count}</span></button>`).join('')
             + `</div>`;
     } else if (ghl?.status === 'no_tags' && !ghl.tags_column) {
@@ -7669,13 +7689,14 @@ async function renderLeadsCheck() {
 
     // By day, so the day that went wrong is visible
     const dayRows = days.map(d => {
-        const g = ghlOk ? (ghl.by_day.find(x => x.date === d)?.tagged ?? 0) : null;
+        const g = hasAdTags ? (ghl.by_day.find(x => x.date === d)?.tagged ?? 0) : null;
+        const w = hasWebTags ? (ghl.by_day.find(x => x.date === d)?.web ?? 0) : null;
         const m = meta ? (meta[d] || 0) : null;
         const off = leadsCheckGap(ge[d], g) || (g != null && Math.abs(ge[d] - g) >= 2);
-        return `<tr style="${off ? 'color:var(--warn);' : ''}"><td style="padding:2px 8px 2px 0;">${escapeAttr(d)}</td><td style="text-align:right; padding:2px 8px;">${ge[d]}</td><td style="text-align:right; padding:2px 8px;">${m == null ? '—' : m}</td><td style="text-align:right; padding:2px 0 2px 8px;">${g == null ? '—' : g}</td></tr>`;
+        return `<tr style="${off ? 'color:var(--warn);' : ''}"><td style="padding:2px 8px 2px 0;">${escapeAttr(d)}</td><td style="text-align:right; padding:2px 8px;">${ge[d]}</td><td style="text-align:right; padding:2px 8px;">${m == null ? '—' : m}</td><td style="text-align:right; padding:2px 0 2px 8px;">${g == null ? '—' : g}</td>${hasWebTags ? `<td style="text-align:right; padding:2px 0 2px 8px;">${w}</td>` : ''}</tr>`;
     }).join('');
     html += `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:11.5px; color:var(--t3);">By day</summary>
-        <table class="ge-num" style="font-size:11.5px; margin-top:6px; color:var(--t2);"><tr style="color:var(--t3);"><th style="text-align:left; padding-right:8px;">Day</th><th style="padding:0 8px;">GE</th><th style="padding:0 8px;">Meta</th><th style="padding-left:8px;">GHL</th></tr>${dayRows}</table></details>`;
+        <table class="ge-num" style="font-size:11.5px; margin-top:6px; color:var(--t2);"><tr style="color:var(--t3);"><th style="text-align:left; padding-right:8px;">Day</th><th style="padding:0 8px;">GE</th><th style="padding:0 8px;">Meta</th><th style="padding-left:8px;">GHL ads</th>${hasWebTags ? '<th style="padding-left:8px;">GHL web</th>' : ''}</tr>${dayRows}</table></details>`;
     box.innerHTML = html;
 }
 
@@ -14751,6 +14772,61 @@ window.openSetupStepTask = function (id) {
     openTaskDrawer(isNaN(Number(id)) ? id : Number(id));
 };
 
+// "Add an opt-in funnel" on Our checklist (2026-11-10): the SOP for every new funnel, quiz, survey or website form that
+// collects leads, at any stage. Raises one task, "New opt-in funnel: <name>", in the client's current stage, with these
+// steps under it, the same shape as the setup groups (so the board's arrow, the tick boxes and the auto-complete all work).
+// Each funnel gets its own task, so two funnels never share ticks. Hidden from the client, like our setup steps.
+const OPTIN_FUNNEL_PREFIX = 'New opt-in funnel: ';
+const OPTIN_FUNNEL_STEPS = [
+    { title: 'Tags — Give every lead from it the standard tag', due: 1,
+      notes: '"quiz ads" for a funnel, quiz, survey or Meta form our ads send people to; "website lead" for a form on their own website. Same spelling as every other client. Add it with an Add Tag action in the workflow the form or survey triggers.' },
+    { title: 'Funnel — Set its Facebook event to Submit Application or None, never Lead', due: 1,
+      notes: 'Ad funnels only. The Conversions API workflow sends Lead, so a form event would count every lead twice. Skip for a website form our ads don\'t point at.' },
+    { title: 'CAPI — Add it to the Conversions API workflow', due: 1,
+      notes: 'Ad funnels only. In their GHL, open the Conversions API workflow and add this form or survey as a trigger (Form Submitted or Survey Submitted, filtered to it). Check it sends to this client\'s own dataset.' },
+    { title: 'Follow-up — Add it to the lead follow-up workflow', due: 1,
+      notes: 'So the client is notified and the lead gets the follow-up texts, the same as their other leads.' },
+    { title: 'Golden Eye — Make sure its tag reaches Golden Eye', due: 1,
+      notes: 'The standard tags are already in the "leads to Golden Eye" workflow and in Edit Client. If this funnel uses a new tag: add it to the workflow\'s Contact Tag Added filter, and to Edit Client (GHL ad lead tags, or GHL website lead tags for a website form).' },
+    { title: 'Check — The first real lead is tagged, the client was notified and Meta counted it once', due: 7,
+      notes: 'Open the contact in GHL and check the tag, check the client got the notification, and for an ad funnel check the dataset shows one Lead, not two. It then shows in the Leads check in Generate Report.' },
+];
+
+function optinFunnelRows(client, stage, name, today = new Date()) {
+    const group = OPTIN_FUNNEL_PREFIX + name;
+    const due = days => { const d = new Date(today); d.setDate(d.getDate() + days); return d.toISOString().split('T')[0]; };
+    const now = new Date().toISOString();
+    const base = { client, stage, status: 'Not Started', client_visible: false, p: 3, u: 3, e: 3, score: 60, updated_at: now };
+    return {
+        group: { ...base, title: group, type: 'Checklist', checklist_group: null, due: due(7), notes: 'Steps for adding a new opt-in funnel. Open the arrow to tick them off.' },
+        steps: OPTIN_FUNNEL_STEPS.map(s => ({ ...base, title: s.title, type: SETUP_STEP_TYPE, checklist_group: group, due: due(s.due), notes: s.notes })),
+    };
+}
+
+window.addOptinFunnel = async function () {
+    if (currentUserRole !== 'admin' || !setupChecklistClient) return;
+    const client = globalClientsData.find(c => normalize(c.name) === normalize(setupChecklistClient));
+    if (!client) return;
+    const name = (prompt('Which funnel or form? (for example "Kitchen cost quiz" or "Website contact form")') || '').trim().replace(/\s+/g, ' ');
+    if (!name) return;
+    const stage = client.current_stage || 'Onboarding';
+    const { group, steps } = optinFunnelRows(client.name, stage, name);
+    const { data: dup } = await supabaseClient.from('tasks').select('id').eq('client', client.name).eq('stage', stage).ilike('title', group.title.replace(/[%_\\]/g, '\\$&'));
+    if (dup?.length) return alert(`"${group.title}" already exists for ${client.name}. Give this funnel a different name.`);
+    const { data: g, error: gErr } = await supabaseClient.from('tasks').insert([group]).select();
+    if (gErr) return alert('Could not add the funnel task: ' + gErr.message);
+    const { data: st, error: sErr } = await supabaseClient.from('tasks').insert(steps).select();
+    if (sErr) {
+        // No group task without its steps: it could never tick itself off
+        await supabaseClient.from('tasks').delete().eq('id', g[0].id);
+        return alert('Could not add the funnel steps: ' + sErr.message);
+    }
+    rememberTaskRows(g);
+    globalSetupSteps.push(...(st || []));
+    refreshSetupViews();
+    if (typeof renderActiveTaskView === 'function') renderActiveTaskView();
+};
+
 async function runAutoChecks() {
     if (currentUserRole !== 'admin') return 0;
     const { data, error } = await supabaseClient.rpc('reconcile_auto_checks');
@@ -14913,6 +14989,8 @@ window.openEditClientModal = function() {
     document.getElementById('edit-client-ghl-location').value = c.ghl_location_id || '';
     const leadTagsBox = document.getElementById('edit-client-lead-tags');
     if (leadTagsBox) leadTagsBox.value = Array.isArray(c.lead_tags) ? c.lead_tags.join(', ') : '';
+    const webTagsBox = document.getElementById('edit-client-web-lead-tags');
+    if (webTagsBox) webTagsBox.value = Array.isArray(c.website_lead_tags) ? c.website_lead_tags.join(', ') : '';
     document.getElementById('edit-client-seranking-site').value = c.seranking_site_id || '';
     document.getElementById('edit-client-seo-start').value = c.seo_start_date || '';
     document.getElementById('edit-client-seo-fee').value = c.seo_monthly_fee ?? '';
@@ -16115,6 +16193,8 @@ window.saveClientEdits = async function(e) {
             ghl_location_id: document.getElementById('edit-client-ghl-location').value.trim() || null,
             // The tags that mark a lead in their GHL, for the report's Leads check. Lower-cased, like GHL's own tags.
             lead_tags: [...new Set((document.getElementById('edit-client-lead-tags')?.value || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean))],
+            // Website form leads, counted apart from ad leads (supabase/sql/lead_check_website_tags.sql)
+            website_lead_tags: [...new Set((document.getElementById('edit-client-web-lead-tags')?.value || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean))],
             // SE Ranking's project id is purely numeric — parseInt over Number so a stray
             // trailing character (a pasted URL fragment) doesn't turn the whole value NaN.
             seranking_site_id: parseInt(document.getElementById('edit-client-seranking-site').value, 10) || null,
@@ -16136,6 +16216,12 @@ window.saveClientEdits = async function(e) {
         if (error && /contractor/.test(`${error.message || ''} ${error.details || ''}`)) {
             if (payload.contractor === 'no') throw new Error("Not a contractor can't be saved until supabase/sql/contractor_fact.sql has been run.");
             delete payload.contractor;
+            ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
+        }
+        // Before lead_check_website_tags.sql: same rule for website lead tags
+        if (error && /website_lead_tags/.test(`${error.message || ''} ${error.details || ''}`)) {
+            if (payload.website_lead_tags.length) throw new Error("Website lead tags can't be saved until supabase/sql/lead_check_website_tags.sql has been run.");
+            delete payload.website_lead_tags;
             ({ error } = await supabaseClient.from('clients').update(payload).eq('id', id));
         }
         // Before lead_check.sql: save the rest, but never quietly drop typed lead tags
