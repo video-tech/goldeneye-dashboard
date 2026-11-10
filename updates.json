@@ -3,6 +3,13 @@
   "updates": [
     {
       "date": "2026-11-10",
+      "area": "Data",
+      "title": "One lead setup for every client: the ge lead tag",
+      "what": "Every opt-in now has its own small GHL workflow that adds a source tag (quiz ads, meta form or website lead) and then \"ge lead\". One workflow, Lead to Golden Eye and Meta, sends every lead to Golden Eye and, for ad leads, to Meta. Golden Eye counts \"ge lead\" and \"website lead\" by default, so the lead tag fields in Edit Client stay blank unless a client uses its own tags. The setup checklist steps are rewritten for it, the funnel checklist is shorter, and every current client gets a \"Switch to the ge lead setup\" task with the steps to move their GHL over.",
+      "action": "Run supabase/sql/ge_lead_setup.sql"
+    },
+    {
+      "date": "2026-11-10",
       "area": "Reports",
       "title": "Website leads have their own line in the Leads check",
       "what": "The Leads check used to add website leads into the GHL count and compare it with Golden Eye's, which only counts ad leads, so any client with website leads looked off. Edit Client now has two fields: GHL ad lead tags (compared with the daily pull and Meta) and GHL website lead tags (compared with the SEO tab's website leads). 3Sixty's \"website lead\" tag is moved across for you.",

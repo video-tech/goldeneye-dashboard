@@ -144,11 +144,18 @@ const ct = (id, created_at, tags) => ({ ghl_contact_id: id, client_name: 'Acme',
 
     const w3 = world({ client: { ...CLIENT, lead_tags: [], website_lead_tags: ['website lead'] }, contacts });
     await w3.eval('renderLeadsCheck()');
-    ok(/GHL \(ad leads\).*no ad lead tags set.*—$/.test(rows(w3)[2]) && rows(w3).length === 5, 'website tags only: ad row says so, website rows still shown');
+    ok(/GHL \(ad leads\).*ge lead \(standard\).*0$/.test(rows(w3)[2]) && rows(w3).length === 5, 'website tags only: ad leads fall back to the standard ge lead tag');
 
     const w4 = world({ client: { ...CLIENT, lead_tags: ['quiz ads'] }, contacts });
     await w4.eval('renderLeadsCheck()');
-    ok(rows(w4).length === 3 && !/GHL web/.test(box(w4).textContent), 'no website tags: no website section');
+    ok(rows(w4).length === 5 && /tagged website lead/.test(rows(w4)[4]), 'no website tags set: the standard website lead tag is used, shown because there are website leads');
+    const w5 = world({ client: { ...CLIENT, lead_tags: ['quiz ads'] }, contacts: [ct('a', '2026-11-03T16:00:00Z', ['quiz ads'])] });
+    await w5.eval('renderLeadsCheck()');
+    ok(rows(w5).length === 3 && !/GHL web/.test(box(w5).textContent), 'standard website tag and no website leads anywhere: no website section');
+    const w6 = world({ client: { ...CLIENT, lead_tags: [] }, contacts: [ct('a', '2026-11-03T16:00:00Z', ['quiz ads', 'ge lead']), ct('b', '2026-11-03T17:00:00Z', ['website lead', 'ge lead']), ct('c', '2026-11-03T18:00:00Z', ['quiz ads'])] });
+    await w6.eval('renderLeadsCheck()');
+    ok(/GHL \(ad leads\).*ge lead \(standard\).*1$/.test(rows(w6)[2]), 'no tags set: counts ge lead contacts; a website lead with ge lead is not an ad lead');
+    ok(/GHL \(website leads\).*1/.test(rows(w6)[4]), 'and counts it as a website lead');
 }
 
 // ---- setup states ----
@@ -172,12 +179,12 @@ const ct = (id, created_at, tags) => ({ ghl_contact_id: id, client_name: 'Acme',
 
     w = world({ client: { ...CLIENT, lead_tags: [] }, contacts: [ct('a', '2026-11-03T16:00:00Z', ['FB <b>lead'])] });
     await w.eval('renderLeadsCheck()');
-    ok(/1 contacts added, no lead tags set/.test(rows(w)[2]), 'no tags: count of contacts shown');
+    ok(/GHL \(ad leads\).*ge lead \(standard\).*0$/.test(rows(w)[2]), 'no tags set: the standard ge lead tag is counted');
     const btn = box(w).querySelector('button');
-    ok(btn && btn.textContent.includes('fb <b>lead') && !box(w).querySelector('b'), 'tags offered, escaped');
+    ok(btn && btn.textContent.includes('fb <b>lead') && !box(w).querySelector('b'), 'other tags offered, escaped');
     btn.click();
     await new Promise(r => setTimeout(r, 0));
-    ok(w.__db.updates.length === 1 && JSON.stringify(w.__db.updates[0].lead_tags) === '["fb <b>lead"]', 'clicking a tag saves it');
+    ok(w.__db.updates.length === 1 && JSON.stringify(w.__db.updates[0].lead_tags) === '["ge lead","fb <b>lead"]', 'clicking a tag adds it and keeps the standard one');
 
     w = world({ client: { ...CLIENT, ad_account_id: '' } });
     await w.eval('renderLeadsCheck()');

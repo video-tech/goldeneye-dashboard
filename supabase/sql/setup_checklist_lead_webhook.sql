@@ -1,3 +1,5 @@
+-- SUPERSEDED 2026-11-10 by ge_lead_setup.sql, which renames this step for the ge lead setup. Don't re-run this file: it would
+-- add the old step back.
 -- A step in "Connect their GHL to Golden Eye" (2026-11-10): lead tags and the webhook that sends every contact to Golden Eye,
 -- so the report's Leads check can count GHL's leads (supabase/sql/ghl_contacts.sql). Last in the task, after the Golden Eye
 -- profile step. Base only, like the rest of the task. Also added to clients whose task is already open. Safe to re-run.

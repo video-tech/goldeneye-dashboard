@@ -2094,8 +2094,24 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
   every source but paid, Mountain days). Adding them into the ad count made GHL read high by every website lead and flagged a false gap
   against the daily pull, which is Meta ads only. The SQL moved any saved tag containing "website" (3Sixty's) across. The report fact
   counts ad leads only. Tests: 10 more in `tests/leads-check.test.mjs`.
-- **The workflow is the same for every client:** Contact Created (no filter: it also feeds website leads) plus Contact Tag Added filtered
-  to all their lead tags, ad and website, with re-entry on. Standard tag names everywhere: `quiz ads` and `website lead`.
+- **The `ge lead` setup (2026-11-10, `supabase/sql/ge_lead_setup.sql`), the standard for every client's GHL.**
+  - **Each opt-in** (funnel, quiz, survey, Meta form, website form) has its own workflow: Add Tag source (`quiz ads`, `meta form` for a
+    Meta instant form, `website lead` for a site form), then a separate Add Tag `ge lead`. Re-entry on.
+  - **One workflow per account, "Lead to Golden Eye and Meta"** (in Master): Contact Tag Added = `ge lead`, re-entry OFF, the Golden Eye
+    webhook, then an If/Else that sends the Conversions API Lead only for `quiz ads` (Meta counts its own instant forms; website leads stay
+    out). It replaces the separate Conversions API and "leads to Golden Eye" workflows. Never add `ge lead` by hand or in an import.
+  - **SEO clients** also keep "Website source to Golden Eye": Contact Created, re-entry off, the same webhook (the SEO tab's website
+    leads). It can't be a trigger on the main workflow: Contact Created would use up its one entry before the tags arrive.
+  - **Golden Eye defaults:** blank lead tags in Edit Client mean `ge lead` (ad) and `website lead` (`effectiveLeadTags`,
+    `DEFAULT_AD_LEAD_TAGS`). A contact with a website tag counts as a website lead only. The website lines show only when the client set
+    its own website tags or has website leads. Picking a tag in the box adds to the standard one.
+  - **The SQL** renames the four setup steps that described the old workflows (templates and step tasks together, since tasks are
+    deduped on title) and raises **"Switch to the ge lead setup"** with 11 hidden steps for every active Base client past Onboarding
+    (copy the pixel, build drafts, remove other tagging, check for Lead events, publish and turn off the old CAPI workflow in one sitting,
+    first real lead, delete the old one a week later). `setup_checklist_lead_webhook.sql` is superseded; don't re-run it.
+  - **Unconfirmed:** whether GHL's Tag Added payload carries the landing page like Contact Created. If it does, "Website source" may not
+    be needed. Check the first real tagged lead.
+  - **Tests:** `supabase/sql/ge_lead_setup.test.mjs` 10 (PGlite).
 - **States the box explains:** no location ID, nothing ever received ("add the webhook"), table missing (the SQL), no lead tags
   (contacts counted, tags offered). A connected client with no contacts that week reads a real 0.
 - **Gap rule** (`leadsCheckGap`): flagged when two counts are more than 2 apart and more than 15% of the larger. The by-day
@@ -2114,10 +2130,11 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
 - **New opt-in funnels (2026-11-10):** **Add an opt-in funnel** on Our checklist (`addOptinFunnel`, `OPTIN_FUNNEL_STEPS` in app.js) raises
   "New opt-in funnel: <name>" in the client's current stage with six hidden steps under it (`checklist_group` = that title, so the
   board arrow and self-ticking work): standard tag, Facebook event never Lead, add to the Conversions API workflow, add to the lead
-  follow-up workflow, make sure the tag reaches Golden Eye, check the first real lead. No SQL: the steps are in app.js. Raised in the
+  follow-up workflow, make sure the tag reaches Golden Eye, check the first real lead (first version). Rewritten for the `ge lead` setup: build its
+  opt-in workflow (source tag then `ge lead`), Facebook event never Lead, no pixel Lead on its pages, first real lead. No SQL: the steps are in app.js. Raised in the
   Onboarding stage it holds up the move to Campaign Building until done, like any of our tasks. `tests/optin-funnel.test.mjs`, 11
   checks, 2 of 2 breakages caught.
-- **Tests:** `tests/leads-check.test.mjs` (jsdom) 45 checks on the real code; `ghl-lead-webhook/contacts.test.mjs` 14;
+- **Tests:** `tests/leads-check.test.mjs` (jsdom) 48 checks on the real code; `ghl-lead-webhook/contacts.test.mjs` 14;
   `supabase/sql/ghl_contacts.test.mjs` (PGlite) 10.
 
 ## Text the assignee (built 2026-10-13)

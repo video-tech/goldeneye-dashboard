@@ -64,11 +64,12 @@ function world({ role = 'admin', existing = [], stepsFail = false, answer = 'Kit
     const [group, steps] = w.__db.inserts;
     ok(group.length === 1 && group[0].title === 'New opt-in funnel: Kitchen cost quiz' && group[0].stage === 'Optimizing', 'one task, named for the funnel, in the client\'s current stage');
     ok(group[0].client_visible === false && group[0].type === 'Checklist' && group[0].checklist_group === null, 'the task is hidden from the client and is not itself a step');
-    ok(steps.length === 6 && steps.every(s => s.type === 'Setup step' && s.checklist_group === 'New opt-in funnel: Kitchen cost quiz' && s.stage === 'Optimizing' && s.client_visible === false), 'six steps, filed under that task, hidden');
+    ok(steps.length === 4 && steps.every(s => s.type === 'Setup step' && s.checklist_group === 'New opt-in funnel: Kitchen cost quiz' && s.stage === 'Optimizing' && s.client_visible === false), 'four steps, filed under that task, hidden');
     const titles = steps.map(s => s.title).join(' | ');
-    ok(/standard tag/.test(titles) && /Conversions API workflow/.test(titles) && /lead follow-up workflow/.test(titles) && /reaches Golden Eye/.test(titles) && /never Lead/.test(titles), 'covers the tag, CAPI, follow-up, Golden Eye and the Facebook event');
-    ok(w.eval('globalTasksData.length') === 1 && w.eval('globalSetupSteps.length') === 6 && w.eval('refreshed') === 1, 'shown at once');
-    ok(steps[0].due < steps[5].due, 'the check on the first real lead is due last');
+    ok(/source tag, then ge lead/.test(titles) && /never Lead/.test(titles) && /no pixel Lead/.test(titles) && /first real lead/.test(titles), 'covers the opt-in workflow, the Facebook event, the pages and the first lead');
+    ok(/meta form/.test(steps[0].notes) && /quiz ads/.test(steps[0].notes) && /website lead/.test(steps[0].notes), 'names every source tag');
+    ok(w.eval('globalTasksData.length') === 1 && w.eval('globalSetupSteps.length') === 4 && w.eval('refreshed') === 1, 'shown at once');
+    ok(steps[0].due < steps[3].due, 'the check on the first real lead is due last');
 }
 {
     const w = world({ existing: [{ client: 'Acme', stage: 'Optimizing', title: 'New opt-in funnel: kitchen cost quiz' }] });

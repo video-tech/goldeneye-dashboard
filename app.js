@@ -7553,20 +7553,31 @@ function countGhlContacts(rows, leadTags, start, end, webTags = []) {
         added++; days[day].added++;
         const tags = [...new Set((r.tags || []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
         const hits = tags.filter(t => wanted.has(t));
+        const isWeb = tags.some(t => webWanted.has(t));
         hits.forEach(t => perTag[t]++);
         tags.filter(t => !wanted.has(t) && !webWanted.has(t)).forEach(t => { other[t] = (other[t] || 0) + 1; });
-        if (hits.length) { tagged++; days[day].tagged++; }
-        if (tags.some(t => webWanted.has(t))) { web++; days[day].web++; }
+        if (hits.length && !isWeb) { tagged++; days[day].tagged++; }
+        if (isWeb) { web++; days[day].web++; }
     }
     const otherTags = Object.entries(other).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 10).map(([name, count]) => ({ name, count }));
     return { added, tagged, web, per_tag: perTag, by_day: Object.entries(days).map(([date, v]) => ({ date, ...v })), other_tags: otherTags };
 }
 
 const GHL_CONTACTS_CAP = 5000;
+// The standard tags in every client's GHL (2026-11-10): each opt-in workflow adds a source tag ("quiz ads", "meta form" or
+// "website lead") and then "ge lead", which fires the one "Lead to Golden Eye and Meta" workflow. Edit Client's tag fields
+// are only for a client that uses its own names; blank means these.
+const DEFAULT_AD_LEAD_TAGS = ['ge lead'];
+const DEFAULT_WEB_LEAD_TAGS = ['website lead'];
+const cleanTags = (list) => [...new Set((Array.isArray(list) ? list : []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
+function effectiveLeadTags(client) {
+    const ad = cleanTags(client?.lead_tags), web = cleanTags(client?.website_lead_tags);
+    return { ad: ad.length ? ad : DEFAULT_AD_LEAD_TAGS, web: web.length ? web : DEFAULT_WEB_LEAD_TAGS, adDefault: !ad.length, webDefault: !web.length };
+}
 async function loadGhlLeads(client, start, end) {
-    const leadTags = [...new Set((Array.isArray(client.lead_tags) ? client.lead_tags : []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
-    const webTags = [...new Set((Array.isArray(client.website_lead_tags) ? client.website_lead_tags : []).map(t => String(t).trim().toLowerCase()).filter(Boolean))];
-    const base = { lead_tags: leadTags, website_lead_tags: webTags, tags_column: 'lead_tags' in client };
+    const eff = effectiveLeadTags(client);
+    const leadTags = eff.ad, webTags = eff.web;
+    const base = { lead_tags: leadTags, website_lead_tags: webTags, ad_default: eff.adDefault, web_default: eff.webDefault, tags_column: 'lead_tags' in client };
     if (!String(client.ghl_location_id || '').trim()) return { ...base, status: 'no_location', error: 'No GHL location ID is saved for this client. Add it in Edit Client.' };
     const from = denverMidnightUtc(start).toISOString(), until = denverMidnightUtc(nextYmd(end)).toISOString();
     const rows = [];
@@ -7660,7 +7671,7 @@ async function renderLeadsCheck() {
         <span class="ge-num" style="font-size:13px; font-weight:600; color:var(--t1); white-space:nowrap;">${value}${flag(gap)}</span></div>`;
 
     let ghlCell, ghlNote = '';
-    if (hasAdTags) { ghlCell = String(ghlTotal); ghlNote = `tagged ${escapeAttr(ghl.lead_tags.join(', '))}${ghl.truncated ? ' · first 5,000 contacts only' : ''}`; }
+    if (hasAdTags) { ghlCell = String(ghlTotal); ghlNote = `tagged ${escapeAttr(ghl.lead_tags.join(', '))}${ghl.ad_default ? ' (standard)' : ''}${ghl.truncated ? ' · first 5,000 contacts only' : ''}`; }
     else if (ghlOk) { ghlCell = '—'; ghlNote = 'no ad lead tags set'; }
     else if (ghl?.status === 'no_tags') { ghlCell = '—'; ghlNote = `${ghl.added} contacts added, no lead tags set`; }
     else { ghlCell = '—'; ghlNote = escapeAttr(ghl?.error || 'not available'); }
@@ -7672,7 +7683,8 @@ async function renderLeadsCheck() {
 
     // Website leads are not ad leads, so they are compared with what Golden Eye recorded from the site (the SEO tab's
     // Website leads), never with the daily pull
-    if (hasWebTags) {
+    const showWeb = hasWebTags && (!ghl.web_default || ghl.web > 0 || siteLeads > 0);
+    if (showWeb) {
         html += '<div class="ge-label" style="margin-top:10px;">Website leads</div>';
         html += row('Golden Eye (SEO tab)', siteLeads == null ? '—' : String(siteLeads), 'from their site, not paid', false);
         html += row('GHL (website leads)', String(ghl.web), 'tagged ' + escapeAttr(ghl.website_lead_tags.join(', ')), leadsCheckGap(siteLeads, ghl.web));
@@ -7693,10 +7705,10 @@ async function renderLeadsCheck() {
         const w = hasWebTags ? (ghl.by_day.find(x => x.date === d)?.web ?? 0) : null;
         const m = meta ? (meta[d] || 0) : null;
         const off = leadsCheckGap(ge[d], g) || (g != null && Math.abs(ge[d] - g) >= 2);
-        return `<tr style="${off ? 'color:var(--warn);' : ''}"><td style="padding:2px 8px 2px 0;">${escapeAttr(d)}</td><td style="text-align:right; padding:2px 8px;">${ge[d]}</td><td style="text-align:right; padding:2px 8px;">${m == null ? '—' : m}</td><td style="text-align:right; padding:2px 0 2px 8px;">${g == null ? '—' : g}</td>${hasWebTags ? `<td style="text-align:right; padding:2px 0 2px 8px;">${w}</td>` : ''}</tr>`;
+        return `<tr style="${off ? 'color:var(--warn);' : ''}"><td style="padding:2px 8px 2px 0;">${escapeAttr(d)}</td><td style="text-align:right; padding:2px 8px;">${ge[d]}</td><td style="text-align:right; padding:2px 8px;">${m == null ? '—' : m}</td><td style="text-align:right; padding:2px 0 2px 8px;">${g == null ? '—' : g}</td>${showWeb ? `<td style="text-align:right; padding:2px 0 2px 8px;">${w}</td>` : ''}</tr>`;
     }).join('');
     html += `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:11.5px; color:var(--t3);">By day</summary>
-        <table class="ge-num" style="font-size:11.5px; margin-top:6px; color:var(--t2);"><tr style="color:var(--t3);"><th style="text-align:left; padding-right:8px;">Day</th><th style="padding:0 8px;">GE</th><th style="padding:0 8px;">Meta</th><th style="padding-left:8px;">GHL ads</th>${hasWebTags ? '<th style="padding-left:8px;">GHL web</th>' : ''}</tr>${dayRows}</table></details>`;
+        <table class="ge-num" style="font-size:11.5px; margin-top:6px; color:var(--t2);"><tr style="color:var(--t3);"><th style="text-align:left; padding-right:8px;">Day</th><th style="padding:0 8px;">GE</th><th style="padding:0 8px;">Meta</th><th style="padding-left:8px;">GHL ads</th>${showWeb ? '<th style="padding-left:8px;">GHL web</th>' : ''}</tr>${dayRows}</table></details>`;
     box.innerHTML = html;
 }
 
@@ -7705,7 +7717,7 @@ async function addLeadTag(tag) {
     if (currentUserRole !== 'admin') return;
     const client = globalClientsData.find(c => normalize(c.name) === normalize(cSelectedAccount));
     if (!client) return;
-    const tags = [...new Set([...(Array.isArray(client.lead_tags) ? client.lead_tags : []), String(tag).trim().toLowerCase()].filter(Boolean))];
+    const tags = [...new Set([...effectiveLeadTags(client).ad, String(tag).trim().toLowerCase()].filter(Boolean))];
     const { error } = await supabaseClient.from('clients').update({ lead_tags: tags }).eq('id', client.id);
     if (error) { alert(`Couldn't save the lead tag: ${error.message}`); return; }
     client.lead_tags = tags;
@@ -14778,18 +14790,14 @@ window.openSetupStepTask = function (id) {
 // Each funnel gets its own task, so two funnels never share ticks. Hidden from the client, like our setup steps.
 const OPTIN_FUNNEL_PREFIX = 'New opt-in funnel: ';
 const OPTIN_FUNNEL_STEPS = [
-    { title: 'Tags — Give every lead from it the standard tag', due: 1,
-      notes: '"quiz ads" for a funnel, quiz, survey or Meta form our ads send people to; "website lead" for a form on their own website. Same spelling as every other client. Add it with an Add Tag action in the workflow the form or survey triggers.' },
+    { title: 'Workflow — Build its opt-in workflow: source tag, then ge lead', due: 1,
+      notes: 'In their GHL: trigger Form Submitted or Survey Submitted, filtered to this form only (Facebook Lead Form Submitted for a Meta form), re-entry on. Action 1: Add Tag with the source: "quiz ads" for a funnel, quiz or survey our ads send people to, "meta form" for a Meta instant form, "website lead" for a form on their own site. Action 2, a separate action after it: Add Tag "ge lead". Then the client notification and follow-up. "ge lead" fires Lead to Golden Eye and Meta, which sends it to Golden Eye and, for "quiz ads" only, a Lead to Meta. Nothing else needs changing.' },
     { title: 'Funnel — Set its Facebook event to Submit Application or None, never Lead', due: 1,
-      notes: 'Ad funnels only. The Conversions API workflow sends Lead, so a form event would count every lead twice. Skip for a website form our ads don\'t point at.' },
-    { title: 'CAPI — Add it to the Conversions API workflow', due: 1,
-      notes: 'Ad funnels only. In their GHL, open the Conversions API workflow and add this form or survey as a trigger (Form Submitted or Survey Submitted, filtered to it). Check it sends to this client\'s own dataset.' },
-    { title: 'Follow-up — Add it to the lead follow-up workflow', due: 1,
-      notes: 'So the client is notified and the lead gets the follow-up texts, the same as their other leads.' },
-    { title: 'Golden Eye — Make sure its tag reaches Golden Eye', due: 1,
-      notes: 'The standard tags are already in the "leads to Golden Eye" workflow and in Edit Client. If this funnel uses a new tag: add it to the workflow\'s Contact Tag Added filter, and to Edit Client (GHL ad lead tags, or GHL website lead tags for a website form).' },
-    { title: 'Check — The first real lead is tagged, the client was notified and Meta counted it once', due: 7,
-      notes: 'Open the contact in GHL and check the tag, check the client got the notification, and for an ad funnel check the dataset shows one Lead, not two. It then shows in the Leads check in Generate Report.' },
+      notes: 'Lead to Golden Eye and Meta sends the Lead, so a form event would count every lead twice. GHL sends no event ID, so Meta can\'t remove the duplicate.' },
+    { title: 'Funnel — Check its pages send no pixel Lead event', due: 1,
+      notes: 'Open the thank-you page\'s tracking code and the funnel\'s settings. A pixel Lead there doubles the server Lead. Skip for a website form.' },
+    { title: 'Check — The first real lead has both tags, the client was notified and Meta counted it once', due: 7,
+      notes: 'In GHL: the source tag and "ge lead". The client got the notification. For a "quiz ads" lead, the dataset shows one server Lead, not two; for a Meta form or website lead, no server Lead. It then shows in the Leads check in Generate Report.' },
 ];
 
 function optinFunnelRows(client, stage, name, today = new Date()) {
