@@ -7564,7 +7564,7 @@ function countGhlContacts(rows, leadTags, start, end, webTags = []) {
 }
 
 const GHL_CONTACTS_CAP = 5000;
-// The standard tags in every client's GHL (2026-11-10): each opt-in workflow adds a source tag ("quiz ads", "meta form" or
+// The standard tags in every client's GHL (2026-11-10): each opt-in workflow adds a source tag ("quiz ads ge", "meta form" or
 // "website lead") and then "ge lead", which fires the one "Lead to Golden Eye and Meta" workflow. Edit Client's tag fields
 // are only for a client that uses its own names; blank means these.
 const DEFAULT_AD_LEAD_TAGS = ['ge lead'];
@@ -14791,13 +14791,13 @@ window.openSetupStepTask = function (id) {
 const OPTIN_FUNNEL_PREFIX = 'New opt-in funnel: ';
 const OPTIN_FUNNEL_STEPS = [
     { title: 'Workflow — Build its opt-in workflow: source tag, then ge lead', due: 1,
-      notes: 'In their GHL: trigger Form Submitted or Survey Submitted, filtered to this form only (Facebook Lead Form Submitted for a Meta form), re-entry on. Action 1: Add Tag with the source: "quiz ads" for a funnel, quiz or survey our ads send people to, "meta form" for a Meta instant form, "website lead" for a form on their own site. Action 2, a separate action after it: Add Tag "ge lead". Then the client notification and follow-up. "ge lead" fires Lead to Golden Eye and Meta, which sends it to Golden Eye and, for "quiz ads" only, a Lead to Meta. Nothing else needs changing.' },
+      notes: 'In their GHL: trigger Form Submitted or Survey Submitted, filtered to this form only (Facebook Lead Form Submitted for a Meta form), re-entry on. Action 1: Add Tag with the source: "quiz ads ge" for a funnel, quiz or survey our ads send people to, "meta form" for a Meta instant form, "website lead" for a form on their own site. Action 2, a separate action after it: Add Tag "ge lead". Then the client notification and follow-up. "ge lead" fires Lead to Golden Eye and Meta, which sends it to Golden Eye and, for "quiz ads ge" only, a Lead to Meta. Nothing else needs changing.' },
     { title: 'Funnel — Set its Facebook event to Submit Application or None, never Lead', due: 1,
       notes: 'Lead to Golden Eye and Meta sends the Lead, so a form event would count every lead twice. GHL sends no event ID, so Meta can\'t remove the duplicate.' },
     { title: 'Funnel — Check its pages send no pixel Lead event', due: 1,
       notes: 'Open the thank-you page\'s tracking code and the funnel\'s settings. A pixel Lead there doubles the server Lead. Skip for a website form.' },
     { title: 'Check — The first real lead has both tags, the client was notified and Meta counted it once', due: 7,
-      notes: 'In GHL: the source tag and "ge lead". The client got the notification. For a "quiz ads" lead, the dataset shows one server Lead, not two; for a Meta form or website lead, no server Lead. It then shows in the Leads check in Generate Report.' },
+      notes: 'In GHL: the source tag and "ge lead". The client got the notification. For a "quiz ads ge" lead, the dataset shows one server Lead, not two; for a Meta form or website lead, no server Lead. It then shows in the Leads check in Generate Report.' },
 ];
 
 function optinFunnelRows(client, stage, name, today = new Date()) {

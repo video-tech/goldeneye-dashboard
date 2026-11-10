@@ -2095,10 +2095,10 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
   against the daily pull, which is Meta ads only. The SQL moved any saved tag containing "website" (3Sixty's) across. The report fact
   counts ad leads only. Tests: 10 more in `tests/leads-check.test.mjs`.
 - **The `ge lead` setup (2026-11-10, `supabase/sql/ge_lead_setup.sql`), the standard for every client's GHL.**
-  - **Each opt-in** (funnel, quiz, survey, Meta form, website form) has its own workflow: Add Tag source (`quiz ads`, `meta form` for a
+  - **Each opt-in** (funnel, quiz, survey, Meta form, website form) has its own workflow: Add Tag source (`quiz ads ge`, `meta form` for a
     Meta instant form, `website lead` for a site form), then a separate Add Tag `ge lead`. Re-entry on.
   - **One workflow per account, "Lead to Golden Eye and Meta"** (in Master): Contact Tag Added = `ge lead`, re-entry OFF, the Golden Eye
-    webhook, then an If/Else that sends the Conversions API Lead only for `quiz ads` (Meta counts its own instant forms; website leads stay
+    webhook, then an If/Else that sends the Conversions API Lead only for `quiz ads ge` (Meta counts its own instant forms; website leads stay
     out). It replaces the separate Conversions API and "leads to Golden Eye" workflows. Never add `ge lead` by hand or in an import.
   - **SEO clients** also keep "Website source to Golden Eye": Contact Created, re-entry off, the same webhook (the SEO tab's website
     leads). It can't be a trigger on the main workflow: Contact Created would use up its one entry before the tags arrive.
@@ -2111,6 +2111,8 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
     first real lead, delete the old one a week later). `setup_checklist_lead_webhook.sql` is superseded; don't re-run it.
   - **Unconfirmed:** whether GHL's Tag Added payload carries the landing page like Contact Created. If it does, "Website source" may not
     be needed. Check the first real tagged lead.
+  - **The ad tag is `quiz ads ge`, not `quiz ads`** (`supabase/sql/quiz_ads_ge_tag.sql`): some clients already use `quiz ads` in their own
+    workflows. That file rewrote the step wording already in the database; old tags can stay.
   - **Tests:** `supabase/sql/ge_lead_setup.test.mjs` 10 (PGlite).
 - **States the box explains:** no location ID, nothing ever received ("add the webhook"), table missing (the SQL), no lead tags
   (contacts counted, tags offered). A connected client with no contacts that week reads a real 0.
@@ -2120,7 +2122,7 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
   next to the daily pull's, with the daily pull as the headline and the CRM count not mentioned unless the notes ask.
 - **Counts start the day the workflow is set up**: there's no backfill of older contacts.
 - **On every new client's checklist** (`supabase/sql/setup_checklist_lead_webhook.sql`, 2026-11-10): the last step of "Connect their GHL to
-  Golden Eye", "Golden Eye — Lead tags and the webhook to Golden Eye" (Base only): tag leads in GHL (3Sixty uses `quiz ads` and
+  Golden Eye", "Golden Eye — Lead tags and the webhook to Golden Eye" (Base only): tag leads in GHL (3Sixty uses `quiz ads ge` and
   `website lead`), publish the workflow with both triggers and re-entry on, and enter the same tags in Edit Client. The workflow
   also has to be in the Master snapshot (by hand in GHL).
 - **Coverage on 2026-11-09:** only 3Sixty, Caliber, PANDEN, Optimum and PureAirK9 had `ghl_location_id`. Alta Vista, Anxiety

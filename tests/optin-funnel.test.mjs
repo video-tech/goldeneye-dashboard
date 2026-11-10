@@ -67,7 +67,7 @@ function world({ role = 'admin', existing = [], stepsFail = false, answer = 'Kit
     ok(steps.length === 4 && steps.every(s => s.type === 'Setup step' && s.checklist_group === 'New opt-in funnel: Kitchen cost quiz' && s.stage === 'Optimizing' && s.client_visible === false), 'four steps, filed under that task, hidden');
     const titles = steps.map(s => s.title).join(' | ');
     ok(/source tag, then ge lead/.test(titles) && /never Lead/.test(titles) && /no pixel Lead/.test(titles) && /first real lead/.test(titles), 'covers the opt-in workflow, the Facebook event, the pages and the first lead');
-    ok(/meta form/.test(steps[0].notes) && /quiz ads/.test(steps[0].notes) && /website lead/.test(steps[0].notes), 'names every source tag');
+    ok(/meta form/.test(steps[0].notes) && /quiz ads ge/.test(steps[0].notes) && /website lead/.test(steps[0].notes), 'names every source tag');
     ok(w.eval('globalTasksData.length') === 1 && w.eval('globalSetupSteps.length') === 4 && w.eval('refreshed') === 1, 'shown at once');
     ok(steps[0].due < steps[3].due, 'the check on the first real lead is due last');
 }

@@ -5,8 +5,8 @@
       "date": "2026-11-10",
       "area": "Data",
       "title": "One lead setup for every client: the ge lead tag",
-      "what": "Every opt-in now has its own small GHL workflow that adds a source tag (quiz ads, meta form or website lead) and then \"ge lead\". One workflow, Lead to Golden Eye and Meta, sends every lead to Golden Eye and, for ad leads, to Meta. Golden Eye counts \"ge lead\" and \"website lead\" by default, so the lead tag fields in Edit Client stay blank unless a client uses its own tags. The setup checklist steps are rewritten for it, the funnel checklist is shorter, and every current client gets a \"Switch to the ge lead setup\" task with the steps to move their GHL over.",
-      "action": "Run supabase/sql/ge_lead_setup.sql"
+      "what": "Every opt-in now has its own small GHL workflow that adds a source tag (quiz ads ge, meta form or website lead) and then \"ge lead\". One workflow, Lead to Golden Eye and Meta, sends every lead to Golden Eye and, for ad leads, to Meta. Golden Eye counts \"ge lead\" and \"website lead\" by default, so the lead tag fields in Edit Client stay blank unless a client uses its own tags. The setup checklist steps are rewritten for it, the funnel checklist is shorter, and every current client gets a \"Switch to the ge lead setup\" task with the steps to move their GHL over.",
+      "action": "Run supabase/sql/ge_lead_setup.sql, then supabase/sql/quiz_ads_ge_tag.sql"
     },
     {
       "date": "2026-11-10",
