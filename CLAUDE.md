@@ -2096,6 +2096,10 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
 - **The model gets one line** (`buildLeadsCheckBlock`), only when the check is for the same client and dates: the GHL count
   next to the daily pull's, with the daily pull as the headline and the CRM count not mentioned unless the notes ask.
 - **Counts start the day the workflow is set up**: there's no backfill of older contacts.
+- **On every new client's checklist** (`supabase/sql/setup_checklist_lead_webhook.sql`, 2026-11-10): the last step of "Connect their GHL to
+  Golden Eye", "Golden Eye — Lead tags and the webhook to Golden Eye" (Base only): tag leads in GHL (3Sixty uses `quiz ads` and
+  `website lead`), publish the workflow with both triggers and re-entry on, and enter the same tags in Edit Client. The workflow
+  also has to be in the Master snapshot (by hand in GHL).
 - **Coverage on 2026-11-09:** only 3Sixty, Caliber, PANDEN, Optimum and PureAirK9 had `ghl_location_id`. Alta Vista, Anxiety
   Solutions, Astra, KLH, Red Valley and Tattoo Ink need theirs, and the workflow in their GHL.
 - **Order:** `ghl_contacts.sql`, re-run `rename_client.sql`, deploy `ghl-lead-webhook`, then the workflow trigger in each GHL.
