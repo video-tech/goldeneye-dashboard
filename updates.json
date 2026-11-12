@@ -4,6 +4,12 @@
     {
       "date": "2026-11-12",
       "area": "Reports",
+      "title": "Report drafts go to every address on the client",
+      "what": "The Draft button took the client's email from the oldest day of their ad data, so a client whose addresses were added later only got the first one: PANDEN drafts went to alpha@ alone, not estimates@ and ryan@. Drafts now go to every address in the client's email field in Edit Client."
+    },
+    {
+      "date": "2026-11-12",
+      "area": "Reports",
       "title": "Reports say what we will do, and leave the task list out",
       "what": "Generated reports now speak as us: any \"let's monitor\" or \"we should check\" becomes \"we'll monitor\" or \"we'll check\", in the email note, the report and What We're Working On. What We're Working On no longer pulls in open tasks from the board (mostly internal setup work); it comes from the next-week box and your notes only, with the usual default line when both are empty."
     },

@@ -2087,6 +2087,9 @@ account totals and the morning audit; this adds what it can't say: which ad, and
 - **No board tasks:** open tasks are no longer given to the model (they were mostly internal setup work, deleted from every report).
   What We're Working On comes from the next-week box and the notes; completed tasks still feed the highlights.
 - `tests/report-filler.test.mjs` 32 checks, the voice breakage caught.
+- **Who a draft goes to (`reportRecipients`):** every address in the client's `client_email` (Edit Client), else the newest `daily_reports` row with an
+  email. It used to take the first matching row, which was the oldest, so PANDEN (alpha@ only until 2026-05-26) drafted to alpha@ alone.
+  Make's Gmail step maps the whole `to_email` array and was fine. `tests/report-recipients.test.mjs` 5 checks.
 
 ## Leads check in Generate Report (built 2026-11-09, NOT live until set up)
 

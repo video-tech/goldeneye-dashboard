@@ -7256,6 +7256,19 @@ Treat this period as a fresh starting point. State every number plainly as where
             }
         }
 
+        function reportRecipients(clientName) {
+            const row = globalClientsData.find(c => normalize(c.name) === normalize(clientName || ''));
+            let raw = String(row?.client_email || '').trim();
+            if (!raw) {
+                const newest = reportsForClient(clientName)
+                    .filter(r => r.client_email || r.email)
+                    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0];
+                raw = String(newest?.client_email || newest?.email || clientEmail || '');
+            }
+            return [...new Set(raw.split(/[,;\s]+/).map(e => e.trim()).filter(e => e.includes('@')))];
+        }
+        window.reportRecipients = reportRecipients;
+
         async function sendToMake() {
             const btn = document.getElementById('rpt-draft-btn');
             const originalText = btn.innerHTML;
@@ -7267,21 +7280,8 @@ Treat this period as a fresh starting point. State every number plainly as where
             const htmlCode = document.getElementById('rpt-html-src').value;
             const clientName = cSelectedAccount === "ALL" ? "General" : cSelectedAccount;
 
-            const clientReports = reportsForClient(clientName);
-
-            let targetEmail = "";
-            const recordWithEmail = clientReports.find(r => r.client_email || r.email);
-            if (recordWithEmail) {
-                targetEmail = recordWithEmail.client_email || recordWithEmail.email;
-            }
-            if (!targetEmail) targetEmail = clientEmail || "";
-
-            // FIX: Package multiple emails into a clean, Make-friendly Array
-            let emailArray = [];
-            if (targetEmail) {
-                // Splits by commas, semicolons, or spaces, and removes any empty blanks
-                emailArray = targetEmail.split(/[,;\s]+/).filter(e => e.trim() !== "");
-            }
+            // Every address on the client's email field (reportRecipients)
+            const emailArray = reportRecipients(clientName);
 
             const payload = {
                 client: clientName,
@@ -12548,18 +12548,8 @@ window.openEditReportModal = function(id) {
                 const clientName = report.client_name || cSelectedAccount;
 
                 // Fetch the client's email address using our normal routing logic
-                const clientReports = reportsForClient(clientName);
-
-                let targetEmail = "";
-                const recordWithEmail = clientReports.find(r => r.client_email || r.email);
-                if (recordWithEmail) targetEmail = recordWithEmail.client_email || recordWithEmail.email;
-                if (!targetEmail) targetEmail = clientEmail || "";
-
-                // Safely convert to a string and split into an array (matching your Make.com setup)
-                let emailArray = [];
-                if (targetEmail) {
-                    emailArray = String(targetEmail).split(/[,;\s]+/).filter(e => e.trim() !== "");
-                }
+                // Every address on the client's email field (reportRecipients)
+                const emailArray = reportRecipients(clientName);
 
                 const payload = {
                     client: clientName,
