@@ -2129,11 +2129,13 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
   Solutions, Astra, KLH, Red Valley and Tattoo Ink need theirs, and the workflow in their GHL.
 - **Order:** `ghl_contacts.sql`, re-run `rename_client.sql`, deploy `ghl-lead-webhook`, then the workflow trigger in each GHL.
   If the RPC is missing, the webhook logs a warning and carries on with website leads.
-- **New opt-in funnels (2026-11-10):** **Add an opt-in funnel** on Our checklist (`addOptinFunnel`, `OPTIN_FUNNEL_STEPS` in app.js) raises
+- **New opt-in funnels (2026-11-10):** **Add a new opt-in** on Our checklist (`addOptinFunnel`, `OPTIN_FUNNEL_STEPS` in app.js) raises
   "New opt-in funnel: <name>" in the client's current stage with six hidden steps under it (`checklist_group` = that title, so the
   board arrow and self-ticking work): standard tag, Facebook event never Lead, add to the Conversions API workflow, add to the lead
   follow-up workflow, make sure the tag reaches Golden Eye, check the first real lead (first version). Rewritten for the `ge lead` setup: build its
-  opt-in workflow (source tag then `ge lead`), Facebook event never Lead, no pixel Lead on its pages, first real lead. No SQL: the steps are in app.js. Raised in the
+  opt-in workflow (source tag then `ge lead`), Facebook event never Lead, no pixel Lead on its pages, first real lead. Since 2026-11-12 its first step says which workflow to change by kind: a GHL form or survey gets its own `quiz ads ge` opt-in
+  workflow, a Meta instant form is added to the `meta form ge` workflow's trigger, a website form to the `website lead` one; never Lead to
+  Golden Eye and Meta. No SQL: the steps are in app.js. Raised in the
   Onboarding stage it holds up the move to Campaign Building until done, like any of our tasks. `tests/optin-funnel.test.mjs`, 11
   checks, 2 of 2 breakages caught.
 - **Tests:** `tests/leads-check.test.mjs` (jsdom) 48 checks on the real code; `ghl-lead-webhook/contacts.test.mjs` 14;

@@ -3,6 +3,12 @@
   "updates": [
     {
       "date": "2026-11-12",
+      "area": "Tasks",
+      "title": "The new opt-in checklist says which workflow to change",
+      "what": "On Our checklist, the button is now Add a new opt-in, for any funnel, quiz, survey, Meta instant form or website form. Its first step says exactly which GHL workflow to change for each kind (a quiz ads ge opt-in workflow, the meta form ge one, or the website lead one) and that Lead to Golden Eye and Meta is never touched. The Facebook event and thank-you page steps say when to skip them."
+    },
+    {
+      "date": "2026-11-12",
       "area": "Onboarding",
       "title": "Onboarding asks about the customer's problem",
       "what": "About your business now asks three more questions, for every client: what problem usually makes someone contact them, up to 5 specific things that finally push people to reach out, and what worries people about hiring them (optional). The answers are for ad copy, the website and SEO articles, and show with the rest of their answers on the Relationship tab.",

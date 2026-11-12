@@ -14790,14 +14790,18 @@ window.openSetupStepTask = function (id) {
 // Each funnel gets its own task, so two funnels never share ticks. Hidden from the client, like our setup steps.
 const OPTIN_FUNNEL_PREFIX = 'New opt-in funnel: ';
 const OPTIN_FUNNEL_STEPS = [
-    { title: 'Workflow — Build its opt-in workflow: source tag, then ge lead', due: 1,
-      notes: 'In their GHL: trigger Form Submitted or Survey Submitted, filtered to this form only (Facebook Lead Form Submitted for a Meta form), re-entry on. Action 1: Add Tag with the source: "quiz ads ge" for a funnel, quiz or survey our ads send people to, "meta form ge" for a Meta instant form, "website lead" for a form on their own site. Action 2, a separate action after it: Add Tag "ge lead". Then the client notification and follow-up. "ge lead" fires Lead to Golden Eye and Meta, which sends it to Golden Eye and, for "quiz ads ge" only, a Lead to Meta. Nothing else needs changing.' },
+    { title: 'Workflow — Add it to the right opt-in workflow, by kind', due: 1,
+      notes: 'Every opt-in tags its leads with its source, then "ge lead". Which workflow to change depends on what it is:\n'
+        + '- A GHL form, survey or quiz our ads send people to: its own opt-in workflow. Trigger Form Submitted or Survey Submitted filtered to it, re-entry on, Add Tag "quiz ads ge", then a separate Add Tag "ge lead", then the client notification and follow-up. (Or add it to the trigger of an existing "quiz ads ge" opt-in workflow that does the same.)\n'
+        + '- A Meta instant form: the client\'s "meta form ge" opt-in workflow. Add the new form to its Facebook Lead Form Submitted trigger; if the trigger is set to any form, nothing to change.\n'
+        + '- A form on their own website: the "website lead" opt-in workflow. Add the form to its trigger, or build one: Add Tag "website lead", then "ge lead".\n'
+        + 'Never change Lead to Golden Eye and Meta: "ge lead" already sends every lead to Golden Eye, and only "quiz ads ge" leads to Meta.' },
     { title: 'Funnel — Set its Facebook event to Submit Application or None, never Lead', due: 1,
-      notes: 'Lead to Golden Eye and Meta sends the Lead, so a form event would count every lead twice. GHL sends no event ID, so Meta can\'t remove the duplicate.' },
+      notes: 'GHL forms and surveys only (skip for a Meta instant form). Lead to Golden Eye and Meta sends the Lead, so a form event would count every lead twice. GHL sends no event ID, so Meta can\'t remove the duplicate.' },
     { title: 'Funnel — Check its pages send no pixel Lead event', due: 1,
-      notes: 'Open the thank-you page\'s tracking code and the funnel\'s settings. A pixel Lead there doubles the server Lead. Skip for a website form.' },
+      notes: 'GHL funnels only (skip for a Meta instant form or a website form). Open the thank-you page\'s tracking code and the funnel\'s settings. A pixel Lead there doubles the server Lead.' },
     { title: 'Check — The first real lead has both tags, the client was notified and Meta counted it once', due: 7,
-      notes: 'In GHL: the source tag and "ge lead". The client got the notification. For a "quiz ads ge" lead, the dataset shows one server Lead, not two; for a Meta form or website lead, no server Lead. It then shows in the Leads check in Generate Report.' },
+      notes: 'In GHL: the source tag and "ge lead". The client got the notification. For a "quiz ads ge" lead, the dataset shows one server Lead, not two; for a "meta form ge" or website lead, no server Lead. It then shows in the Leads check in Generate Report.' },
 ];
 
 function optinFunnelRows(client, stage, name, today = new Date()) {
@@ -14815,7 +14819,7 @@ window.addOptinFunnel = async function () {
     if (currentUserRole !== 'admin' || !setupChecklistClient) return;
     const client = globalClientsData.find(c => normalize(c.name) === normalize(setupChecklistClient));
     if (!client) return;
-    const name = (prompt('Which funnel or form? (for example "Kitchen cost quiz" or "Website contact form")') || '').trim().replace(/\s+/g, ' ');
+    const name = (prompt('Which opt-in? (for example "Kitchen cost quiz", "Meta form: spring promo" or "Website contact form")') || '').trim().replace(/\s+/g, ' ');
     if (!name) return;
     const stage = client.current_stage || 'Onboarding';
     const { group, steps } = optinFunnelRows(client.name, stage, name);
