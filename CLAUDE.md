@@ -2120,6 +2120,11 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
     first real lead, delete the old one a week later). `setup_checklist_lead_webhook.sql` is superseded; don't re-run it.
   - **Unconfirmed:** whether GHL's Tag Added payload carries the landing page like Contact Created. If it does, "Website source" may not
     be needed. Check the first real tagged lead.
+  - **The Conversions API action reads two custom values (2026-11-12, `supabase/sql/capi_custom_values.sql`)**: Pixel ID
+    `{{custom_values.meta_dataset_id}}`, Access Token `{{custom_values.meta_capi_token}}` (Settings > Custom Values, account-wide). Set once in
+    Master, so per client only the two values are filled, never the workflow. The SQL rewrote the setup and switch steps to say so. A
+    client's staff can read custom values, so they can see their own token (it only reaches their own dataset). Not built yet: Golden Eye
+    filling the dataset ID itself from the ad account (needs the Golden Eye app installed on each account).
   - **The ad tag is `quiz ads ge`, not `quiz ads`** (`supabase/sql/quiz_ads_ge_tag.sql`): some clients already use `quiz ads` in their own
     workflows. That file rewrote the step wording already in the database; old tags can stay.
   - **Tests:** `supabase/sql/ge_lead_setup.test.mjs` 10 (PGlite).
