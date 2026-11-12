@@ -7565,7 +7565,7 @@ function countGhlContacts(rows, leadTags, start, end, webTags = []) {
 
 const GHL_CONTACTS_CAP = 5000;
 // The standard tags in every client's GHL (2026-11-10): each opt-in workflow adds a source tag ("quiz ads ge", "meta form ge" or
-// "website lead") and then "ge lead", which fires the one "Lead to Golden Eye and Meta" workflow. Edit Client's tag fields
+// "website lead") and then "ge lead", which fires the one "Lead Relay: Hub" workflow (the Lead Relay setup). Edit Client's tag fields
 // are only for a client that uses its own names; blank means these.
 const DEFAULT_AD_LEAD_TAGS = ['ge lead'];
 const DEFAULT_WEB_LEAD_TAGS = ['website lead'];
@@ -14790,14 +14790,14 @@ window.openSetupStepTask = function (id) {
 // Each funnel gets its own task, so two funnels never share ticks. Hidden from the client, like our setup steps.
 const OPTIN_FUNNEL_PREFIX = 'New opt-in funnel: ';
 const OPTIN_FUNNEL_STEPS = [
-    { title: 'Workflow — Add it to the right opt-in workflow, by kind', due: 1,
-      notes: 'Every opt-in tags its leads with its source, then "ge lead". Which workflow to change depends on what it is:\n'
-        + '- A GHL form, survey or quiz our ads send people to: its own opt-in workflow. Trigger Form Submitted or Survey Submitted filtered to it, re-entry on, Add Tag "quiz ads ge", then a separate Add Tag "ge lead", then the client notification and follow-up. (Or add it to the trigger of an existing "quiz ads ge" opt-in workflow that does the same.)\n'
-        + '- A Meta instant form: the client\'s "meta form ge" opt-in workflow. Add the new form to its Facebook Lead Form Submitted trigger; if the trigger is set to any form, nothing to change.\n'
-        + '- A form on their own website: the "website lead" opt-in workflow. Add the form to its trigger, or build one: Add Tag "website lead", then "ge lead".\n'
-        + 'Never change Lead to Golden Eye and Meta: "ge lead" already sends every lead to Golden Eye, and only "quiz ads ge" leads to Meta.' },
+    { title: 'Workflow — Add it to the right Lead Relay workflow, by kind', due: 1,
+      notes: 'Lead Relay: every opt-in tags its leads with its source, then "ge lead", and Lead Relay: Hub sends them on. Which workflow to change depends on what it is:\n'
+        + '- A GHL form, survey or quiz our ads send people to: its own workflow, named "Lead Relay: Opt-in - <its name>". Trigger Form Submitted or Survey Submitted filtered to it, re-entry on, Add Tag "quiz ads ge", then a separate Add Tag "ge lead", then the client notification and follow-up. (Or add it to the trigger of an existing Lead Relay opt-in workflow that does the same.)\n'
+        + '- A Meta instant form: "Lead Relay: Meta forms" (it adds "meta form ge", then "ge lead"). Add the new form to its Facebook Lead Form Submitted trigger; if the trigger is set to any form, nothing to change.\n'
+        + '- A form on their own website: "Lead Relay: Website form". Add the form to its trigger, or build it: Add Tag "website lead", then "ge lead".\n'
+        + 'Never change Lead Relay: Hub: "ge lead" already sends every lead to Golden Eye, and only "quiz ads ge" leads to Meta.' },
     { title: 'Funnel — Set its Facebook event to Submit Application or None, never Lead', due: 1,
-      notes: 'GHL forms and surveys only (skip for a Meta instant form). Lead to Golden Eye and Meta sends the Lead, so a form event would count every lead twice. GHL sends no event ID, so Meta can\'t remove the duplicate.' },
+      notes: 'GHL forms and surveys only (skip for a Meta instant form). Lead Relay: Hub sends the Lead, so a form event would count every lead twice. GHL sends no event ID, so Meta can\'t remove the duplicate.' },
     { title: 'Funnel — Check its pages send no pixel Lead event', due: 1,
       notes: 'GHL funnels only (skip for a Meta instant form or a website form). Open the thank-you page\'s tracking code and the funnel\'s settings. A pixel Lead there doubles the server Lead.' },
     { title: 'Check — The first real lead has both tags, the client was notified and Meta counted it once', due: 7,

@@ -3,6 +3,13 @@
   "updates": [
     {
       "date": "2026-11-12",
+      "area": "Tasks",
+      "title": "The ge lead setup is now called Lead Relay",
+      "what": "Every checklist, switch step and opt-in SOP uses the Lead Relay names, matching the workflows in GHL: Lead Relay: Hub, Lead Relay: Opt-in - <name> for each funnel or survey, Lead Relay: Meta forms, Lead Relay: Website form and Lead Relay: Website source. The switch task is now Switch to Lead Relay.",
+      "action": "Run supabase/sql/lead_relay_rename.sql"
+    },
+    {
+      "date": "2026-11-12",
       "area": "Data",
       "title": "A text if Meta's ad sync falls behind",
       "what": "Every day at noon (11am in winter), Golden Eye checks that Meta's ad sync reached every connected client for yesterday. If one was skipped, hit an error or has days missing, Tenny gets a text naming the client and why.",

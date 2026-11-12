@@ -56,7 +56,7 @@ create temporary table switch_clients on commit drop as
 select c.name, c.current_stage as stage
   from public.clients c
  where c.status = 'active' and coalesce(c.current_stage, '') not in ('', 'Onboarding') and coalesce(c.base_package, 'yes') <> 'no'
-   and not exists (select 1 from public.tasks t where t.client = c.name and t.title = 'Switch to the ge lead setup');
+   and not exists (select 1 from public.tasks t where t.client = c.name and t.title in ('Switch to the ge lead setup', 'Switch to Lead Relay'));
 
 insert into public.tasks (client, title, type, stage, status, checklist_group, client_visible, notes, due, p, u, e, score, updated_at)
 select name, 'Switch to the ge lead setup', 'Checklist', stage, 'Not Started', null, false,

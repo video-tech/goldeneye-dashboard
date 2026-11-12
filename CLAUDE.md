@@ -2103,6 +2103,11 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
   every source but paid, Mountain days). Adding them into the ad count made GHL read high by every website lead and flagged a false gap
   against the daily pull, which is Meta ads only. The SQL moved any saved tag containing "website" (3Sixty's) across. The report fact
   counts ad leads only. Tests: 10 more in `tests/leads-check.test.mjs`.
+- **Lead Relay (named 2026-11-12, `supabase/sql/lead_relay_rename.sql`) is the `ge lead` setup below.** GHL workflow names: **Lead Relay: Hub**
+  (Contact Tag Added = `ge lead` -> webhook, then the Conversions API for `quiz ads ge`), **Lead Relay: Opt-in - <name>** (one per funnel or
+  survey), **Lead Relay: Meta forms**, **Lead Relay: Website form**, **Lead Relay: Website source** (SEO clients). Below, "Lead to Golden Eye
+  and Meta" is the Hub and "Website source to Golden Eye" is Website source; the switch task is "Switch to Lead Relay". The rename SQL changed
+  titles, the switch group and every note; `ge_lead_setup.sql` now also checks the new group name before raising one.
 - **The `ge lead` setup (2026-11-10, `supabase/sql/ge_lead_setup.sql`), the standard for every client's GHL.**
   - **Each opt-in** (funnel, quiz, survey, Meta form, website form) has its own workflow: Add Tag source (`quiz ads ge`, `meta form ge` for a
     Meta instant form, `website lead` for a site form), then a separate Add Tag `ge lead`. Re-entry on.
