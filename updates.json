@@ -4,6 +4,13 @@
     {
       "date": "2026-11-12",
       "area": "Tasks",
+      "title": "Reminders to set up every new opt-in",
+      "what": "Two things now prompt you to click Add a new opt-in. The Launch ads checklist has a step before the ads are built: using a new form, funnel, survey or Meta instant form? And whenever someone creates a campaign or ad set in a client's Meta account, Golden Eye raises a task the next afternoon, \"New in Meta: a new form or funnel?\", listing what was built. Nothing new? Mark it done. More creations while it is open are added to the same task.",
+      "action": "Run supabase/sql/new_optin_prompts.sql"
+    },
+    {
+      "date": "2026-11-12",
+      "area": "Tasks",
       "title": "The new opt-in checklist says which workflow to change",
       "what": "On Our checklist, the button is now Add a new opt-in, for any funnel, quiz, survey, Meta instant form or website form. Its first step says exactly which GHL workflow to change for each kind (a quiz ads ge opt-in workflow, the meta form ge one, or the website lead one) and that Lead to Golden Eye and Meta is never touched. The Facebook event and thank-you page steps say when to skip them."
     },

@@ -2138,6 +2138,13 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
   Golden Eye and Meta. No SQL: the steps are in app.js. Raised in the
   Onboarding stage it holds up the move to Campaign Building until done, like any of our tasks. `tests/optin-funnel.test.mjs`, 11
   checks, 2 of 2 breakages caught.
+- **Reminders to add a new opt-in (2026-11-12, `supabase/sql/new_optin_prompts.sql`):** a Launch ads step at position 3 ("Using a new form,
+  funnel, survey or Meta instant form? Click Add a new opt-in"), and `raise_new_meta_optin_checks()` (pg_cron `meta-optin-checks`, 19:15 UTC):
+  each campaign or ad set someone creates in a client's Meta (`meta_activity` create_campaign_group / create_ad_set, never Meta's own)
+  raises one hidden task, "New in Meta: a new form or funnel?", listing them; while it is open later ones are appended. `meta_optin_prompts`
+  remembers raised events, and everything already logged was marked seen on install. Skips clients not active, in Onboarding or No Base.
+  New ads alone don't count (hundreds, from duplicating). Admin or no signed-in user only. `new_optin_prompts.test.mjs` 16 (PGlite), 2 of 2
+  breakages caught. Depends on meta-sync covering the client: its daily run sometimes stops "out of time" before reaching every client.
 - **Tests:** `tests/leads-check.test.mjs` (jsdom) 48 checks on the real code; `ghl-lead-webhook/contacts.test.mjs` 14;
   `supabase/sql/ghl_contacts.test.mjs` (PGlite) 10.
 
