@@ -4,6 +4,13 @@
     {
       "date": "2026-11-12",
       "area": "Data",
+      "title": "A text if Meta's ad sync falls behind",
+      "what": "Every day at noon (11am in winter), Golden Eye checks that Meta's ad sync reached every connected client for yesterday. If one was skipped, hit an error or has days missing, Tenny gets a text naming the client and why.",
+      "action": "Run supabase/sql/meta_sync_check.sql"
+    },
+    {
+      "date": "2026-11-12",
+      "area": "Data",
       "title": "Meta's ad data syncs every client again",
       "what": "The daily Meta sync went one client after another, and on busy days Sunset's large account used up the time, so 3Sixty, Alta Vista, Anxiety Solutions, Red Valley and PureAirK9 were skipped until the next day. It now syncs three clients at once, so one slow account no longer holds up the rest. That keeps the morning audit's per-ad list, the Ads tab activity panel and the New in Meta reminders up to date.",
       "action": "Deploy meta-sync"
