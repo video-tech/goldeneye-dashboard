@@ -37,6 +37,18 @@ ok(r.html_report.includes('Cost per lead fell to $41.</div>') && !/continue to m
 ok(r.html_report.includes('>Keep an eye on this</div>'), 'headings are never touched');
 ok(r.working_on[0].details === 'Launching Monday.' && r.working_on[0].headline === 'New ads', 'working-on details are cleaned, headlines kept');
 ok(!/keep an eye/i.test(r.email_summary), 'the email note is cleaned');
+// Our voice (2026-11-12): the report says what we will do, never advice to the client
+ok(stripFillerSentences("Let's watch the cost per lead on the new carousel.") === "We'll watch the cost per lead on the new carousel.", 'lets watch becomes well watch');
+ok(stripFillerSentences("Next, let's test a new offer.") === "Next, we'll test a new offer.", 'mid-sentence lets keeps lower case');
+ok(stripFillerSentences("We should check the landing page on Thursday.") === "We'll check the landing page on Thursday.", 'we should check becomes well check');
+ok(stripFillerSentences("Let’s review the new ads Friday.") === "We'll review the new ads Friday.", 'a curly apostrophe works too');
+ok(stripFillerSentences("Let's keep an eye on those changes moving forward.") === '', 'filler is still deleted, not just reworded');
+ok(stripFillerSentences("Your leads doubled. Let us know if the calls feel different.") === "Your leads doubled. Let us know if the calls feel different.", 'a real request to the client is left alone');
+const v = stripReportFiller({ email_summary: "Let's check the form.", html_report: '<div style="font-size: 15px; color: #515154; line-height: 1.6;">We should review the budget.</div>', working_on: [{ headline: 'x', details: "Let's test it." }] });
+ok(v.email_summary === "We'll check the form." && /We'll review the budget/.test(v.html_report) && v.working_on[0].details === "We'll test it.", 'note, paragraphs and working-on all use our voice');
+// Board tasks no longer reach the report
+const gen = src.slice(src.indexOf('async function generateReport()'), src.indexOf('async function generateReport()') + 30000);
+ok(!/CURRENTLY OPEN/.test(gen) && /never guess at other work/.test(gen), 'open board tasks are not given to the model');
 ok(stripReportFiller(null) === null && stripReportFiller({}).email_summary === undefined, 'odd input passes through');
 
 // Wired in: the report's finalize step runs it before the notes and to-do checks

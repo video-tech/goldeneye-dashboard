@@ -6709,11 +6709,26 @@ const REPORT_FILLER = [
     /\bmore to come\b/i,
     /\b(exciting|great) things ahead\b/i,
 ];
+// The report is us telling the client what we're doing, so "let's monitor" / "we should watch" become "we'll ..." (2026-11-12).
+// Only phrasings about our own next steps; anything else is left alone.
+const REPORT_VOICE = [
+    [/\b(L|l)et['’]s (monitor|watch|track|keep|check|see|look|test|review|make sure|focus|plan|aim|continue|wait|give|try|revisit|reassess|evaluate|measure|follow|stay)\b/g,
+        (m, L, verb) => (L === 'L' ? 'We' : 'we') + "'ll " + verb],
+    [/\b(W|w)e should (monitor|watch|track|keep|check|look|test|review|make sure|focus|continue|revisit|evaluate|measure|follow)\b/g,
+        (m, W, verb) => (W === 'W' ? 'We' : 'we') + "'ll " + verb],
+    [/\b(W|w)e(?: will)? want to (monitor|watch|track|keep|check|look|test|review|make sure|revisit|evaluate|measure)\b/g,
+        (m, W, verb) => (W === 'W' ? 'We' : 'we') + "'ll " + verb],
+];
+function ourVoice(text) {
+    let out = String(text ?? '');
+    for (const [re, fn] of REPORT_VOICE) out = out.replace(re, fn);
+    return out;
+}
 function stripFillerSentences(text) {
     return String(text ?? '').split('\n').map(line => {
         const parts = line.split(/(?<=[.!?])\s+/);
         const kept = parts.filter(s => !REPORT_FILLER.some(re => re.test(s)));
-        return kept.length === parts.length ? line : kept.join(' ');
+        return ourVoice(kept.length === parts.length ? line : kept.join(' '));
     }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 // The email note, plus every paragraph of the report's sections (the 15px explanation divs). Tiles and headings untouched.
@@ -6898,10 +6913,7 @@ Treat this period as a fresh starting point. State every number plainly as where
                     globalTasksData.push(...(createdTodos || []));
                 }
             }
-            const plannedKeys = new Set(plannedTodos.map(todoKey));
 
-            // Planned to-dos are listed in their own block, so they aren't repeated in the open list
-            const openTasks = clientTasks.filter(t => t.status !== 'Complete' && !plannedKeys.has(todoKey(t.title)));
 
             // Task TITLES only. Due dates, assignees, priorities and types are internal bookkeeping,
             // and the client report explains the work in plain language without them. (Due labels
@@ -6911,9 +6923,8 @@ Treat this period as a fresh starting point. State every number plainly as where
             if (completedTasks.length) {
                 workBlock += `\n\nCOMPLETED THIS PERIOD (internal task titles):\n${completedTasks.map(t => `- ${stripSlashEscapes(t.title)}`).join('\n')}`;
             }
-            if (openTasks.length) {
-                workBlock += `\n\nCURRENTLY OPEN / STILL TO DO (internal task titles):\n${openTasks.map(t => `- ${stripSlashEscapes(t.title)}`).join('\n')}`;
-            }
+            // Open board tasks are no longer listed (2026-11-12): they were mostly internal setup work the media buyer
+            // deleted from every report. What We're Working On comes from the next-week box and the notes only.
             if (plannedTodos.length) {
                 workBlock += `\n\nPLANNED FOR NEXT WEEK (internal to-dos set by the media buyer; EVERY one must be covered in "working_on"):\n${plannedTodos.map(t => `- ${t}`).join('\n')}`;
             }
@@ -6987,13 +6998,13 @@ Treat this period as a fresh starting point. State every number plainly as where
               bookkeeping.
             - Never invent specifics a task doesn't imply. Explaining why it helps is fine, but
               don't add numbers, results or promises that aren't in the task, the data or the notes.
-            - What goes in: EVERY item from PLANNED FOR NEXT WEEK, then open tasks from CURRENTLY OPEN /
-              STILL TO DO that are worth telling a client about (skip pure internal admin), then any
-              specific next step from the notes. Related items can share one entry.
+            - What goes in: EVERY item from PLANNED FOR NEXT WEEK, then any specific next step from the
+              media buyer's notes. Nothing else: our internal task list is deliberately not given to you,
+              so never guess at other work. Related items can share one entry.
             - "covers": the exact text of each PLANNED FOR NEXT WEEK item the entry covers, copied
               character for character. Use an empty array for entries that cover none. Every planned
               item must appear in some entry's "covers".
-            - If there is nothing specific at all (no planned items, no open tasks worth mentioning,
+            - If there is nothing specific at all (no planned items,
               no next step in the notes), return an empty array. The fixed default text is added for you.
             - In "html_report", leave the ${WORKING_ON_MARKER} marker exactly where it is in the
               template. Don't write that section's content into the HTML yourself.
@@ -7023,15 +7034,13 @@ Treat this period as a fresh starting point. State every number plainly as where
             - A "COMPLETED THIS PERIOD" list above means real work was finished — name it.
             - No "COMPLETED THIS PERIOD" list above means nothing was completed. Do NOT say so.
               Never write anything like "nothing was completed" or "a quiet week on tasks" — just
-              skip the topic of completed work entirely and move straight to what's still to do
+              skip the topic of completed work entirely and move straight to what's next
               or to ad performance. Silence on a topic is not the same as bad news, so do not
               apologize for it or draw attention to its absence.
-            - A "CURRENTLY OPEN / STILL TO DO" list above means work is still in motion. It goes in
-              "working_on", rewritten for the client, with no dates or timing.
             - Task titles in these lists are internal shorthand. Wherever you mention work (highlights,
               email_summary), describe it in plain client language, never as a pasted task title, and
               never with due dates, assignees or priorities.
-            - If NEITHER list appears above, there is nothing to report on work or tasks at all
+            - If neither COMPLETED THIS PERIOD nor PLANNED FOR NEXT WEEK appears above, there is nothing to report on work or tasks at all
               this period. Do not mention tasks, work, or projects anywhere in the report — go
               straight from ad performance into the notes or action plan. The one exception is
               the "What We're Working On" section, which always appears (see its rules below).
@@ -7047,7 +7056,7 @@ Treat this period as a fresh starting point. State every number plainly as where
 
             WHAT MAKES THIS REPORT DIFFERENT FROM LAST WEEK'S:
             Pull the SPECIFIC things that make this period what it was — a task that got
-            finished, one that's overdue, a real computed percentage, an SEO number if given.
+            finished, a real computed percentage, an SEO number if given.
             Draw highlights from whichever of ad performance, the work lists, or SEO has the
             most concrete, specific material this period — do not default to only ad metrics
             every time. A report with nothing specific in it is a sign the data above went unused.
@@ -7059,12 +7068,15 @@ Treat this period as a fresh starting point. State every number plainly as where
             into any report regardless of what happened are banned outright. Any sentence like that
             is deleted automatically after you write it, so it is wasted. Remember who is writing:
             this is our agency reporting to the client, so never "let's" about work that is ours to do.
+            Every forward-looking line says what WE will do: "we'll monitor the new ad's cost per lead",
+            "we'll check the landing page", never "let's monitor", "we should watch" or "keep an eye out",
+            which read as advice to the client rather than a report of our work.
             If something genuinely needs watching, say exactly what we will check and when ("we'll
             check the new carousel's cost per lead on Thursday"). A closing priority or action
-            step must name something SPECIFIC: an actual open task from the list above (explained
+            step must name something SPECIFIC: a planned item from the list above (explained
             for the client), an actual metric that moved and what will
             be done about it, or a specific manual note. If none of those give you something
-            concrete — no open tasks, no meaningful shift in the numbers, no manual notes — do
+            concrete — no planned items, no meaningful shift in the numbers, no manual notes — do
             not manufacture a closing action step at all. A report that ends after stating the
             numbers plainly is completely fine; it is far better than a sentence that says nothing.
             (The "What We're Working On" section still appears in that case, using its fixed

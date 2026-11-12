@@ -3,6 +3,12 @@
   "updates": [
     {
       "date": "2026-11-12",
+      "area": "Reports",
+      "title": "Reports say what we will do, and leave the task list out",
+      "what": "Generated reports now speak as us: any \"let's monitor\" or \"we should check\" becomes \"we'll monitor\" or \"we'll check\", in the email note, the report and What We're Working On. What We're Working On no longer pulls in open tasks from the board (mostly internal setup work); it comes from the next-week box and your notes only, with the usual default line when both are empty."
+    },
+    {
+      "date": "2026-11-12",
       "area": "Tasks",
       "title": "The ge lead setup is now called Lead Relay",
       "what": "Every checklist, switch step and opt-in SOP uses the Lead Relay names, matching the workflows in GHL: Lead Relay: Hub, Lead Relay: Opt-in - <name> for each funnel or survey, Lead Relay: Meta forms, Lead Relay: Website form and Lead Relay: Website source. The switch task is now Switch to Lead Relay.",

@@ -2079,6 +2079,15 @@ account totals and the morning audit; this adds what it can't say: which ad, and
 - **Tests:** 37 parser checks (real SimpliBlinds extra_data), 14 PGlite checks (schema, RLS,
   rename), 22 jsdom checks on the report block (5 mutations, all caught), strict `tsc`.
 
+## Weekly report wording (2026-11-12)
+
+- **Our voice:** `ourVoice()` (app.js, beside `REPORT_FILLER`) turns "let's monitor/check/test…", "we should …" and "we want to …" into "we'll …" in the email note,
+  the report paragraphs and What We're Working On, after filler sentences are deleted. The prompt says the same. A real request to the client
+  ("let us know") is left alone.
+- **No board tasks:** open tasks are no longer given to the model (they were mostly internal setup work, deleted from every report).
+  What We're Working On comes from the next-week box and the notes; completed tasks still feed the highlights.
+- `tests/report-filler.test.mjs` 32 checks, the voice breakage caught.
+
 ## Leads check in Generate Report (built 2026-11-09, NOT live until set up)
 
 The report pop-up shows the period's leads three ways before the report is written, replacing the weekly hand check of
