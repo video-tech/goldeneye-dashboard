@@ -403,6 +403,20 @@ and `morning-audit` share a hook, so the filter went in only after that function
     simulates 8 JWTs: an access-row client, an email-fallback client, both, a member, a signed-in
     user with no access, anon, the investor and an admin. All 8 pass in PGlite, and against the
     old policies 7 fail (the control).
+- **Security audit, 2026-11-12 (`supabase/sql/security_fixes_2026_11_12.sql`).** Supabase's advisor plus a sweep of every `true` policy.
+  - **Critical:** `pre_approved_users` was ALL true, and `handle_new_user()` gives a new account its pre-approved role, so anyone could sign up,
+    pre-approve a second email as admin and sign up again as an admin. Not used (admins were video@, info@, support@ only). Now admins manage,
+    a user reads only its own row. `send_weekly_checkin_reminders()` was executable by the anon key (texts clients via Make #5); now owner only.
+  - **High:** `onboarding_steps`/`stage_templates` (anyone could rewrite every portal), `morning_audits`, `ad_approvals`, `client_leads`,
+    `user_profiles`/`user_client_access` reads, `client_health`/`health_logs`/`client_milestones`/`seo_metrics`, legacy `client_estimates`/`client_jobs`,
+    and the `ad-creatives` storage uploads were all open to any signed-in user. Now: clients reach their own rows through `client_row_visible`,
+    config tables are read-only to them, admins (and staff for profiles) do the rest.
+  - **Checked and fine:** no service_role key, Meta, GHL, OpenAI or Resend token in the repo or its history (only the public anon key); every
+    `verify_jwt = false` function checks its own secret or token; the other SECURITY DEFINER functions check the caller.
+  - **Left as low:** six functions without a pinned search_path, pg_net in the public schema, leaked-password protection off (sign-in is OTP).
+  - **Known gap found:** initApp's "apply my invite" for an already-existing pending user writes `user_profiles`/`user_client_access` as that user,
+    which RLS refuses, so it only works through `handle_new_user()` at sign-up.
+  - `security_fixes_2026_11_12.test.mjs` 33 PGlite checks, run against the old policies as the control.
 - **`client_row_visible(text)`, added 2026-09-10** — the RLS helper every client-facing table
   added from here on should use. Wraps admin / `user_has_client_access()` / `client_email`
   fallback into one call so the fallback cannot be forgotten. See SEO measurement for why that
