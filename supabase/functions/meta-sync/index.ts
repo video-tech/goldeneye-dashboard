@@ -25,7 +25,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { adminCheck, cronCheck } from "../_shared/admin-auth.ts";
 import {
     parseInsights, parseActivities, isRateLimit, scrubToken, windowEndingYesterday,
-    pickAccounts, windowsInChunks, accountsToFill, type AdDayRow, type ActivityRow,
+    pickAccounts, windowsInChunks, accountsToFill, runPool, type AdDayRow, type ActivityRow,
 } from "./parse.ts";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
@@ -36,6 +36,7 @@ const TIME_BUDGET_MS = 120_000; // stop starting new clients past this; the gate
 // seen on Caliber Cabinets at 30 and 90 days while its 8-day daily pull worked), the same window is
 // pulled in pieces this long, each retried once.
 const CHUNK_DAYS = 7;
+const PARALLEL_ACCOUNTS = 3; // clients synced at once, so one slow account can't use the whole budget
 const REQUEST_DEADLINE_MS = 135_000; // no new piece starts past this, measured from the start of the request (the gateway kills at 150s)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -237,21 +238,21 @@ Deno.serve(async (req: Request) => {
             const connectedClients = (stateRes.data ?? []).filter((s: any) => String(s.last_window ?? "").includes("..")).map((s: any) => s.client_name);
             const todo = accountsToFill(accounts, { spentAccts, haveAccts, connectedClients });
             const started = Date.now();
-            const results: any[] = [];
-            for (const a of todo) {
-                if (Date.now() - started > TIME_BUDGET_MS) { results.push({ client: a.client_name, skipped: "out of time this run" }); continue; }
+            let fillLimited = false;
+            const results: any[] = await runPool(todo, PARALLEL_ACCOUNTS, async (a) => {
                 try {
                     const r: any = await syncAccount(db, token, a, 2, { deadline: started + REQUEST_DEADLINE_MS });
                     // last_window is left alone: it records the full daily sync's window
                     await recordState(db, a.client_name, { ad_account_id: a.ad_account_id, last_run_at: new Date().toISOString(), last_error: null });
-                    results.push({ client: a.client_name, ...r });
+                    return { client: a.client_name, ...r };
                 } catch (e) {
                     const msg = scrubToken(String((e as Error).message));
                     await recordState(db, a.client_name, { ad_account_id: a.ad_account_id, last_run_at: new Date().toISOString(), last_error: msg });
-                    results.push({ client: a.client_name, error: msg });
-                    if (e instanceof GraphError && isRateLimit(e)) { results.push({ stopped: "Meta rate limit" }); break; }
+                    if (e instanceof GraphError && isRateLimit(e)) fillLimited = true;
+                    return { client: a.client_name, error: msg };
                 }
-            }
+            }, () => !fillLimited && Date.now() - started <= TIME_BUDGET_MS,
+               (a) => ({ client: a.client_name, skipped: fillLimited ? "Meta rate limit" : "out of time this run" }));
             if (todo.length) console.log(`meta-sync fill by ${caller} for ${yesterday}: ${JSON.stringify(results).slice(0, 2000)}`);
             return Response.json({ mode, yesterday, missing: todo.map((a) => a.client_name), results });
         }
@@ -267,31 +268,26 @@ Deno.serve(async (req: Request) => {
         const started = Date.now();
         const chunked = mode === "backfill" && body?.chunked === true;
         const skipDays = mode === "backfill" ? Math.max(0, Math.floor(Number(body?.skip_days) || 0)) : 0;
-        const results: any[] = [];
-        for (const a of accounts) {
-            if (Date.now() - started > TIME_BUDGET_MS) {
-                results.push({ client: a.client_name, skipped: "out of time this run" });
-                continue;
-            }
+        // Rate limited: everything after would fail the same way, so nothing more starts. Tomorrow's run
+        // re-pulls the whole window, so nothing is lost by stopping.
+        let rateLimited = false;
+        const results: any[] = await runPool(accounts, PARALLEL_ACCOUNTS, async (a) => {
+            const t0 = Date.now();
             try {
                 const r: any = await syncAccount(db, token, a, days, { chunked, skipDays, deadline: started + REQUEST_DEADLINE_MS });
                 // A piece that could not load is named here, so it shows up in the sync state and not only a log
                 const partial = r.failed_windows?.length ? `partial: ${r.failed_windows.length} window(s) not loaded: ${r.failed_windows.join(", ")}`.slice(0, 500) : null;
                 await recordState(db, a.client_name, { ad_account_id: a.ad_account_id, last_run_at: new Date().toISOString(), last_error: partial, ...(skipDays > 0 ? {} : { last_window: `${r.since}..${r.until}` }) });
-                results.push({ client: a.client_name, ...r });
+                return { client: a.client_name, seconds: Math.round((Date.now() - t0) / 1000), ...r };
             } catch (e) {
                 const msg = scrubToken(String((e as Error).message));
                 await recordState(db, a.client_name, { ad_account_id: a.ad_account_id, last_run_at: new Date().toISOString(), last_error: msg });
-                results.push({ client: a.client_name, error: msg });
                 console.error(`meta-sync ${a.client_name}: ${msg}`);
-                // Rate limited: everything after this would fail the same way. Tomorrow's run
-                // re-pulls the whole window, so nothing is lost by stopping.
-                if (e instanceof GraphError && isRateLimit(e)) {
-                    results.push({ stopped: "Meta rate limit; the next run picks up the rest" });
-                    break;
-                }
+                if (e instanceof GraphError && isRateLimit(e)) rateLimited = true;
+                return { client: a.client_name, error: msg };
             }
-        }
+        }, () => !rateLimited && Date.now() - started <= TIME_BUDGET_MS,
+           (a) => ({ client: a.client_name, skipped: rateLimited ? "Meta rate limit; the next run picks up the rest" : "out of time this run" }));
         console.log(`meta-sync ${mode} by ${caller}: ${JSON.stringify(results).slice(0, 2000)}`);
         return Response.json({ mode, days, results });
     } catch (e) {

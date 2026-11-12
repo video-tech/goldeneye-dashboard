@@ -2061,6 +2061,10 @@ account totals and the morning audit; this adds what it can't say: which ad, and
   `{"mode":"backfill","days":90,"client":"<name>","chunked":true,"skip_days":42}`: `chunked` goes straight to
   pieces, and `skip_days` leaves out the newest days already loaded. A run with `skip_days` does not touch
   `last_window`, so the sync still reads as current to the audit's ADS OFF check.
+- **Three clients at a time (2026-11-12, `runPool` in parse.ts, `PARALLEL_ACCOUNTS`).** The daily and fill runs went one client after another,
+  so on Nov 12 Sunset (211 ad rows, its 8-day request refused and pulled in pieces, 83 s) used the 120 s budget and Alta Vista, 3Sixty,
+  Anxiety Solutions, Red Valley and PureAirK9 were skipped "out of time". A rate limit still stops new clients starting; results keep
+  their order and now carry `seconds`. `pool.test.mjs` 8 checks, 1 of 1 breakage caught.
 - **Meta's lead counts are not the daily pull's.** For the same week, Anxiety Solutions: Meta's own Ads
   Manager 37 leads, meta-sync 37, Make 15. Spend matches within 1%, and the other clients' leads line up
   (Sunset 59 vs 59). **GHL is the source of truth for leads and Make's feed was deliberately left alone**, so

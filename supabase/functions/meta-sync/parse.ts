@@ -272,3 +272,25 @@ export function accountsToFill(
     const connected = new Set(opts.connectedClients);
     return accounts.filter((a) => spent.has(a.ad_account_id) && !have.has(a.ad_account_id) && connected.has(a.client_name));
 }
+
+// Runs fn over items, at most `limit` at a time (2026-11-12). The daily sync used to go one client after another, so one slow
+// account (Sunset: hundreds of ads, Meta refusing the 8-day request and falling back to pieces) used the whole time budget and
+// the clients after it were skipped "out of time". shouldStart is asked before each item starts; when it says no, that item is
+// passed to onSkip instead. Results keep the items' order.
+export async function runPool<T, R>(
+    items: T[], limit: number,
+    fn: (item: T) => Promise<R>,
+    shouldStart: () => boolean,
+    onSkip: (item: T) => R,
+): Promise<R[]> {
+    const out: R[] = new Array(items.length);
+    let next = 0;
+    const worker = async () => {
+        while (next < items.length) {
+            const i = next++;
+            out[i] = shouldStart() ? await fn(items[i]) : onSkip(items[i]);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+    return out;
+}

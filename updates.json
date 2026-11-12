@@ -3,6 +3,13 @@
   "updates": [
     {
       "date": "2026-11-12",
+      "area": "Data",
+      "title": "Meta's ad data syncs every client again",
+      "what": "The daily Meta sync went one client after another, and on busy days Sunset's large account used up the time, so 3Sixty, Alta Vista, Anxiety Solutions, Red Valley and PureAirK9 were skipped until the next day. It now syncs three clients at once, so one slow account no longer holds up the rest. That keeps the morning audit's per-ad list, the Ads tab activity panel and the New in Meta reminders up to date.",
+      "action": "Deploy meta-sync"
+    },
+    {
+      "date": "2026-11-12",
       "area": "Tasks",
       "title": "Reminders to set up every new opt-in",
       "what": "Two things now prompt you to click Add a new opt-in. The Launch ads checklist has a step before the ads are built: using a new form, funnel, survey or Meta instant form? And whenever someone creates a campaign or ad set in a client's Meta account, Golden Eye raises a task the next afternoon, \"New in Meta: a new form or funnel?\", listing what was built. Nothing new? Mark it done. More creations while it is open are added to the same task.",
