@@ -2465,6 +2465,10 @@ since the questionnaire now asks both (old answers stay). Re-runnable.
   Templates has "Only our team sees it" and "Encrypt" per question; the editor refuses a question depending on a private answer, a private fact,
   and an encrypted choice. Missing SQL degrades: keys load empty, and a private save fails loudly instead of dropping the answer.
 - **All three tables are in `rename_client.sql`.**
+- **Customer problem questions (2026-11-12, `supabase/sql/onboarding_pain_points.sql`)** in About your business, after services, so every
+  client answers them: the problem that makes someone contact them (`a_pain_main`), up to 5 things that finally push people to reach out
+  (`a_pain_triggers`), and what worries people about hiring them (`a_pain_worries`, optional). `dest` `ad_brief:`, recorded only. Examples
+  sit in the label in brackets, since questions have no hint line.
 - **"Your new website" (added 2026-10-16)**, for every client whose website situation is "We're building it" (`{new_build}`, not only SEO):
   a **style picker** plus 16 questions (likes and dislikes, brand colors, logo, lettering, feel, pages, features, domain, content ready).
   - **The style picker** (question type `style`) shows looks as cards like the website-options pages the team sends (Red Valley,

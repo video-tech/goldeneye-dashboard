@@ -2,6 +2,13 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-11-12",
+      "area": "Onboarding",
+      "title": "Onboarding asks about the customer's problem",
+      "what": "About your business now asks three more questions, for every client: what problem usually makes someone contact them, up to 5 specific things that finally push people to reach out, and what worries people about hiring them (optional). The answers are for ad copy, the website and SEO articles, and show with the rest of their answers on the Relationship tab.",
+      "action": "Run supabase/sql/onboarding_pain_points.sql"
+    },
+    {
       "date": "2026-11-10",
       "area": "Data",
       "title": "One lead setup for every client: the ge lead tag",
