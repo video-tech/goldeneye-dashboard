@@ -853,7 +853,8 @@
                         </button>
                     </div>
 
-                    <!-- Client switcher: one bordered segmented unit, stage chip, and a
+                    <!-- Fixed widths on the client name and date pill (2026-11-13) so the arrows never move: click through clients and dates without moving the mouse.
+                         Client switcher: one bordered segmented unit, stage chip, and a
                          one-line summary beside it, matching the target design. Cycling +
                          picking a client still calls the same cycleClient()/toggleDropdown(). -->
                     <div class="flex items-center justify-between flex-wrap gap-4">
@@ -861,7 +862,7 @@
                             <div class="flex items-center" style="border:1px solid var(--line); border-radius:3px; overflow:hidden;">
                                 <button onclick="cycleClient(-1)" style="width:32px; height:34px; background:transparent; border:none; color:var(--t2); cursor:pointer;"><i class="fa-solid fa-chevron-left" style="font-size:10px;"></i></button>
                                 <div class="dropdown-container">
-                                    <div onclick="toggleDropdown('c-account-menu')" style="height:34px; padding:0 16px; border-left:1px solid var(--line); border-right:1px solid var(--line); color:var(--t1); font-size:12.5px; cursor:pointer; display:flex; align-items:center; gap:9px; min-width:180px; justify-content:space-between;">
+                                    <div onclick="toggleDropdown('c-account-menu')" style="height:34px; padding:0 16px; border-left:1px solid var(--line); border-right:1px solid var(--line); color:var(--t1); font-size:12.5px; cursor:pointer; display:flex; align-items:center; gap:9px; width:230px; justify-content:space-between;">
                                         <span id="c-account-label" class="truncate">All Accounts</span>
                                         <i class="fa-solid fa-chevron-down" style="font-size:8px; color:var(--t3);"></i>
                                     </div>
@@ -916,7 +917,7 @@
                         <div class="flex items-center gap-1">
                             <button onclick="cycleDate(-1)" class="glass-icon-btn !w-8 !h-8 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
                             <div class="dropdown-container flex gap-2">
-                                <div class="glass-pill" onclick="toggleDropdown('c-date-menu')"><i class="fa-regular fa-calendar-range mr-2" id="c-date-icon" style="color:var(--gold);"></i><span id="c-date-label">Last 7 Days</span><i class="fa-solid fa-chevron-down text-[10px] ml-3"></i></div>
+                                <div class="glass-pill" onclick="toggleDropdown('c-date-menu')" style="width:200px; justify-content:space-between;"><span class="flex items-center min-w-0"><i class="fa-regular fa-calendar-range mr-2" id="c-date-icon" style="color:var(--gold);"></i><span id="c-date-label" class="truncate">Last 7 Days</span></span><i class="fa-solid fa-chevron-down text-[10px] ml-3"></i></div>
                                 <div id="c-date-menu" class="custom-dropdown-menu">
                                     <div class="dropdown-item" onclick="cSelectDate('today', 'Today')">Today</div>
                                     <div class="dropdown-item" onclick="cSelectDate('yesterday', 'Yesterday')">Yesterday</div>

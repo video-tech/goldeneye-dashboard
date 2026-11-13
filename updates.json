@@ -3,6 +3,12 @@
   "updates": [
     {
       "date": "2026-11-13",
+      "area": "Data",
+      "title": "The client and date arrows on Accounts stay in one place",
+      "what": "The client name box and the date pill are now a fixed width, so the arrows don't move when the name or dates change. Click through clients or days without moving the mouse. Long client names are cut short with an ellipsis."
+    },
+    {
+      "date": "2026-11-13",
       "area": "Onboarding",
       "title": "The setup call step ticks itself only when a call is actually booked",
       "what": "Clients could tick \"Book your setup call\" themselves with an I've booked my call button, and one did without booking. That button is gone: the step now ticks itself when the booking reaches us from our GHL calendar, and if it doesn't, the client can tell us. We can still tick or untick it by hand on the Relationship tab.",
