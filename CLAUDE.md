@@ -697,6 +697,13 @@ embedded GHL form, for forms nothing in GHL uses. The SEO intake is one. Schema 
   third, an open WITH CHECK on update, is still blocked by the select policy). `tests/step-toggle.test.mjs` (jsdom) 42 checks on the
   real code, 11 of 11 breakages caught.
 
+**The booking step ticks itself (2026-11-12, `supabase/functions/onboarding-booking/`, `supabase/sql/booking_step_self_ticks.sql`).** "Book your setup call"
+used to be ticked by the client's own "I've booked my call"; Todd Woods ticked it a minute in and no appointment existed. Now the step has
+no client button (`obIsBookingStep`, `requires_confirm` off) and a workflow in our Midas GHL (Customer Booked Appointment on that calendar →
+Webhook POST to `onboarding-booking` with the Lead Relay `x-webhook-secret`) ticks it, `completed_by = booking`. It acts only when exactly one
+non-archived client lists the booker's email, the calendar id matches the step's widget, and the appointment isn't cancelled; it never unticks.
+Admins still tick it by hand. `verify_jwt = false`. Tests: `handler.test.mjs` 17, `tests/booking-step.test.mjs` 6.
+
 Videos should be self-hosted MP4 in Supabase Storage (public bucket): gives 1.5× default
 playback, watch tracking, resume, auto-complete. Loom = cross-origin iframe = none of
 those. Encode H.264 (**not HEVC** — Chrome/Firefox won't reliably play it), `+faststart`.

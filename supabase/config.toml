@@ -438,5 +438,8 @@ verify_jwt = false
 
 # Public by design: the homeowner link page has no sign-in. "view" needs only the link token; every
 # other mode checks the caller inside the function (see estimate-share/handler.ts).
+[functions.onboarding-booking]
+verify_jwt = false
+
 [functions.estimate-share]
 verify_jwt = false

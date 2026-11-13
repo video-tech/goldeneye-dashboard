@@ -2090,7 +2090,9 @@ window.renderGetStarted = function() {
                 if (!s.requires_confirm) {
                     inner += `<p class="text-[11px] text-gray-500 mb-3">
                                   <i class="fa-solid fa-circle-notch fa-spin mr-1 text-blue-400"></i>
-                                  After you hit submit, give this a few seconds &mdash; it ticks itself off and opens the next step. Please don&rsquo;t close this tab.
+                                  ${obIsBookingStep(s)
+                                      ? 'Pick a time and confirm your booking. This ticks itself off once the booking reaches us.'
+                                      : 'After you hit submit, give this a few seconds &mdash; it ticks itself off and opens the next step. Please don&rsquo;t close this tab.'}
                               </p>`;
                 }
             }
@@ -2134,7 +2136,7 @@ window.renderGetStarted = function() {
                 inner += obHelpAlreadyRequested(s.id, 'form')
                     ? `<span class="text-xs text-blue-400"><i class="fa-solid fa-circle-check mr-1"></i>Thanks, we'll check it and tick it off.</span>`
                     : `<button id="ob-manual-${s.id}" onclick="obRequestHelp('${s.id}', 'form')" class="hidden text-xs text-gray-400 hover:text-white underline underline-offset-2 transition">
-                              Submitted it but nothing happened? Let us know
+                              ${obIsBookingStep(s) ? 'Booked but it didn&rsquo;t tick? Let us know' : 'Submitted it but nothing happened? Let us know'}
                           </button>`;
             }
 
@@ -2806,10 +2808,17 @@ window.obCompleteStep = async function(stepId) {
 // client's Relationship tab or while previewing their portal. Every one asks first.
 // Unticking sets completed_at back to null. That never texts anyone: trg_onboarding_handoff acts only when a step goes
 // from not done to done, and "already announced" is the handoff task, so ticking it again doesn't text them twice.
+// A GHL booking calendar embedded as a form step. It ticks itself when the booking reaches onboarding-booking, never from a
+// client's own "I booked it" (2026-11-12: a client ticked it a minute in and no appointment existed). Admins can still tick it.
+function obIsBookingStep(step) {
+    return !!step && step.step_type === 'form' && /\/widget\/(booking|bookings|appointment)s?\//i.test(String(step.embed_url || ''));
+}
+
 function obClientCanToggle(step) {
     if (!step) return false;
     if (step.step_type === 'questions') return false;
     if (step.step_type === 'form' && !step.requires_confirm) return false;
+    if (obIsBookingStep(step)) return false;
     return true;
 }
 
