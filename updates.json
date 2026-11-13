@@ -4,8 +4,8 @@
     {
       "date": "2026-11-13",
       "area": "Data",
-      "title": "The client and date arrows on Accounts stay in one place",
-      "what": "The client name box and the date pill are now a fixed width, so the arrows don't move when the name or dates change. Click through clients or days without moving the mouse. Long client names are cut short with an ellipsis."
+      "title": "The client and date arrows on Accounts stay in one place, and stay on screen",
+      "what": "The client name box and the date pill are now a fixed width, so the arrows don't move when the name or dates change. Both now sit in the bar that stays at the top as you scroll, so you can click through clients or days from anywhere on the page without moving the mouse. Long client names are cut short with an ellipsis."
     },
     {
       "date": "2026-11-13",
