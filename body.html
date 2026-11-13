@@ -2347,6 +2347,7 @@
                 <button id="cp-tab-tasks" onclick="switchCpTab('tasks')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-list-check mr-2"></i>Tasks <span id="cp-tasks-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full" style="background:var(--warn);"></span></button>
                 <button id="cp-tab-reports" onclick="switchCpTab('reports')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-file-lines mr-2"></i>Reports</button>
                 <button id="cp-tab-checkin" onclick="switchCpTab('checkin')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-clipboard-check mr-2"></i>Weekly check-in <span id="cp-checkin-dot" class="hidden ml-1 inline-block w-2 h-2 rounded-full" style="background:var(--warn);"></span></button>
+                <button id="cp-tab-pipeline" onclick="switchCpTab('pipeline')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-bars-progress mr-2"></i>Pipeline</button>
                 <button id="cp-tab-creatives" onclick="switchCpTab('creatives')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-palette mr-2"></i>Ad approvals</button>
                 <button id="cp-tab-seo" onclick="switchCpTab('seo')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-brands fa-google mr-2"></i>Search &amp; SEO</button>
                 <button id="cp-tab-support" onclick="switchCpTab('support')" class="ge-cp-tab" style="white-space:nowrap; background:transparent; border:none; border-bottom:1.5px solid transparent; padding:0 0 13px; font-family:inherit; font-size:13px; color:var(--t2); cursor:pointer; margin-bottom:-1px;"><i class="fa-solid fa-comments mr-2"></i>Get in touch</button>
@@ -2358,7 +2359,6 @@
                         <div class="dropdown-item" onclick="switchCpTab('leaderboard'); toggleDropdown('cp-more-menu');"><i class="fa-solid fa-trophy w-4" style="color:var(--gold);"></i> Network Ranks</div>
                         <div class="dropdown-item" onclick="switchCpTab('knowledge'); toggleDropdown('cp-more-menu');"><i class="fa-solid fa-graduation-cap w-4"></i> Knowledge Base</div>
                         <div class="dropdown-item" onclick="switchCpTab('profile'); toggleDropdown('cp-more-menu');"><i class="fa-solid fa-circle-user w-4"></i> Profile</div>
-                        <div class="dropdown-item hidden" id="cp-more-pipeline" onclick="switchCpTab('pipeline'); toggleDropdown('cp-more-menu');"><i class="fa-solid fa-bars-progress w-4"></i> Pipeline</div>
                     </div>
                 </div>
             </div>
@@ -2579,9 +2579,10 @@
 
             <div id="cp-view-pipeline" class="space-y-5 hidden">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-1">
-                    <h3 class="ge-label">Lead pipeline</h3>
+                    <div><h3 class="ge-label">Lead pipeline</h3><p id="cp-pipeline-note" class="hidden text-xs mt-1" style="color:var(--t3);"></p></div>
                     <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
-                        <button onclick="openCpLeadDrawer('new')" class="btn-secondary btn text-xs shrink-0"><i class="fa-solid fa-plus mr-2"></i>Add lead</button>
+                        <button id="cp-pipeline-add" onclick="openCpLeadDrawer('new')" class="hidden btn-secondary btn text-xs shrink-0"><i class="fa-solid fa-plus mr-2"></i>Add lead</button>
+                        <button id="cp-pipeline-off" onclick="setCpPipeline(false)" class="hidden text-xs shrink-0" style="background:transparent; border:none; color:var(--t3); cursor:pointer; text-decoration:underline;">Turn off</button>
                     </div>
                 </div>
                 <div class="flex gap-4 overflow-x-auto pb-4 items-start" id="cp-pipeline-container">

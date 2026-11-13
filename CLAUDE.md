@@ -2200,6 +2200,28 @@ app.js, run by `openReportModal`; box `#rpt-leads-check` in body.html. Admins on
 - **Tests:** `tests/leads-check.test.mjs` (jsdom) 48 checks on the real code; `ghl-lead-webhook/contacts.test.mjs` 14;
   `supabase/sql/ghl_contacts.test.mjs` (PGlite) 10.
 
+## The client's lead pipeline (built 2026-11-13, `supabase/sql/client_pipeline.sql`)
+
+The portal's **Pipeline** tab is back (a tab again, no longer hidden under More). **It's off until the client presses "Turn on my
+pipeline"**, so leads never pile up in a board nobody works: the old feed (Make "LEADS ghl to goldeneye", off since 2026-08-19, no
+secret, not used again) left PANDEN 357 leads that never left New Lead.
+- **Switch:** `clients.pipeline_enabled_at` (null = off), set only through `set_client_pipeline(client, on)` (SECURITY DEFINER,
+  `client_row_visible`; clients don't write `clients`). Turning off stops new leads and hides the board; leads already in it stay.
+- **Feed:** Lead Relay. `ghl-lead-webhook`'s `recordContact` calls `add_pipeline_lead(client, contact, name, phone, email)` after
+  `record_ghl_contact`. The database adds the lead only when the pipeline is on and the contact's merged tags (`ghl_contacts`) hold one
+  of the client's lead tags (`lead_tags` else `ge lead` = Ads; `website_lead_tags` else `website lead` = Website, which wins). One row
+  per contact (`client_leads.ghl_contact_id`, unique per client, first write wins), so retries, later tag events and a lead the client
+  moved or deleted are never touched. A failure there is logged and swallowed; it never costs the contact record.
+- **The one place Golden Eye stores a lead's name, phone and email**, and only for clients who switched it on. Never logged (the
+  webhook logs the client name only). Read and edited by that client through the existing `client_row_visible` policy.
+- **The board shows leads created since the switch-on moment** (`cpPipelineLeads`), which keeps PANDEN's old pile out of sight
+  without deleting it. Names, contact and source are escaped (the old board printed names raw, and they now come from GHL).
+- **Stages** are still the hard-coded `clientPipelineStages`; the Settings page's add/remove isn't saved. Not yet tied to check-ins
+  (see the lead pipeline plan).
+- **Order:** the SQL, then deploy `ghl-lead-webhook`, then push (before the SQL the tab says "Not available on your account yet").
+- **Tests:** `client_pipeline.test.mjs` (PGlite) 17, `ghl-lead-webhook/pipeline.test.mjs` 10, `tests/client-pipeline.test.mjs` 12
+  (2 of 2 breakages caught).
+
 ## Text the assignee (built 2026-10-13)
 
 "Text the assignee" in the task drawer (existing tasks only) texts whoever a task is assigned to.
@@ -3056,7 +3078,7 @@ GitHub Pages copy but not from the GHL domain.
 - Embed URL isn't validated — pasting a whole `<iframe>` snippet shows clients a
   Cloudflare error
 - Deleting an onboarding step that has progress rows assumes the FK cascades; untested
-- Pipeline tab hidden pending a rebuild
+- Pipeline stages aren't saved per client (Settings edits are lost on reload); see "The client's lead pipeline"
 - Ad approvals never tested end to end with a client actually approving; pending
   approvals aren't surfaced in the dashboard notification feed yet
 - The onboarding form chain has broken twice on email identity and hasn't been

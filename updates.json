@@ -4,6 +4,13 @@
     {
       "date": "2026-11-13",
       "area": "Data",
+      "title": "Clients have a lead pipeline again, switched on by them",
+      "what": "The Pipeline tab is back in the client portal. It stays off until the client presses Turn on my pipeline, so leads don't pile up for clients who won't use it. Once it's on, every new lead tagged by Lead Relay (ads or website) lands in New Lead with its name, phone and source, and the client drags it along as they work it. Older leads aren't added, and they can turn it off any time.",
+      "action": "Run supabase/sql/client_pipeline.sql, then deploy ghl-lead-webhook"
+    },
+    {
+      "date": "2026-11-13",
+      "area": "Data",
       "title": "The client and date arrows on Accounts stay in one place, and stay on screen",
       "what": "The client name box and the date pill are now a fixed width, so the arrows don't move when the name or dates change. Both now sit in the bar that stays at the top as you scroll, so you can click through clients or days from anywhere on the page without moving the mouse. Long client names are cut short with an ellipsis."
     },

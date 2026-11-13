@@ -750,6 +750,11 @@
                 const { data: pkgRows } = await supabaseClient.from('clients').select('name, base_package').in('name', allowedClients);
                 (pkgRows || []).forEach(p => portalClientRows.filter(r => r.name === p.name).forEach(r => { r.base_package = p.base_package; }));
             } catch (e) { console.warn('Package not loaded:', e); }
+            // Pipeline switch (client_pipeline.sql): its own query too. Failing means nobody has it on.
+            try {
+                const { data: plRows, error: plErr } = await supabaseClient.from('clients').select('name, pipeline_enabled_at').in('name', allowedClients);
+                if (!plErr) { cpPipelineSqlReady = true; (plRows || []).forEach(p => portalClientRows.filter(r => r.name === p.name).forEach(r => { r.pipeline_enabled_at = p.pipeline_enabled_at; })); }
+            } catch (e) { console.warn('Pipeline switch not loaded:', e); }
             // Contractor or not (contractor_fact.sql): its own query too, for the same reason. Failing means everyone is a contractor.
             try {
                 const { data: ctRows } = await supabaseClient.from('clients').select('name, contractor').in('name', allowedClients);
@@ -3657,7 +3662,7 @@ window.maybeShowWeeklyCheckin = function() {
             currentActiveClient = accountName; document.getElementById('client-name-display').innerText = accountName.split(' ')[0];
             const normTarget = normalize(accountName);
             filteredReportData = reportsForClient(accountName, allRawReports);
-            clientLeadsData = globalClientLeadsData.filter(l => normalize(l.client_name) === normTarget).map(l => ({ id: l.id, name: l.lead_name, stage: l.stage || 'New Lead', email: l.lead_email || '', phone: l.lead_phone || '' }));
+            clientLeadsData = globalClientLeadsData.filter(l => normalize(l.client_name) === normTarget).map(l => ({ id: l.id, name: l.lead_name, stage: l.stage || 'New Lead', email: l.lead_email || '', phone: l.lead_phone || '', source: l.source || '', created_at: l.created_at || null }));
             // The cached work summary is per-client. Without this an admin switching
             // between clients would keep showing whichever client's summary loaded first.
             cachedWorkSummary = null;
@@ -3840,13 +3845,61 @@ updateAgencyPowerTicker();
             });
         }
 
+        // The pipeline is off until the client switches it on (client_pipeline.sql, 2026-11-13), so leads never pile up in a
+        // board nobody works. Once on, GHL leads with the client's lead tags arrive through ghl-lead-webhook, and the board shows
+        // only leads from the moment it was switched on (PANDEN's 357 untouched leads from the old Make feed stay out of sight).
+        var cpPipelineSqlReady = false;
+        function cpPipelineRow() {
+            const want = normalize(currentActiveClient || '');
+            return portalClientRows.find(c => normalize(c.name) === want) || null;
+        }
+        function cpPipelineOnSince() { return cpPipelineRow()?.pipeline_enabled_at || null; }
+        function cpPipelineLeads() {
+            const since = cpPipelineOnSince();
+            if (!since) return [];
+            const t = new Date(since).getTime();
+            return clientLeadsData.filter(l => !l.created_at || new Date(l.created_at).getTime() >= t);
+        }
+        async function setCpPipeline(on) {
+            const ask = on
+                ? 'Turn on your lead pipeline?\n\nFrom now on, every new lead from your ads and website lands here as New Lead, so you can move it along as you work it. Leads from before today are not added.'
+                : 'Turn off your lead pipeline?\n\nNew leads stop arriving here. The leads already in it are kept, and come back if you turn it on again.';
+            if (!confirm(ask)) return;
+            const { data, error } = await supabaseClient.rpc('set_client_pipeline', { p_client: currentActiveClient, p_on: !!on });
+            if (error) { alert(/function|schema cache/i.test(error.message || '') ? 'The pipeline is not ready yet. Ask us to switch it on.' : 'Could not change the pipeline: ' + error.message); return; }
+            const row = cpPipelineRow();
+            if (row) row.pipeline_enabled_at = data || null;
+            else portalClientRows.push({ name: currentActiveClient, pipeline_enabled_at: data || null });
+            renderCpPipeline();
+        }
+
         function renderCpPipeline() {
             const container = document.getElementById('cp-pipeline-container'); container.innerHTML = '';
+            const since = cpPipelineOnSince();
+            const addBtn = document.getElementById('cp-pipeline-add'); const offBtn = document.getElementById('cp-pipeline-off');
+            const note = document.getElementById('cp-pipeline-note');
+            if (addBtn) addBtn.classList.toggle('hidden', !since);
+            if (offBtn) offBtn.classList.toggle('hidden', !since);
+            if (note) { note.classList.toggle('hidden', !since); if (since) note.textContent = 'New leads from your ads and website land in New Lead. On since ' + new Date(since).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + '.'; }
+            if (!since) {
+                container.innerHTML = `
+                    <div class="glass p-8 max-w-xl" style="text-align:left;">
+                        <i class="fa-solid fa-bars-progress text-2xl mb-3" style="color:var(--gold);"></i>
+                        <h3 class="text-lg font-bold mb-2" style="color:var(--t1);">Track every lead from first call to closed job</h3>
+                        <p class="text-sm mb-2" style="color:var(--t2);">Turn this on and each new lead from your ads and website shows up here automatically. Drag it along as you call, book and close, so you always know who still needs a follow-up.</p>
+                        <p class="text-sm mb-5" style="color:var(--t2);">It stays off until you want it, so leads don't pile up in a board nobody is working. You can turn it off any time.</p>
+                        ${cpPipelineSqlReady
+                            ? '<button onclick="setCpPipeline(true)" class="btn-primary btn text-sm"><i class="fa-solid fa-power-off mr-2"></i>Turn on my pipeline</button>'
+                            : '<p class="text-xs" style="color:var(--t3);">Not available on your account yet.</p>'}
+                    </div>`;
+                return;
+            }
+            const leadsNow = cpPipelineLeads();
             const baseStages = clientPipelineStages.filter(s => s !== 'Won' && s !== 'Lost');
             const finalStages = [...baseStages, 'Won', 'Lost'];
 
             finalStages.forEach(stage => {
-                const count = clientLeadsData.filter(l => l.stage === stage).length;
+                const count = leadsNow.filter(l => l.stage === stage).length;
                 let colorClass = 'text-blue-400'; let bgClass = 'bg-white/5 border border-white/5'; let headBg = 'border-b border-white/5'; let icon = 'fa-solid fa-list';
                 if (stage === 'Won') { colorClass = 'text-green-400'; bgClass = 'bg-green-900/10 border border-green-500/20'; headBg = 'border-b border-green-500/20'; icon = 'fa-solid fa-sack-dollar'; }
                 if (stage === 'Lost') { colorClass = 'text-red-400'; bgClass = 'bg-red-900/10 border border-red-500/20'; headBg = 'border-b border-red-500/20'; icon = 'fa-solid fa-skull-crossbones'; }
@@ -3856,10 +3909,10 @@ updateAgencyPowerTicker();
                     <div class="w-72 flex flex-col rounded-xl shrink-0 ${bgClass}">
                         <div class="p-3 flex justify-between items-center ${headBg}"><h3 class="font-bold ${colorClass} text-xs"><i class="${icon} mr-2"></i>${stage}</h3><span class="text-gray-500 text-[10px] bg-black/40 px-2 py-0.5 rounded">${count}</span></div>
                         <div class="p-2 flex-1 min-h-[150px] space-y-2 cp-kanban-col" data-stage="${stage}">
-                            ${clientLeadsData.filter(l => l.stage === stage).map(l => `
-                                <div class="glass cp-kanban-card p-3 border border-white/10 hover:border-blue-500/50 transition cursor-pointer" data-id="${l.id}" onclick="openCpLeadDrawer('${l.id}')">
-                                    <h4 class="font-bold text-white text-sm mb-1">${l.name}</h4>
-                                    <div class="flex justify-between items-center mt-2"><span class="text-[10px] text-gray-400 truncate max-w-[150px]">${l.phone || l.email || 'No Contact Info'}</span></div>
+                            ${leadsNow.filter(l => l.stage === stage).map(l => `
+                                <div class="glass cp-kanban-card p-3 border border-white/10 hover:border-blue-500/50 transition cursor-pointer" data-id="${escapeAttr(l.id)}" onclick="openCpLeadDrawer('${escapeAttr(l.id)}')">
+                                    <h4 class="font-bold text-white text-sm mb-1">${escapeAttr(l.name)}</h4>
+                                    <div class="flex justify-between items-center mt-2 gap-2"><span class="text-[10px] text-gray-400 truncate max-w-[150px]">${escapeAttr(l.phone || l.email || 'No contact info')}</span>${l.source ? `<span class="text-[10px] shrink-0" style="color:var(--t3);">${escapeAttr(l.source)}${l.created_at ? ' · ' + escapeAttr(new Date(l.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })) : ''}</span>` : ''}</div>
                                 </div>
                             `).join('')}
                         </div>
@@ -3916,7 +3969,7 @@ updateAgencyPowerTicker();
             let isNewWon = false; const btn = document.getElementById('cp-ld-save-btn'); btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             try {
                 if (activeCpLeadId) { const idx = clientLeadsData.findIndex(x => x.id == activeCpLeadId); const oldStage = clientLeadsData[idx].stage; clientLeadsData[idx] = { ...clientLeadsData[idx], name: payload.lead_name, stage: payload.stage, email: payload.lead_email, phone: payload.lead_phone }; if(oldStage !== 'Won' && payload.stage === 'Won') isNewWon = true; await supabaseClient.from('client_leads').update(payload).eq('id', activeCpLeadId); } 
-                else { const { data, error } = await supabaseClient.from('client_leads').insert([payload]).select(); if(error) throw error; const newId = data ? data[0].id : 'c' + Date.now(); clientLeadsData.push({ id: newId, name: payload.lead_name, stage: payload.stage, email: payload.lead_email, phone: payload.lead_phone }); if(payload.stage === 'Won') isNewWon = true; }
+                else { const { data, error } = await supabaseClient.from('client_leads').insert([payload]).select(); if(error) throw error; const newId = data ? data[0].id : 'c' + Date.now(); clientLeadsData.push({ id: newId, name: payload.lead_name, stage: payload.stage, email: payload.lead_email, phone: payload.lead_phone, source: data?.[0]?.source || '', created_at: data?.[0]?.created_at || new Date().toISOString() }); if(payload.stage === 'Won') isNewWon = true; }
             } catch (err) { console.error("Error saving lead:", err); if(!activeCpLeadId) clientLeadsData.push({ id: 'c' + Date.now(), name: payload.lead_name, stage: payload.stage, email: payload.lead_email, phone: payload.lead_phone }); }
             btn.innerHTML = 'Save Lead'; closeAllDrawers(); renderCpPipeline();
         }

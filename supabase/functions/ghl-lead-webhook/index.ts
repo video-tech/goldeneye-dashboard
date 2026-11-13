@@ -399,8 +399,36 @@ export async function recordContact(payload: any): Promise<number> {
         // ghl_contacts.sql not run yet: say so, but never stop the website-lead decision below
         if (res.status === 404) { console.warn("ghl-lead-webhook: record_ghl_contact missing, run supabase/sql/ghl_contacts.sql"); return 0; }
         if (!res.ok) throw new Error(`record_ghl_contact failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+        await addPipelineLead(base, headers, c.name, contactId, payload);
     }
     return candidates.length;
+}
+
+// The client's portal pipeline (2026-11-13, supabase/sql/client_pipeline.sql). The database decides: it adds the lead only
+// when that client switched their pipeline on and the contact (tags merged in ghl_contacts) carries one of their lead tags,
+// once per contact. This is the only place a lead's name, phone and email are passed on, and never logged. A failure here
+// is logged and swallowed: it must never cost the contact record or the website-lead decision.
+export function pipelineFields(payload: any): { name: string | null; phone: string | null; email: string | null } {
+    const full = str(payload?.full_name) ?? str(payload?.contact?.name) ??
+        ([str(payload?.first_name) ?? str(payload?.contact?.first_name), str(payload?.last_name) ?? str(payload?.contact?.last_name)]
+            .filter(Boolean).join(" ") || null);
+    return { name: full, phone: str(payload?.phone) ?? str(payload?.contact?.phone), email: str(payload?.email) ?? str(payload?.contact?.email) };
+}
+
+async function addPipelineLead(base: string, headers: Record<string, string>, client: string, contactId: string, payload: any): Promise<void> {
+    const f = pipelineFields(payload);
+    try {
+        const res = await fetch(`${base}/rest/v1/rpc/add_pipeline_lead`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ p_client: client, p_contact: contactId, p_name: f.name, p_phone: f.phone, p_email: f.email }),
+        });
+        if (res.status === 404) return; // client_pipeline.sql not run yet
+        if (!res.ok) console.warn(`ghl-lead-webhook: add_pipeline_lead failed (${res.status})`);
+        else if ((await res.json()) === true) console.log(`ghl-lead-webhook PIPELINE added for ${client}`);
+    } catch (e) {
+        console.warn("ghl-lead-webhook: add_pipeline_lead error", String((e as Error)?.message ?? e).slice(0, 200));
+    }
 }
 
 // ---------------------------------------------------------------------------
