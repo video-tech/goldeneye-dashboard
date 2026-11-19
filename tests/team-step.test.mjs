@@ -35,6 +35,8 @@ function world({ contacts = [], missingColumns = false } = {}) {
         var globalContactsData = ${JSON.stringify(contacts)};
         function isCheckinContact(c) { return c.checkin_texts !== false; }
         async function obCompleteStep(id) { window.__completed = id; }
+        // Not previewing: the guard lets the save through (tests/preview-fill.test.mjs covers preview)
+        function previewBlocksWrite() { return false; }
         var supabaseClient = { from: () => ({ upsert: (rows, opts) => ({ select: async () => {
             __saves.push({ rows, opts });
             if (__missing && rows.some(r => 'ghl_login' in r)) return { data: null, error: { code: 'PGRST204', message: "Could not find the 'ghl_login' column" } };

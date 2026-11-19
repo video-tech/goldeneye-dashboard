@@ -1431,6 +1431,7 @@ window.obAddTeamRow = function(stepId) {
 };
 
 window.obSaveTeam = async function(stepId, justMe) {
+    if (previewBlocksWrite('saving their team', { fillable: true })) return;
     const err = document.getElementById(`ob-team-error-${stepId}`);
     const show = msg => { if (err) { err.innerText = msg; err.classList.remove('hidden'); } };
     if (err) err.classList.add('hidden');
@@ -2576,7 +2577,7 @@ window.obqChanged = function(stepId) {
 // Writes the answers and the client facts. A draft saves whatever is filled in without asking for the
 // rest; the real submit has checked everything by the time it gets here.
 async function obSaveAnswers(stepId, { draft }) {
-    if (previewBlocksWrite('saving answers')) return { ok: false };
+    if (previewBlocksWrite('saving answers', { fillable: true, quiet: draft })) return { ok: false };
     const step = globalOnboardingSteps.find(s => s.id === stepId);
     const form = document.getElementById(`obq-form-${stepId}`);
     const status = document.getElementById(`obq-status-${stepId}`);
@@ -2639,7 +2640,7 @@ async function obSaveAnswers(stepId, { draft }) {
 }
 
 window.obSubmitAnswers = async function(stepId) {
-    if (previewBlocksWrite('submitting answers')) return;
+    if (previewBlocksWrite('submitting answers', { fillable: true })) return;
     const step = globalOnboardingSteps.find(s => s.id === stepId);
     const form = document.getElementById(`obq-form-${stepId}`);
     const status = document.getElementById(`obq-status-${stepId}`);
@@ -2717,9 +2718,9 @@ window.obVideoProgress = function(stepId) {
     }
 };
 
-async function saveOnboardingProgress(stepId, fields) {
+async function saveOnboardingProgress(stepId, fields, { fill = false } = {}) {
     // Silent rather than an alert — timeupdate fires this repeatedly during playback
-    if (window.isClientPreview) return null;
+    if (window.isClientPreview && !fill) return null;
 
     const row = {
         client_name: currentActiveClient,
@@ -2789,18 +2790,25 @@ window.obRequestHelp = async function(stepId, kind) {
 };
 
 window.obCompleteStep = async function(stepId) {
+    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    // Fill in for client finishes only the steps it fills in (answers and the team), never a video or a form
+    const filling = !!(window.isClientPreview && window.previewFillMode && step && ['questions', 'team'].includes(step.step_type));
     // saveOnboardingProgress already refuses in preview, but silently — this is a button,
     // so it needs to say why nothing happened rather than just not responding.
-    if (previewBlocksWrite('marking a step done')) return;
-
-    const step = globalOnboardingSteps.find(s => s.id === stepId);
+    if (!filling && previewBlocksWrite('marking a step done')) return;
     if (!step) return;
     if (onboardingProgressFor(currentActiveClient, stepId)?.completed_at) return;
 
-    await saveOnboardingProgress(stepId, {
+    const fields = {
         completed_at: new Date().toISOString(),
         watch_percent: step.step_type === 'video' ? 100 : null
-    });
+    };
+    // Their last step, entered by us: the same question as ticking it by hand. No text = 'backfilled', which the trigger skips
+    if (filling && obWouldFinishOnboarding(currentActiveClient, stepId)
+        && !confirm(`This is ${currentActiveClient}'s last onboarding step.\n\nOK: send them the "onboarding complete" text, the same as if they had finished it themselves.\nCancel: finish it without a text.`)) {
+        fields.completed_by = 'backfilled';
+    }
+    await saveOnboardingProgress(stepId, fields, { fill: filling });
 
     renderGetStarted();
     updateGetStartedTabVisibility();
@@ -16354,16 +16362,43 @@ window.saveClientEdits = async function(e) {
 window.isClientPreview = false;
 
 // Guards any write that would be attributed to the client. Returns true when blocked.
-window.previewBlocksWrite = function(what) {
+// fillable: a write "Fill in for client" may make (answers, the team step, finishing those steps). quiet: blocked
+// without an alert (a draft autosave would otherwise alert every few seconds while an admin types in preview).
+window.previewBlocksWrite = function(what, { fillable = false, quiet = false } = {}) {
     if (!window.isClientPreview) return false;
-    alert("You're previewing this client's portal, so " + what + " is disabled — it would be recorded as though they did it.");
+    if (fillable && window.previewFillMode) return false;
+    if (!quiet) alert("You're previewing this client's portal, so " + what + " is disabled — it would be recorded as though they did it."
+        + (fillable ? '\n\nTo enter their answers for them, click "Fill in for client" in the bar at the top.' : ''));
     return true;
+};
+
+// Fill in for client (2026-11-19): while previewing, an admin can type a client's onboarding answers for them (on a call,
+// or for a client who won't). Only answers, the team step, and finishing those two kinds of step are let through; videos,
+// check-ins, approvals and help requests stay blocked. Everything saved carries the admin's own email (submitted_by,
+// completed_by), so it reads as entered by us. Finishing the client's last step asks whether to text them, the same
+// question as ticking it by hand. Off every time a preview opens or closes.
+window.previewFillMode = false;
+function updatePreviewFillUi() {
+    const btn = document.getElementById('btn-preview-fill');
+    const note = document.getElementById('client-preview-fill-note');
+    if (btn) btn.innerHTML = window.previewFillMode
+        ? '<i class="fa-solid fa-pen-to-square mr-1"></i> Stop filling in'
+        : '<i class="fa-solid fa-pen-to-square mr-1"></i> Fill in for client';
+    if (note) note.style.display = window.previewFillMode ? 'inline' : 'none';
+}
+window.togglePreviewFillMode = function() {
+    if (!window.isClientPreview || currentUserRole !== 'admin') return;
+    if (!window.previewFillMode && !confirm(`Fill in ${currentActiveClient}'s onboarding for them?\n\nAnswers you type and submit are saved to their real account, marked as entered by you (${clientEmail || 'your login'}). Their GHL account and A2P registration are built from these answers.`)) return;
+    window.previewFillMode = !window.previewFillMode;
+    updatePreviewFillUi();
 };
 
 window.previewAsClient = async function() {
     if (currentUserRole !== 'admin') return;
     if (cSelectedAccount === "ALL") { alert("Pick a specific client first."); return; }
     window.isClientPreview = true;
+    window.previewFillMode = false;
+    updatePreviewFillUi();
 
     const btn = document.getElementById('btn-preview-client');
     const originalHTML = btn ? btn.innerHTML : '';
@@ -16392,6 +16427,8 @@ window.previewAsClient = async function() {
 
 window.exitClientPreview = async function() {
     window.isClientPreview = false;
+    window.previewFillMode = false;
+    updatePreviewFillUi();
     // Leaving the portal doesn't go through switchCpTab, so stop the poll explicitly
     if (typeof stopOnboardingPoll === 'function') stopOnboardingPoll();
     document.getElementById('client-preview-banner').style.display = 'none';

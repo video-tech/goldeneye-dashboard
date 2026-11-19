@@ -437,7 +437,10 @@
         </div>
 
         <div id="client-preview-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:10000; background:linear-gradient(90deg,#7c3aed,#2563eb); color:white; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; align-items:center; justify-content:center; gap:10px 16px; flex-wrap:wrap; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,0.4);">
-            <span class="text-sm font-bold"><i class="fa-solid fa-eye mr-2"></i>Client preview &mdash; viewing as <span id="client-preview-name">Client</span></span>
+            <span class="text-sm font-bold"><i class="fa-solid fa-eye mr-2"></i>Client preview &mdash; viewing as <span id="client-preview-name">Client</span><span id="client-preview-fill-note" style="display:none;"> &middot; filling in their answers (saved as you)</span></span>
+            <button id="btn-preview-fill" onclick="togglePreviewFillMode()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white btn btn-sm text-xs transition">
+                <i class="fa-solid fa-pen-to-square mr-1"></i> Fill in for client
+            </button>
             <button onclick="exitClientPreview()" class="bg-white/20 hover:bg-white/30 border border-white/30 text-white btn btn-sm text-xs transition">
                 <i class="fa-solid fa-arrow-left mr-1"></i> Back to dashboard
             </button>

@@ -690,6 +690,13 @@ embedded GHL form, for forms nothing in GHL uses. The SEO intake is one. Schema 
   answer), the A2P registration and the team logins are all built from answers. Found 2026-11-06: Optimum Health had every step ticked
   within a minute and no answers, so no GHL account was made. The fix for a client in that state is **Mark not done** on those steps so
   they fill them in; the handoff task already exists, so nothing is texted twice.
+- **Fill in for client (2026-11-19):** a button in the preview bar (`togglePreviewFillMode`, admins only, asks first, off whenever a
+  preview opens or closes) lets an admin type a client's onboarding answers for them. `previewBlocksWrite(what, { fillable, quiet })` lets
+  through only fillable writes: answers (`obSaveAnswers`, `obSubmitAnswers`), the team step (`obSaveTeam`, which now refuses before
+  writing anything) and finishing a questions or team step (`obCompleteStep`, `saveOnboardingProgress(..., { fill })`). Videos, forms,
+  check-ins, ad approvals and help requests stay blocked. Everything carries the admin's own email (`submitted_by`, `completed_by`).
+  Finishing their last step asks whether to text them (no = `backfilled`). Draft autosaves in plain preview are now blocked silently instead
+  of alerting every few seconds. No SQL: admins already pass `client_row_visible`. `tests/preview-fill.test.mjs` 21, 3 of 3 breakages caught.
 - **RLS (`supabase/sql/onboarding_progress_rls.sql`):** the old `Auth manage onboarding progress` was `for all using (true)`, so any
   signed-in user could change or delete any client's progress. Now admins do everything; others select, insert and update their
   own client's rows through `client_row_visible`; only admins delete. Make #3 and the edge functions skip RLS.

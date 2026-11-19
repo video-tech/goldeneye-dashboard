@@ -2,6 +2,12 @@
   "_comment": "What's new in Golden Eye, shown in Settings → Updates. Newest first. Written for the people using the dashboard, not as commit messages. Add an entry in the same commit as the change it describes. area: SEO | Reports | Onboarding | Tasks | Security | Data. action: only when something has to be run or deployed before it works.",
   "updates": [
     {
+      "date": "2026-11-19",
+      "area": "Onboarding",
+      "title": "Fill in a client's onboarding for them",
+      "what": "While previewing a client's portal, click Fill in for client in the bar at the top to type their onboarding answers and their team for them, on a call or when they won't do it themselves. Their answers save to their real account, marked as entered by you, so their GHL account and A2P registration can be built from them. Finishing their last step asks whether to send them the onboarding complete text. Videos, forms and check-ins still can't be done for them."
+    },
+    {
       "date": "2026-11-13",
       "area": "Data",
       "title": "Clients have a lead pipeline again, switched on by them",
